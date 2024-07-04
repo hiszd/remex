@@ -1,0 +1,7 @@
+[workspace]
+
+members = [
+"remex_endpoint",
+"remex_server",
+"remex_core",
+]
