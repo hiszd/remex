@@ -5,9 +5,9 @@ pub type RawPacket = [u8; 128];
 // [packet number, total packets, ...information]
 #[derive(Debug, Clone)]
 pub struct Packet {
-    number: u8,
-    total: u8,
-    information: StackVec<u8, 126>,
+    pub number: u8,
+    pub total: u8,
+    pub information: StackVec<u8, 126>,
 }
 
 impl Packet {
@@ -19,14 +19,12 @@ impl Packet {
         }
     }
 
-    fn to_vec(self) -> StackVec<u8, 128> {
+    pub fn to_vec(self) -> StackVec<u8, 128> {
         let mut vc: StackVec<u8, 128> = StackVec::from_slice(&[self.number, self.total]).unwrap();
         vc.extend(self.information);
         vc
     }
 }
-
-impl Into<&[u8]> for Packet {}
 
 impl Into<RawPacket> for Packet {
     fn into(self) -> RawPacket {
@@ -94,6 +92,25 @@ impl Message {
         println!("packets: {:?}", packets);
 
         packets
+    }
+
+    fn string_from_packets(packets: &Vec<Packet>) -> String {
+        let mut rtrn = String::from("");
+        for packet in packets {
+            rtrn.push_str(&String::from_utf8_lossy(&packet.information).to_string());
+        }
+        rtrn
+    }
+}
+
+impl From<Packet> for Message {
+    fn from(value: Packet) -> Self {
+        let mut packets = Vec::new();
+        packets.push(value);
+        Message {
+            msg: Message::string_from_packets(&packets),
+            packets,
+        }
     }
 }
 
