@@ -3,9 +3,10 @@ use remex_core::{Message, Packet};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::time::{sleep, Duration};
 
 #[derive(Debug, Clone)]
-enum ERROR {
+pub enum ERROR {
   InvalidSecret,
   InvalidPacket,
   InvalidLength,
@@ -38,8 +39,8 @@ async fn log(severity: Severity, msg: String) {
   let mut log = String::new();
   match severity {
     Severity::WARNING => log.push_str("[WARNING] "),
-    Severity::ERROR => log.push_str("[ERROR]"),
-    _ => {}
+    Severity::ERROR => log.push_str("  [ERROR] "),
+    Severity::INFO => log.push_str("   [INFO] "),
   }
   log.push_str(date.to_string().as_str());
   log.push_str(" - ");
@@ -50,8 +51,6 @@ async fn log(severity: Severity, msg: String) {
 }
 
 const ADDRESS: &str = "127.0.0.1:4269";
-
-static mut CLIENTS: Vec<String> = Vec::new();
 
 const SECRET: &str = "tZs3U%hqY^o$&*y%4HcF8&RyAKevUbZnkTsrjCzPGxfare3Yn9c7shVZETfPDPUc8xR%N38a!TL%2$WbkFhZqmH#jvw&d3^mryPD8Y8TqHoJHwyKSTJeQB7vK7QkW#&B";
 
@@ -74,10 +73,12 @@ async fn process(socket: TcpStream, secret: Message) {
     Ok(_) => {
       log(Severity::INFO, format!("secret received and verified")).await;
       write_message(&socket, "hello".to_string()).await;
+      sleep(Duration::from_millis(100)).await;
       write_message(&socket, "zion".to_string()).await;
     }
     Err(e) => {
-      log(Severity::ERROR, format!("Secret verification failed. Reason: {}", String::from(e))).await;
+      log(Severity::ERROR, format!("Secret verification failed. Reason: {}", String::from(e)))
+        .await;
       return;
     }
   }

@@ -1,10 +1,57 @@
 //ENDPOINT
 use remex_core::{Message, Packet};
+use tokio::fs::OpenOptions;
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
+
+#[derive(Debug, Clone)]
+pub enum ERROR {
+  InvalidSecret,
+  InvalidPacket,
+  InvalidLength,
+  NotConnected,
+  NotEnoughPackets,
+}
+
+impl From<ERROR> for String {
+  fn from(value: ERROR) -> Self {
+    match value {
+      ERROR::InvalidSecret => "invalid secret".to_string(),
+      ERROR::InvalidPacket => "invalid packet".to_string(),
+      ERROR::InvalidLength => "invalid length".to_string(),
+      ERROR::NotConnected => "not connected".to_string(),
+      ERROR::NotEnoughPackets => "not enough packets".to_string(),
+    }
+  }
+}
+
+#[derive(Debug, Clone)]
+pub enum Severity {
+  INFO,
+  WARNING,
+  ERROR,
+}
+
+async fn log(severity: Severity, msg: String) {
+  let mut file = OpenOptions::new().create(true).append(true).open("log.log").await.unwrap();
+  let date = chrono::Local::now().format("%m-%d-%y %H:%M:%S");
+  let mut log = String::new();
+  match severity {
+    Severity::WARNING => log.push_str("[WARNING] "),
+    Severity::ERROR => log.push_str("  [ERROR] "),
+    Severity::INFO => log.push_str("   [INFO] "),
+  }
+  log.push_str(date.to_string().as_str());
+  log.push_str(" - ");
+  log.push_str(msg.as_str());
+  log.push_str("\n");
+  file.write_all(log.as_bytes()).await.unwrap();
+  print!("{}", log);
+}
 
 const ADDRESS: &str = "127.0.0.1:4269";
 
-const SECRET: &str = "tzs3U%hqY^o$&*y%4HcF8&RyAKevUbZnkTsrjCzPGxfare3Yn9c7shVZETfPDPUc8xR%N38a!TL%2$WbkFhZqmH#jvw&d3^mryPD8Y8TqHoJHwyKSTJeQB7vK7QkW#&B";
+const SECRET: &str = "tZs3U%hqY^o$&*y%4HcF8&RyAKevUbZnkTsrjCzPGxfare3Yn9c7shVZETfPDPUc8xR%N38a!TL%2$WbkFhZqmH#jvw&d3^mryPD8Y8TqHoJHwyKSTJeQB7vK7QkW#&B";
 
 #[tokio::main]
 async fn main() {
@@ -18,10 +65,17 @@ async fn main() {
 }
 
 async fn process(socket: &TcpStream, secret: Message) {
-  await_secret(socket, secret).await;
-  println!("exited loop");
-  println!("secret received and verified");
-  await_messages(socket).await;
+  match await_secret(socket, secret).await {
+    Ok(_) => {
+      log(Severity::INFO, "secret received and verified".to_string()).await;
+      await_messages(socket).await;
+    }
+    Err(e) => {
+      log(Severity::ERROR, format!("Secret verification failed. Reason: {}", String::from(e)))
+        .await;
+      return;
+    }
+  }
 }
 
 async fn await_messages(socket: &TcpStream) {
@@ -38,7 +92,7 @@ async fn await_messages(socket: &TcpStream) {
             packets.push(packet.clone());
             buf = [0; 128];
             if packet.number == packet.total {
-              println!("got all packets");
+              log(Severity::INFO, "got all packets".to_string()).await;
               break;
             }
           }
@@ -49,11 +103,11 @@ async fn await_messages(socket: &TcpStream) {
 
     // packets.iter().for_each(|x| println!("{}, {}", x.number, x.total));
     let received = Message::from(packets);
-    println!("got {:?}", received.get_msg());
+    log(Severity::INFO, format!("got {:?}", received.get_msg())).await;
   }
 }
 
-async fn await_secret(socket: &TcpStream, secret: Message) {
+async fn await_secret(socket: &TcpStream, secret: Message) -> Result<(), ERROR> {
   {
     let mut buf = [0; 128];
     let mut packets = Vec::new();
@@ -68,8 +122,11 @@ async fn await_secret(socket: &TcpStream, secret: Message) {
       }
     }
     let receivedsecret = Message::from(packets);
-    println!("got secret: {:?}", receivedsecret.get_msg());
-    assert_eq!(secret.get_msg(), receivedsecret.get_msg());
+    log(Severity::INFO, format!("got secret: {:?}", receivedsecret.get_msg())).await;
+    match secret.get_msg() == receivedsecret.get_msg() {
+      false => return Err(ERROR::InvalidSecret),
+      _ => {}
+    }
   }
 
   loop {
@@ -82,7 +139,7 @@ async fn await_secret(socket: &TcpStream, secret: Message) {
         Ok(_) => {
           sent_packets = sent_packets + 1;
         }
-        Err(e) => println!("failed to send secret: {:?}", e),
+        Err(e) => log(Severity::ERROR, format!("failed to send secret: {:?}", e)).await,
       }
     }
 
@@ -90,4 +147,5 @@ async fn await_secret(socket: &TcpStream, secret: Message) {
       break;
     }
   }
+  Ok(())
 }
