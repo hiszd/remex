@@ -1,8 +1,17 @@
-use clap::{arg, Command};
+use clap::{arg, Arg, Command};
 
 pub fn cli() -> Command {
-  Command::new("hidiokb")
-    .about("Hidio Keyboard CLI")
+  Command::new("remex_server")
+    .about("Remex server")
+    .subcommand_required(false)
+    .arg_required_else_help(false)
+    .allow_external_subcommands(true)
+    .arg(Arg::new("verbose").short('v'))
+}
+
+pub fn cli_old() -> Command {
+  Command::new("remex_server")
+    .about("Remex server")
     .subcommand_required(true)
     .arg_required_else_help(true)
     .allow_external_subcommands(true)

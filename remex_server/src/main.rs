@@ -58,6 +58,7 @@ const SECRET: &str = "tZs3U%hqY^o$&*y%4HcF8&RyAKevUbZnkTsrjCzPGxfare3Yn9c7shVZET
 
 #[tokio::main]
 async fn main() {
+  let args = args::cli().get_matches();
   let listener = TcpListener::bind(ADDRESS).await.unwrap();
   log(Severity::INFO, format!("listening on {}...", ADDRESS)).await;
 
