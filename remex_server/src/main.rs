@@ -7,6 +7,8 @@ use tokio::time::{sleep, Duration};
 
 mod args;
 
+static mut LOGLEVEL: u8 = 0;
+
 #[derive(Debug, Clone)]
 pub enum ERROR {
   InvalidSecret,
