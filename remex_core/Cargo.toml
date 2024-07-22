@@ -4,4 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+chrono = "0.4.38"
 heapless = "0.8.0"
+tokio = { version = "1.38.1", features = ["full"] }

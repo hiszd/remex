@@ -1,4 +1,4 @@
-use clap::{arg, Arg, Command};
+use clap::{arg, Command};
 
 pub fn cli() -> Command {
   Command::new("remex_server")
@@ -6,7 +6,7 @@ pub fn cli() -> Command {
     .subcommand_required(false)
     .arg_required_else_help(false)
     .allow_external_subcommands(true)
-    .arg(Arg::new("verbose").short('v'))
+    .arg(arg!(-l --loglevel <LEVEL> "Set log level").default_value("0"))
 }
 
 pub fn cli_old() -> Command {
@@ -35,7 +35,6 @@ pub fn cli_old() -> Command {
             .required_unless_present("name"),
         )
         .arg(arg!(-n --name <NAME> "The name of the keyboard").required_unless_present("serial"))
-        .subcommand(Command::from(crate::commands::Commands::LayerSet(0)))
         .arg_required_else_help(true),
     )
     .subcommand(Command::new("list").about("List all keyboard nodes"))

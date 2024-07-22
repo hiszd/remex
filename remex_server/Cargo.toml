@@ -10,3 +10,5 @@ mini-redis = "0.4"
 remex_core = { path = "../remex_core" }
 chrono = "0.4.38"
 clap = { version = "4.5.9", features = ["derive"] }
+tracing = { version = "0.1.40", features = ["async-await"] }
+tracing-subscriber = { version = "0.3.18", features = ["chrono"] }

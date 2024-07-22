@@ -1,13 +1,11 @@
 //SERVER
 use remex_core::{Message, Packet};
-use tokio::fs::{File, OpenOptions};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::{sleep, Duration};
+use tracing::{error, info, warn};
+use tracing_subscriber;
 
 mod args;
-
-static mut LOGLEVEL: u8 = 0;
 
 #[derive(Debug, Clone)]
 pub enum ERROR {
@@ -30,39 +28,14 @@ impl From<ERROR> for String {
   }
 }
 
-#[derive(Debug, Clone)]
-enum Severity {
-  INFO,
-  WARNING,
-  ERROR,
-}
-
-async fn log(severity: Severity, msg: String) {
-  let mut file = OpenOptions::new().create(true).append(true).open("log.log").await.unwrap();
-  let date = chrono::Local::now().format("%m-%d-%y %H:%M:%S");
-  let mut log = String::new();
-  match severity {
-    Severity::WARNING => log.push_str("[WARNING] "),
-    Severity::ERROR => log.push_str("  [ERROR] "),
-    Severity::INFO => log.push_str("   [INFO] "),
-  }
-  log.push_str(date.to_string().as_str());
-  log.push_str(" - ");
-  log.push_str(msg.as_str());
-  log.push_str("\n");
-  file.write_all(log.as_bytes()).await.unwrap();
-  print!("{}", log);
-}
-
 const ADDRESS: &str = "127.0.0.1:4269";
 
 const SECRET: &str = "tZs3U%hqY^o$&*y%4HcF8&RyAKevUbZnkTsrjCzPGxfare3Yn9c7shVZETfPDPUc8xR%N38a!TL%2$WbkFhZqmH#jvw&d3^mryPD8Y8TqHoJHwyKSTJeQB7vK7QkW#&B";
 
 #[tokio::main]
 async fn main() {
-  let args = args::cli().get_matches();
+  tracing_subscriber::fmt::init();
   let listener = TcpListener::bind(ADDRESS).await.unwrap();
-  log(Severity::INFO, format!("listening on {}...", ADDRESS)).await;
 
   loop {
     let (stream, _) = listener.accept().await.unwrap();
@@ -76,14 +49,13 @@ async fn main() {
 async fn process(socket: TcpStream, secret: Message) {
   match await_secret(&socket, secret).await {
     Ok(_) => {
-      log(Severity::INFO, format!("secret received and verified")).await;
+      info!("secret received and verified");
       write_message(&socket, "hello".to_string()).await;
       sleep(Duration::from_millis(100)).await;
       write_message(&socket, "zion".to_string()).await;
     }
     Err(e) => {
-      log(Severity::ERROR, format!("Secret verification failed. Reason: {}", String::from(e)))
-        .await;
+      error!("Secret verification failed. Reason: {}", String::from(e));
       return;
     }
   }
@@ -95,7 +67,7 @@ async fn write_message(socket: &TcpStream, mg: String) {
     socket.writable().await.unwrap();
     match socket.try_write(&packet.clone().to_vec()) {
       Ok(_) => {}
-      Err(e) => log(Severity::ERROR, format!("failed to send message: {:?}", e)).await,
+      Err(e) => error!("failed to send message: {:?}", e),
     }
   }
 }
@@ -111,14 +83,14 @@ async fn await_secret(socket: &TcpStream, secret: Message) -> Result<(), ERROR> 
         Ok(_) => {
           sent_packets = sent_packets + 1;
         }
-        Err(e) => log(Severity::ERROR, format!("failed to send secret: {:?}", e)).await,
+        Err(e) => error!("failed to send secret: {:?}", e),
       }
     }
 
     if sent_packets == secret.get_packets().len() as u8 {
       break;
     } else {
-      log(Severity::WARNING, format!("failed to send all packets")).await;
+      warn!("failed to send all packets");
     }
   }
 
@@ -138,7 +110,7 @@ async fn await_secret(socket: &TcpStream, secret: Message) -> Result<(), ERROR> 
     }
   }
   let receivedsecret = Message::from(packets);
-  log(Severity::INFO, format!("got secret: {:?}", receivedsecret.get_msg())).await;
+  info!("got secret: {:?}", receivedsecret.get_msg());
   match secret.get_msg() == receivedsecret.get_msg() {
     true => Ok(()),
     false => Err(ERROR::InvalidSecret),
