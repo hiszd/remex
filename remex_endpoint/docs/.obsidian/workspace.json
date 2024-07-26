@@ -18,8 +18,21 @@
                 "source": false
               }
             }
+          },
+          {
+            "id": "4f7f2adc0f8abecf",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "readme_endpoint.md",
+                "mode": "source",
+                "source": false
+              }
+            }
           }
-        ]
+        ],
+        "currentTab": 1
       }
     ],
     "direction": "vertical"
@@ -85,7 +98,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "notes_endpoint.md",
+                "file": "readme_endpoint.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -102,7 +115,7 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "notes_endpoint.md",
+                "file": "readme_endpoint.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               }
@@ -125,7 +138,7 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "notes_endpoint.md"
+                "file": "readme_endpoint.md"
               }
             }
           }
@@ -148,9 +161,10 @@
       "obsidian-excalidraw-plugin:Create new drawing": false
     }
   },
-  "active": "6aaafec789e463e4",
+  "active": "4f7f2adc0f8abecf",
   "lastOpenFiles": [
     "notes_endpoint.md",
+    "readme_endpoint.md",
     "Servers.md",
     "To-Do's for Carl.md",
     "MFA Testers.md",

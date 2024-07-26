@@ -18,8 +18,21 @@
                 "source": false
               }
             }
+          },
+          {
+            "id": "7c3a92b176cde704",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "readme_server.md",
+                "mode": "source",
+                "source": false
+              }
+            }
           }
-        ]
+        ],
+        "currentTab": 1
       }
     ],
     "direction": "vertical"
@@ -85,7 +98,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "notes_server.md",
+                "file": "readme_server.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -102,7 +115,7 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "notes_server.md",
+                "file": "readme_server.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               }
@@ -125,7 +138,7 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "notes_server.md"
+                "file": "readme_server.md"
               }
             }
           }
@@ -147,8 +160,10 @@
       "markdown-importer:Open format converter": false
     }
   },
-  "active": "908afc6c7ac4c3be",
+  "active": "7c3a92b176cde704",
   "lastOpenFiles": [
+    "notes_server.md",
+    "readme_server.md",
     "Servers.md",
     "To-Do's for Carl.md",
     "MFA Testers.md",

@@ -8,7 +8,7 @@ It will need to do the following:
 - Issue commands to the clients
   - [ ] If it is, execute the command
   - [ ] Receive the log from the command after it's execution
-- Use either named pipes(Windows) or unix sockets(Linux) to allow the server to communicate with a GUI of some kind
+- Use either named pipes(Windows) or Unix sockets(Linux) to allow the server to communicate with a GUI of some kind
   - [ ] The GUI will be able to add, or manage commands, and applications that the server requires to be executed on the client
   - [ ] The GUI can view the logs of each command, and see if it was successful or not upon execution
-  - [ ] The GUI will show exectly what clients match the filter for a command
+  - [ ] The GUI will show exactly what clients match the filter for a command
