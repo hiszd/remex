@@ -12,3 +12,4 @@ chrono = "0.4.38"
 clap = { version = "4.5.9", features = ["derive"] }
 tracing = { version = "0.1.40", features = ["async-await"] }
 tracing-subscriber = { version = "0.3.18", features = ["chrono"] }
+sqlx = { version = "0.8.0", features = ["sqlite", "runtime-tokio"] }
