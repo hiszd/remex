@@ -1,4 +1,5 @@
 //SERVER
+use remex_core::db;
 use remex_core::{Message, Packet};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::{sleep, Duration};
@@ -6,7 +7,6 @@ use tracing::{error, info, warn};
 use tracing_subscriber;
 
 mod args;
-mod db;
 
 #[derive(Debug, Clone)]
 pub enum ERROR {
@@ -37,7 +37,11 @@ const SECRET: &str = "tZs3U%hqY^o$&*y%4HcF8&RyAKevUbZnkTsrjCzPGxfare3Yn9c7shVZET
 async fn main() {
   tracing_subscriber::fmt::init();
   let listener = TcpListener::bind(ADDRESS).await.unwrap();
-  let path_str = if !cfg!(debug_assertions) { "db/prod.db" } else { "db/dev.db" };
+  let path_str = if !cfg!(debug_assertions) {
+    "db/prod.db"
+  } else {
+    "db/dev.db"
+  };
   let db = db::Db::new(path_str.to_string()).await;
   db.migrate().await;
 

@@ -5,8 +5,7 @@ edition = "2021"
 
 [dependencies]
 heapless = "0.8.0"
-tokio = { version = "1.38.0", features = ["full"] }
-mini-redis = "0.4"
+tokio = { version = "1.38.1", features = ["full"] }
 remex_core = { path = "../remex_core" }
 chrono = "0.4.38"
 clap = { version = "4.5.9", features = ["derive"] }

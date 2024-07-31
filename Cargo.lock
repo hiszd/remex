@@ -1241,7 +1241,10 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "heapless",
+ "sqlx",
  "tokio",
+ "tracing",
+ "tracing-subscriber 0.3.18",
 ]
 
 [[package]]
@@ -1262,7 +1265,6 @@ dependencies = [
  "chrono",
  "clap 4.5.9",
  "heapless",
- "mini-redis",
  "remex_core",
  "sqlx",
  "tokio",

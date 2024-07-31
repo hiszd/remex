@@ -1,5 +1,7 @@
 use heapless::Vec as StackVec;
 
+pub mod db;
+
 pub type RawPacket = [u8; 128];
 
 // [packet number, total packets, ...information]
@@ -67,9 +69,13 @@ impl Message {
     self.packets = Message::packets_from_string(msg);
   }
 
-  pub fn get_packets(&self) -> &Vec<Packet> { &self.packets }
+  pub fn get_packets(&self) -> &Vec<Packet> {
+    &self.packets
+  }
 
-  pub fn get_msg(&self) -> &String { &self.msg }
+  pub fn get_msg(&self) -> &String {
+    &self.msg
+  }
 
   fn packets_from_string(msg: String) -> Vec<Packet> {
     let len = match msg.len() {
