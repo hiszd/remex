@@ -1,4 +1,4 @@
-The purpose of this project is to create a remote execution protocol that has the following features:
+_The purpose of this project is to create a remote execution protocol that has the following features:
 - Detection methods including registry key, file exists, script, etc.
 - Run as active user, or in system context
 - Log all commands run, and their STDOUT

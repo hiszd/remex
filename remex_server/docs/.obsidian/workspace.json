@@ -18,21 +18,8 @@
                 "source": false
               }
             }
-          },
-          {
-            "id": "7c3a92b176cde704",
-            "type": "leaf",
-            "state": {
-              "type": "markdown",
-              "state": {
-                "file": "readme_server.md",
-                "mode": "source",
-                "source": false
-              }
-            }
           }
-        ],
-        "currentTab": 1
+        ]
       }
     ],
     "direction": "vertical"
@@ -98,7 +85,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "readme_server.md",
+                "file": "notes_server.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -115,7 +102,7 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "readme_server.md",
+                "file": "notes_server.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               }
@@ -138,7 +125,7 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "readme_server.md"
+                "file": "notes_server.md"
               }
             }
           }
@@ -157,13 +144,16 @@
       "daily-notes:Open today's daily note": false,
       "templates:Insert template": false,
       "command-palette:Open command palette": false,
-      "markdown-importer:Open format converter": false
+      "markdown-importer:Open format converter": false,
+      "obsidian-excalidraw-plugin:Create new drawing": false
     }
   },
-  "active": "7c3a92b176cde704",
+  "active": "908afc6c7ac4c3be",
   "lastOpenFiles": [
-    "notes_server.md",
     "readme_server.md",
+    "notes_server.md",
+    "Excalidraw/notes_server 2024-07-26 17.14.05.excalidraw.md",
+    "Excalidraw",
     "Servers.md",
     "To-Do's for Carl.md",
     "MFA Testers.md",

@@ -12,3 +12,5 @@ It will need to do the following:
   - [ ] The GUI will be able to add, or manage commands, and applications that the server requires to be executed on the client
   - [ ] The GUI can view the logs of each command, and see if it was successful or not upon execution
   - [ ] The GUI will show exactly what clients match the filter for a command
+
+![[notes_server 2024-07-26 17.14.05.excalidraw]]
