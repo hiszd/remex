@@ -69,13 +69,9 @@ impl Message {
     self.packets = Message::packets_from_string(msg);
   }
 
-  pub fn get_packets(&self) -> &Vec<Packet> {
-    &self.packets
-  }
+  pub fn get_packets(&self) -> &Vec<Packet> { &self.packets }
 
-  pub fn get_msg(&self) -> &String {
-    &self.msg
-  }
+  pub fn get_msg(&self) -> &String { &self.msg }
 
   fn packets_from_string(msg: String) -> Vec<Packet> {
     let len = match msg.len() {
@@ -124,6 +120,18 @@ impl From<Vec<Packet>> for Message {
       packets: value,
     }
   }
+}
+
+enum MessageContents {
+  Command(String),
+  Secret(String),
+  Log(String),
+}
+
+struct MessagePieces {
+  msg: String,
+  typ: u8,
+  content: MessageContents,
 }
 
 #[cfg(test)]
