@@ -1,6 +1,7 @@
 //SERVER
 use remex_core::db;
 use tokio::net::TcpListener;
+use tracing::info;
 use tracing_subscriber;
 
 mod args;
@@ -47,7 +48,7 @@ async fn main() {
   loop {
     let (stream, _) = listener.accept().await.unwrap();
     tokio::spawn(async move {
-      let mut conn = conn::Conn::new(stream, SECRET.to_string());
+      let mut conn = conn::Conn::new(stream, SECRET.to_string()).await;
       conn.process().await;
     });
   }

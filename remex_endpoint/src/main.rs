@@ -1,5 +1,6 @@
 use gethostname::gethostname;
 //ENDPOINT
+use machine_uid::get;
 use remex_core::{Message, Packet};
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
@@ -69,6 +70,7 @@ async fn process(socket: &TcpStream, secret: Message) {
   match await_secret(socket, secret).await {
     Ok(_) => {
       log(Severity::INFO, "secret received and verified".to_string()).await;
+      // TODO: send machine_uid along with the clientname
       send_clientname(socket).await;
       await_messages(socket).await;
     }

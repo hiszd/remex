@@ -1,4 +1,5 @@
 use remex_core::{db, Message, Packet};
+use std::env;
 use tokio::net::TcpStream;
 use tracing::{error, info, warn};
 

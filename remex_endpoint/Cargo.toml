@@ -10,3 +10,4 @@ mini-redis = "0.4"
 remex_core = { path = "../remex_core" }
 chrono = "0.4.38"
 gethostname = "0.5.0"
+machine-uid = "0.5.2"

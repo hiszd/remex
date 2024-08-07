@@ -13,7 +13,13 @@ impl Db {
   pub async fn new(filename: String) -> Self {
     Self {
       filename: filename.clone(),
-      pool: Some(Db::connect(&filename).await.unwrap()),
+      pool: match Db::connect(&filename).await {
+        Ok(pool) => Some(pool),
+        Err(e) => {
+          error!("failed to connect to db: {} with error {:?}", filename.clone(), e);
+          None
+        }
+      },
     }
   }
 
@@ -54,11 +60,9 @@ impl Db {
       .unwrap();
   }
 
-  pub async fn get_logs(&self) {
-  }
+  pub async fn get_logs(&self) {}
 
-  pub async fn get_cmds(&self) {
-  }
+  pub async fn get_cmds(&self) {}
 
   pub async fn push_log() {
     // TODO: implement log push
