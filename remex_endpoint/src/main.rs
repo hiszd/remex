@@ -1,3 +1,4 @@
+use gethostname::gethostname;
 //ENDPOINT
 use remex_core::{Message, Packet};
 use tokio::fs::OpenOptions;
@@ -68,12 +69,37 @@ async fn process(socket: &TcpStream, secret: Message) {
   match await_secret(socket, secret).await {
     Ok(_) => {
       log(Severity::INFO, "secret received and verified".to_string()).await;
+      send_clientname(socket).await;
       await_messages(socket).await;
     }
     Err(e) => {
       log(Severity::ERROR, format!("Secret verification failed. Reason: {}", String::from(e)))
         .await;
       return;
+    }
+  }
+}
+
+async fn send_clientname(socket: &TcpStream) {
+  let clientname = Message::new(gethostname().to_string_lossy().to_string());
+
+  loop {
+    socket.writable().await.unwrap();
+
+    let mut sent_packets = 0;
+
+    for packet in clientname.get_packets().into_iter() {
+      match socket.try_write(&packet.clone().to_vec()) {
+        Ok(_) => {
+          sent_packets = sent_packets + 1;
+        }
+        Err(e) => log(Severity::ERROR, format!("failed to send clientname: {:?}", e)).await,
+      }
+    }
+
+    if sent_packets == clientname.get_packets().len() as u8 {
+      log(Severity::INFO, format!("sent clientname: {:?}", clientname.get_msg())).await;
+      break;
     }
   }
 }

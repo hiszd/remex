@@ -54,6 +54,12 @@ impl Db {
       .unwrap();
   }
 
+  pub async fn get_logs(&self) {
+  }
+
+  pub async fn get_cmds(&self) {
+  }
+
   pub async fn push_log() {
     // TODO: implement log push
   }
