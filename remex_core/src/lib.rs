@@ -1,6 +1,6 @@
 use heapless::Vec as StackVec;
 
-pub mod db;
+pub mod codec;
 
 pub type RawPacket = [u8; 128];
 
@@ -52,7 +52,8 @@ impl Into<Packet> for RawPacket {
 
 /// Message is a wrapper around a String and a Vec of Packets
 /// the Vec of Packets is created from the String when the message is created, or updated.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, actix::Message)]
+#[rtype(MessageContents)]
 pub struct Message {
   msg: String,
   packets: Vec<Packet>,
@@ -122,20 +123,28 @@ impl From<Vec<Packet>> for Message {
   }
 }
 
-enum MessageContents {
+#[derive(actix::prelude::Message)]
+#[rtype(String)]
+pub enum MessageContents {
   Command(String),
   Secret(String),
   Log(String),
 }
 
-struct MessagePieces {
-  msg: String,
-  typ: u8,
-  content: MessageContents,
+impl From<Message> for MessageContents {
+  fn from(value: Message) -> Self {
+    match value.msg {
+      x if x.starts_with("0") => MessageContents::Command(x),
+      x if x.starts_with("1") => MessageContents::Secret(x),
+      x => MessageContents::Log(x),
+    }
+  }
 }
 
 #[cfg(test)]
 mod tests {
+  use tracing::info;
+
   use super::*;
 
   #[test]
@@ -169,7 +178,7 @@ mod tests {
   fn test_message_from_string() {
     let msg = String::from("Hello, World hope you're listening. I think that they can see, a better side of me. Let's keep talking about this to help with the frustration of not remembering the lyrics.");
     let message = Message::new(msg);
-    println!("Message: {:?}", message);
+    info!("Message: {:?}", message);
     assert_eq!(message.packets.len(), 2);
     assert_eq!(message.packets[0].number, 1);
     assert_eq!(message.packets[0].total, 2);

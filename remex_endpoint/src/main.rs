@@ -1,179 +1,96 @@
-use gethostname::gethostname;
 //ENDPOINT
-use machine_uid::get;
-use remex_core::{Message, Packet};
-use tokio::fs::OpenOptions;
-use tokio::io::AsyncWriteExt;
-use tokio::net::TcpStream;
+use futures_util::{SinkExt as _, StreamExt as _};
+use gethostname::gethostname;
+use tokio::{net::TcpStream, select};
+use tracing::info;
 
-#[derive(Debug, Clone)]
-pub enum ERROR {
-  InvalidSecret,
-  InvalidPacket,
-  InvalidLength,
-  NotConnected,
-  NotEnoughPackets,
-}
+mod id;
 
-impl From<ERROR> for String {
-  fn from(value: ERROR) -> Self {
-    match value {
-      ERROR::InvalidSecret => "invalid secret".to_string(),
-      ERROR::InvalidPacket => "invalid packet".to_string(),
-      ERROR::InvalidLength => "invalid length".to_string(),
-      ERROR::NotConnected => "not connected".to_string(),
-      ERROR::NotEnoughPackets => "not enough packets".to_string(),
-    }
-  }
-}
-
-#[derive(Debug, Clone)]
-pub enum Severity {
-  INFO,
-  WARNING,
-  ERROR,
-}
-
-async fn log(severity: Severity, msg: String) {
-  let mut file = OpenOptions::new().create(true).append(true).open("log.log").await.unwrap();
-  let date = chrono::Local::now().format("%m-%d-%y %H:%M:%S");
-  let mut log = String::new();
-  match severity {
-    Severity::WARNING => log.push_str("[WARNING] "),
-    Severity::ERROR => log.push_str("  [ERROR] "),
-    Severity::INFO => log.push_str("   [INFO] "),
-  }
-  log.push_str(date.to_string().as_str());
-  log.push_str(" - ");
-  log.push_str(msg.as_str());
-  log.push_str("\n");
-  file.write_all(log.as_bytes()).await.unwrap();
-  print!("{}", log);
-}
-
-const ADDRESS: &str = "127.0.0.1:4269";
+const IP: &str = "127.0.0.1";
+const PORT: u16 = 4269;
 
 const SECRET: &str = "tZs3U%hqY^o$&*y%4HcF8&RyAKevUbZnkTsrjCzPGxfare3Yn9c7shVZETfPDPUc8xR%N38a!TL%2$WbkFhZqmH#jvw&d3^mryPD8Y8TqHoJHwyKSTJeQB7vK7QkW#&B";
 
-#[tokio::main]
-async fn main() {
-  tokio::spawn(async move {
-    let stream = TcpStream::connect(ADDRESS).await.unwrap();
-    let secret = Message::new(SECRET.to_string());
-    process(&stream, secret).await;
-  })
-  .await
-  .unwrap();
+struct Context {
+  id: Option<u64>,
+  name: String,
+  authenticated: bool,
 }
 
-async fn process(socket: &TcpStream, secret: Message) {
-  match await_secret(socket, secret).await {
-    Ok(_) => {
-      log(Severity::INFO, "secret received and verified".to_string()).await;
-      // TODO: send machine_uid along with the clientname
-      send_clientname(socket).await;
-      await_messages(socket).await;
-    }
-    Err(e) => {
-      log(Severity::ERROR, format!("Secret verification failed. Reason: {}", String::from(e)))
-        .await;
-      return;
-    }
-  }
-}
+#[actix_web::main]
+async fn main() -> ! {
+  tracing_subscriber::fmt::init();
+  info!("Running client");
 
-async fn send_clientname(socket: &TcpStream) {
-  let clientname = Message::new(gethostname().to_string_lossy().to_string());
+  let addr = (IP, PORT);
 
   loop {
-    socket.writable().await.unwrap();
+    // continually try and connect to the server every 5 seconds until we succeed
+    // TODO: Maybe handle errors that aren't "Connection Refused" differently in the future
+    let st = TcpStream::connect(addr).await;
+    if st.is_err() {
+      tracing::warn!("Failed to connect to server. Trying again in 5 seconds");
+      tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+    } else {
+      let stream = st.unwrap();
+      let mut framed = actix_codec::Framed::new(stream, remex_core::codec::ServerCodec);
+      let mut ctx: Context = Context {
+        id: None,
+        name: gethostname().to_string_lossy().to_string(),
+        authenticated: false,
+      };
 
-    let mut sent_packets = 0;
+      // NOTE: handle server responses
+      loop {
+        select! {
+            Some(msg) = framed.next() => {
+                match msg {
+                    Ok(remex_core::codec::ClientResponse::Command(ref cmd)) => {
+                        info!("command: {cmd}");
+                    }
+                    Ok(remex_core::codec::ClientResponse::Message(ref msg)) => {
+                        info!("message: {msg}");
+                    }
+                    Ok(remex_core::codec::ClientResponse::Identify) => {
+                        info!("Name sent {}, and secret {}", ctx.name.clone(), SECRET.to_string());
+                        let id = id::get_id();
+                        match id {
+                            Ok(s) => {
+                                if s.is_some() {
+                                  let i = s.unwrap();
+                                  tracing::info!("Id {} used for authentication", &i);
+                                  framed.send(remex_core::codec::ClientRequest::IdentifyId(i.parse::<u64>().unwrap(), ctx.name.clone())).await.unwrap();
+                                } else {
+                                  tracing::info!("Secret {} used for authentication", SECRET.to_string());
+                                  framed.send(remex_core::codec::ClientRequest::IdentifySecret(SECRET.to_string(), ctx.name.clone())).await.unwrap();
+                                }
+                            },
+                            Err(e) => {
+                                tracing::error!("{}",e);
+                            }
+                        }
+                    }
+                    Ok(remex_core::codec::ClientResponse::Authenticated(id, name)) => {
+                        info!("Correct secret, session authenticated");
+                        ctx.name = name.clone();
+                        ctx.id = Some( id.clone() );
+                        ctx.authenticated = true;
+                        id::save_id(id.clone());
+                    }
 
-    for packet in clientname.get_packets().into_iter() {
-      match socket.try_write(&packet.clone().to_vec()) {
-        Ok(_) => {
-          sent_packets = sent_packets + 1;
-        }
-        Err(e) => log(Severity::ERROR, format!("failed to send clientname: {:?}", e)).await,
-      }
-    }
+                    // respond to pings with a "pong"
+                    Ok(remex_core::codec::ClientResponse::Ping) => { framed.send(remex_core::codec::ClientRequest::Ping).await.unwrap(); },
 
-    if sent_packets == clientname.get_packets().len() as u8 {
-      log(Severity::INFO, format!("sent clientname: {:?}", clientname.get_msg())).await;
-      break;
-    }
-  }
-}
-
-async fn await_messages(socket: &TcpStream) {
-  loop {
-    let mut buf = [0; 128];
-    let mut packets = Vec::new();
-    loop {
-      socket.readable().await.unwrap();
-      match socket.try_read(&mut buf) {
-        Ok(x) => {
-          if x != 0 {
-            let packet: Packet = buf.into();
-            // println!("got packet: {:?}", packet);
-            packets.push(packet.clone());
-            buf = [0; 128];
-            if packet.number == packet.total {
-              log(Severity::INFO, "got all packets".to_string()).await;
-              break;
+                    _ => { eprintln!("{msg:?}"); }
+                }
             }
-          }
+            // Fallback to connecting to the server until the program is terminated, or a
+            // connection is made
+            else => {
+                break;
+            }
         }
-        Err(_) => continue,
       }
     }
-
-    // packets.iter().for_each(|x| println!("{}, {}", x.number, x.total));
-    let received = Message::from(packets);
-    log(Severity::INFO, format!("got {:?}", received.get_msg())).await;
   }
-}
-
-async fn await_secret(socket: &TcpStream, secret: Message) -> Result<(), ERROR> {
-  {
-    let mut buf = [0; 128];
-    let mut packets = Vec::new();
-    loop {
-      socket.readable().await.unwrap();
-      socket.try_read(&mut buf).unwrap();
-      let packet: Packet = buf.into();
-      packets.push(packet.clone());
-      buf = [0; 128];
-      if packet.number == packet.total {
-        break;
-      }
-    }
-    let receivedsecret = Message::from(packets);
-    log(Severity::INFO, format!("got secret: {:?}", receivedsecret.get_msg())).await;
-    match secret.get_msg() == receivedsecret.get_msg() {
-      false => return Err(ERROR::InvalidSecret),
-      _ => {}
-    }
-  }
-
-  loop {
-    socket.writable().await.unwrap();
-
-    let mut sent_packets = 0;
-
-    for packet in secret.get_packets().into_iter() {
-      match socket.try_write(&packet.clone().to_vec()) {
-        Ok(_) => {
-          sent_packets = sent_packets + 1;
-        }
-        Err(e) => log(Severity::ERROR, format!("failed to send secret: {:?}", e)).await,
-      }
-    }
-
-    if sent_packets == secret.get_packets().len() as u8 {
-      break;
-    }
-  }
-  Ok(())
 }
