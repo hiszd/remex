@@ -94,36 +94,59 @@ impl Handler<GetLogs> for Db {
   }
 }
 
-#[derive(Message)]
-#[rtype(result = "u64")]
+#[derive(Debug)]
 pub struct NewClient {
-  pub current_id: u64,
+  pub id: Option<String>,
   pub clientname: String,
+  pub addr: actix::Addr<crate::session::RemexSession>,
+}
+impl Message for NewClient {
+  type Result = Result<(), anyhow::Error>;
 }
 impl Handler<NewClient> for Db {
-  type Result = u64;
+  type Result = Result<(), anyhow::Error>;
   fn handle(&mut self, msg: NewClient, ctx: &mut Context<Self>) -> Self::Result {
     let clientname1 = msg.clientname.clone();
+    let id1 = msg.id.clone();
+    let addr = msg.addr.clone();
     let pool = self.pool.clone();
-    clients::add_client(pool, msg.current_id, msg.clientname.clone())
-      .into_actor(self)
-      .then(move |res, act, _ctx| {
-        match res {
-          Ok(new_id) => {
-            let old_id = msg.current_id;
-            info!("new client_id: {} old_id: {}", &new_id, &old_id);
-            act.server.do_send(crate::server::DbClientIdentified {
-              old_id,
-              new_id: new_id as u64,
-              clientname: clientname1.clone(),
+    let serv = self.server.clone();
+    let futr = Box::pin(async move {
+      if id1.is_none() {
+        tracing::info!("Generating new id");
+        let id = clients::generate_id(pool.clone()).await.unwrap();
+        tracing::info!("Generated id: {}", id);
+        let b = clients::add_client(pool, id, clientname1).await;
+
+        match b {
+          Ok(client) => {
+            tracing::info!("Client added with id: {}", &client.id);
+            serv.do_send(crate::server::DbClientIdentified {
+              id: client.client_id,
+              clientname: client.clientname.clone(),
+              addr,
             });
           }
-          Err(e) => error!("db error: {}", e),
+          Err(e) => error!("127 - db error: {}", e),
         }
-        actix::fut::ready(())
-      })
-      .wait(ctx);
-    msg.current_id.clone()
+      } else {
+        tracing::info!("Using existing id");
+        let b = clients::get_client(&pool, id1.clone().unwrap()).await;
+        match b {
+          Ok(client) => {
+            serv.do_send(crate::server::DbClientIdentified {
+              id: client.client_id,
+              clientname: client.clientname.clone(),
+              addr,
+            });
+          }
+          Err(e) => error!("139 - db error: {} when getting client: {:?}", e, id1.clone()),
+        }
+      }
+    });
+    let fut = actix::fut::wrap_future::<_, Self>(futr);
+    ctx.spawn(fut);
+    Ok(())
   }
 }
 

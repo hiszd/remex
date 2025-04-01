@@ -53,7 +53,7 @@ pub enum ClientRequest {
   /// IdentifySecret (Secret, Name)
   IdentifySecret(String, String),
   /// IdentifyId (Id, Name)
-  IdentifyId(u64, String),
+  IdentifyId(String, String),
   /// Log
   Log(String),
   /// Result
@@ -74,7 +74,7 @@ pub enum ClientResponse {
   /// Identify
   Identify,
   /// Authenticated
-  Authenticated(u64, String),
+  Authenticated(String, String),
   /// Result
   Result(Box<ClientResponse>, Result<String, String>),
   /// Ping

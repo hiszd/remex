@@ -15,7 +15,7 @@ use crate::sessionmap::SessionMap;
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct Connect {
-  pub id: Option<u64>,
+  pub id: Option<String>,
   pub clientname: String,
   pub addr: Addr<session::RemexSession>,
 }
@@ -37,7 +37,7 @@ impl Handler<GetLogs> for RemexServer {
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct Disconnect {
-  pub id: u64,
+  pub id: String,
 }
 
 /// Send command to specific room
@@ -45,7 +45,7 @@ pub struct Disconnect {
 #[rtype(result = "String")]
 pub struct Command {
   /// Id of the client session
-  pub id: u64,
+  pub id: String,
   /// Peer message
   pub command: String,
 }
@@ -55,7 +55,7 @@ pub struct Command {
 #[rtype(result = "String")]
 pub struct Message {
   /// Id of the client session
-  pub id: u64,
+  pub id: String,
   /// Peer message
   pub msg: String,
 }
@@ -89,9 +89,9 @@ impl Actor for RemexServer {
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct DbClientIdentified {
+  pub id: String,
   pub clientname: String,
-  pub old_id: u64,
-  pub new_id: u64,
+  pub addr: Addr<session::RemexSession>,
 }
 /// Handler for DbClientIDentified message.
 ///
@@ -99,13 +99,12 @@ pub struct DbClientIdentified {
 impl Handler<DbClientIdentified> for RemexServer {
   type Result = ();
   fn handle(&mut self, db: DbClientIdentified, _: &mut Context<Self>) -> Self::Result {
-    info!("Database client id being changed from {} to {}", &db.old_id, &db.new_id);
-    match self.sessions.change_id(db.old_id, db.new_id.clone()) {
-      Err(e) => error!("Could not change session id: {}", e),
+    info!("Database client id being created with id {}", &db.id);
+    match self.sessions.insert(db.id.clone(), db.addr.clone()) {
+      Err(e) => error!("Could not create session with id: {}", e),
       _ => {
-        let addr = self.sessions.get_addr(db.new_id.clone()).unwrap();
-        addr.do_send(crate::session::Identified {
-          id: db.new_id.clone() as i32,
+        db.addr.do_send(crate::session::Identified {
+          id: db.id.clone(),
           name: db.clientname,
         });
       }
@@ -140,51 +139,21 @@ impl Handler<Connect> for RemexServer {
 
   fn handle(&mut self, msg: Connect, ctx: &mut Context<Self>) -> Self::Result {
     // TODO: make this try and enroll based on a previous id
-    if msg.id.is_some() {
-      let id = msg.id.unwrap();
-      let idcln = id.clone();
-      let db = self.db.clone().expect("Database not connected");
-      info!("Session connection made with clientname {} attempting id {}", &msg.clientname, &id);
+    let db = self.db.clone().expect("Database not connected");
+    info!("Session connection made with clientname {}", &msg.clientname);
 
-      self.sessions.insert(id.clone(), msg.addr.clone()).unwrap();
-
-      let futr = async move {
-        let id = match db
-          .send(crate::db::NewClient {
-            current_id: id,
-            clientname: msg.clientname,
-          })
-          .await
-        {
-          Ok(id) => id,
-          Err(e) => {
-            error!("Error creating new client: {}", e);
-            idcln
-          }
-        };
-      };
-      let fut = actix::fut::wrap_future::<_, Self>(futr);
-      ctx.spawn(fut);
-    } else {
-      info!("Session connection made with clientname {}", &msg.clientname);
-
-      let id = random::<u64>();
-
-      self.sessions.insert(id.clone(), msg.addr.clone()).unwrap();
-
-      // FIXME: this is blocking execution and not sending ID back to client
-      self
-        .db
-        .clone()
-        .expect("Database not connected")
-        .send(crate::db::NewClient {
-          current_id: id,
-          clientname: msg.clientname,
-        })
-        .into_actor(self)
-        .then(move |_res, _act, _ctx| actix::fut::ready(()))
-        .wait(ctx);
-    }
+    let futr = async move {
+      db.send(crate::db::NewClient {
+        id: msg.id,
+        clientname: msg.clientname,
+        addr: msg.addr.clone(),
+      })
+      .await
+      .unwrap()
+      .unwrap();
+    };
+    let fut = actix::fut::wrap_future::<_, Self>(futr);
+    ctx.spawn(fut);
   }
 }
 

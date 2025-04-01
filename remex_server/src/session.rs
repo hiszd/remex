@@ -24,7 +24,7 @@ use crate::server::{self, RemexServer};
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct Identified {
-  pub id: i32,
+  pub id: String,
   pub name: String,
 }
 /// Handler for Identified message.
@@ -37,7 +37,7 @@ impl Handler<Identified> for RemexSession {
     }
     info!("Sending auth to peer");
     // send message to peer
-    self.framed.write(ClientResponse::Authenticated(id.id as u64, id.name));
+    self.framed.write(ClientResponse::Authenticated(id.id.clone(), id.name));
   }
 }
 
@@ -86,7 +86,7 @@ impl Handler<Command> for RemexSession {
 /// `RemexSession` actor is responsible for tcp peer communications.
 pub struct RemexSession {
   /// unique session id
-  id: u64,
+  id: String,
   /// unique client id
   client_id: Option<u64>,
   /// machine name
@@ -118,7 +118,9 @@ impl Actor for RemexSession {
 
   fn stopping(&mut self, _: &mut Self::Context) -> Running {
     // notify Remex server
-    self.addr.do_send(server::Disconnect { id: self.id });
+    self.addr.do_send(server::Disconnect {
+      id: self.id.clone(),
+    });
     Running::Stop
   }
 }
@@ -138,7 +140,7 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
         self
           .addr
           .send(server::Command {
-            id: self.id,
+            id: self.id.clone(),
             command: cmd,
           })
           .into_actor(self)
@@ -202,7 +204,7 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
         self
           .addr
           .send(crate::server::Connect {
-            id: None,
+            id: Some(id),
             clientname: self.name.clone().unwrap(),
             addr: addr.clone(),
           })
@@ -231,7 +233,7 @@ impl RemexSession {
     framed: actix::io::FramedWrite<ClientResponse, WriteHalf<TcpStream>, ClientCodec>,
   ) -> RemexSession {
     RemexSession {
-      id: 0,
+      id: "".to_string(),
       client_id: None,
       name: None,
       addr,
@@ -253,7 +255,7 @@ impl RemexSession {
         info!("Client heartbeat failed, disconnecting!");
 
         // notify Remex server
-        act.addr.do_send(server::Disconnect { id: act.id });
+        act.addr.do_send(server::Disconnect { id: act.id.clone() });
 
         // stop actor
         ctx.stop();

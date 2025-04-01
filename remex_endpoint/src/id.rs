@@ -1,7 +1,7 @@
 use std::env;
 use std::io::Write;
 
-pub fn save_id(id: u64) -> anyhow::Result<()> {
+pub fn save_id(id: String) -> anyhow::Result<()> {
   let usr = env::var("USER").expect("No $USER env var found");
   let cdir = "/home/".to_owned() + &usr + "/.config/remex/";
   let flnm = cdir.clone() + "id";
@@ -14,7 +14,7 @@ pub fn save_id(id: u64) -> anyhow::Result<()> {
         }
         _ => {}
       };
-      match std::fs::write(flnm.clone(), id.to_string()) {
+      match std::fs::write(flnm.clone(), id.clone()) {
         Err(e) => {
           anyhow::bail!("could not write id file: {}", e);
         }
@@ -29,7 +29,7 @@ pub fn save_id(id: u64) -> anyhow::Result<()> {
           }
           Ok(f) => f,
         };
-        match fle.write(id.to_string().as_bytes()) {
+        match fle.write(id.clone().as_bytes()) {
           Err(e) => {
             anyhow::bail!("could not write id file: {}", e);
           }
@@ -48,7 +48,7 @@ pub fn save_id(id: u64) -> anyhow::Result<()> {
           }
           Ok(f) => f,
         };
-        match fle.write(id.to_string().as_bytes()) {
+        match fle.write(id.clone().as_bytes()) {
           Err(e) => {
             anyhow::bail!("could not write id file: {}", e);
           }
@@ -64,11 +64,16 @@ pub fn save_id(id: u64) -> anyhow::Result<()> {
 
 pub fn get_id() -> anyhow::Result<Option<String>, std::io::Error> {
   let usr = env::var("USER").expect("No $USER env var found");
-  let cdir = "/home/".to_owned() + &usr + ".config/remex/";
+  let cdir = "/home/".to_owned() + &usr + "/.config/remex/";
+  tracing::info!("Reading ID from: {}id", &cdir);
   match std::fs::read_to_string(cdir + "id") {
-    Ok(s) => Ok(Some(s)),
+    Ok(s) => {
+      tracing::info!("Read id: {}", &s);
+      Ok(Some(s))
+    }
     Err(e) => {
       if e.kind() == std::io::ErrorKind::NotFound {
+        tracing::error!("id file not found");
         return Ok(None);
       }
       tracing::error!("could not get id: {}", e);

@@ -9,6 +9,8 @@ use self::server::RemexServer;
 mod args;
 mod db;
 mod endpoint;
+mod model;
+mod schema;
 mod server;
 mod session;
 mod sessionmap;

@@ -12,7 +12,7 @@ const PORT: u16 = 4269;
 const SECRET: &str = "tZs3U%hqY^o$&*y%4HcF8&RyAKevUbZnkTsrjCzPGxfare3Yn9c7shVZETfPDPUc8xR%N38a!TL%2$WbkFhZqmH#jvw&d3^mryPD8Y8TqHoJHwyKSTJeQB7vK7QkW#&B";
 
 struct Context {
-  id: Option<u64>,
+  id: Option<String>,
   name: String,
   authenticated: bool,
 }
@@ -58,8 +58,9 @@ async fn main() -> ! {
                             Ok(s) => {
                                 if s.is_some() {
                                   let i = s.unwrap();
+                                  tracing::info!("Using existing id: {}", &i);
                                   tracing::info!("Id {} used for authentication", &i);
-                                  framed.send(remex_core::codec::ClientRequest::IdentifyId(i.parse::<u64>().unwrap(), ctx.name.clone())).await.unwrap();
+                                  framed.send(remex_core::codec::ClientRequest::IdentifyId(i.clone(), ctx.name.clone())).await.unwrap();
                                 } else {
                                   tracing::info!("Secret {} used for authentication", SECRET.to_string());
                                   framed.send(remex_core::codec::ClientRequest::IdentifySecret(SECRET.to_string(), ctx.name.clone())).await.unwrap();
@@ -71,11 +72,11 @@ async fn main() -> ! {
                         }
                     }
                     Ok(remex_core::codec::ClientResponse::Authenticated(id, name)) => {
-                        info!("Correct secret, session authenticated");
+                        info!("Correct secret, session authenticated. Id: {}, Name: {}", &id, &name);
                         ctx.name = name.clone();
                         ctx.id = Some( id.clone() );
                         ctx.authenticated = true;
-                        id::save_id(id.clone());
+                        id::save_id(id.clone()).unwrap();
                     }
 
                     // respond to pings with a "pong"
