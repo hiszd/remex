@@ -140,7 +140,15 @@ impl Handler<NewClient> for Db {
               addr,
             });
           }
-          Err(e) => error!("139 - db error: {} when getting client: {:?}", e, id1.clone()),
+          Err(e) => match e {
+            sqlx::Error::RowNotFound => {
+              tracing::error!("client not found");
+              addr.do_send(crate::session::Disconnect {
+                reason: remex_core::codec::DisconnectReason::InvalidClientId,
+              });
+            }
+            _ => {}
+          },
         }
       }
     });

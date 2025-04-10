@@ -18,7 +18,7 @@ struct Context {
 }
 
 #[actix_web::main]
-async fn main() -> ! {
+async fn main() {
   tracing_subscriber::fmt::init();
   info!("Running client");
 
@@ -78,6 +78,20 @@ async fn main() -> ! {
                         ctx.authenticated = true;
                         id::save_id(id.clone()).unwrap();
                     }
+                    Ok(remex_core::codec::ClientResponse::Disconnect(reason)) => {
+                        info!("Disconnected: {}", reason.to_string());
+                        match reason {
+                            remex_core::codec::DisconnectReason::InvalidClientId => {
+                                // if the client id is invalid, then remove it so you can get a new
+                                // one
+                                id::remove_id().unwrap();
+                                break;
+                            }
+                            _ => {
+                                break;
+                            }
+                        }
+                    }
 
                     // respond to pings with a "pong"
                     Ok(remex_core::codec::ClientResponse::Ping) => { framed.send(remex_core::codec::ClientRequest::Ping).await.unwrap(); },
@@ -92,6 +106,8 @@ async fn main() -> ! {
             }
         }
       }
+      tracing::warn!("Failed to connect to server. Trying again in 5 seconds");
+      tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
     }
   }
 }

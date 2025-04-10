@@ -1,3 +1,5 @@
+use std::any::Any;
+
 pub struct Client {
   pub id: i64,
   pub client_id: String,
@@ -49,7 +51,7 @@ RETURNING *
   })
 }
 
-pub async fn get_client(pool: &sqlx::PgPool, client_id: String) -> anyhow::Result<Client> {
+pub async fn get_client(pool: &sqlx::PgPool, client_id: String) -> Result<Client, sqlx::Error> {
   match sqlx::query!(r#"SELECT * FROM clients WHERE client_id = $1"#, client_id)
     .fetch_one(pool)
     .await
@@ -61,9 +63,15 @@ pub async fn get_client(pool: &sqlx::PgPool, client_id: String) -> anyhow::Resul
       created_at: rec.created_at.unwrap(),
       updated_at: rec.updated_at.unwrap(),
     }),
-    Err(e) => {
-      tracing::error!("db error: {} for client_id: {}", e, client_id);
-      Err(anyhow::Error::from(e))
-    }
+    Err(e) => match e {
+      sqlx::Error::RowNotFound => {
+        tracing::error!("client not found");
+        Err(e)
+      }
+      _ => {
+        tracing::error!("db error: {}", e);
+        Err(e)
+      }
+    },
   }
 }

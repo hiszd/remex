@@ -33,23 +33,6 @@ impl Handler<GetLogs> for RemexServer {
   }
 }
 
-/// Session is disconnected
-#[derive(Message)]
-#[rtype(result = "()")]
-pub struct Disconnect {
-  pub id: String,
-}
-
-/// Send command to specific room
-#[derive(Message)]
-#[rtype(result = "String")]
-pub struct Command {
-  /// Id of the client session
-  pub id: String,
-  /// Peer message
-  pub command: String,
-}
-
 /// Send message to specific room
 #[derive(Message)]
 #[rtype(result = "String")]
@@ -157,18 +140,31 @@ impl Handler<Connect> for RemexServer {
   }
 }
 
+/// Session is disconnected
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct Disconnect {
+  pub id: String,
+}
 /// Handler for Disconnect message.
 impl Handler<Disconnect> for RemexServer {
   type Result = ();
-
   fn handle(&mut self, msg: Disconnect, _: &mut Context<Self>) {
     info!("Session {} disconnected", &msg.id);
-
     // remove address
     self.sessions.remove(msg.id.clone());
   }
 }
 
+/// Send command to specific room
+#[derive(Message)]
+#[rtype(result = "String")]
+pub struct Command {
+  /// Id of the client session
+  pub id: String,
+  /// Peer message
+  pub command: String,
+}
 /// Handler for Command message.
 impl Handler<Command> for RemexServer {
   type Result = String;

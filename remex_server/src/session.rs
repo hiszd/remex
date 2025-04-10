@@ -18,6 +18,22 @@ use tracing::info;
 
 use crate::server::{self, RemexServer};
 
+/// Force session close
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct Disconnect {
+  pub reason: remex_core::codec::DisconnectReason,
+}
+/// Handler for Disconnect message.
+impl Handler<Disconnect> for RemexSession {
+  type Result = ();
+  fn handle(&mut self, disc: Disconnect, _: &mut Context<Self>) -> Self::Result {
+    info!("Sending disconnect to peer");
+    // send message to peer
+    self.framed.write(ClientResponse::Disconnect(disc.reason));
+  }
+}
+
 /// Message for chat server communications
 ///
 /// New chat session is created

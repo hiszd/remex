@@ -5,7 +5,6 @@ pub fn save_id(id: String) -> anyhow::Result<()> {
   let usr = env::var("USER").expect("No $USER env var found");
   let cdir = "/home/".to_owned() + &usr + "/.config/remex/";
   let flnm = cdir.clone() + "id";
-  tracing::info!("dir: {}, flnm: {}", &cdir, &flnm);
   match std::fs::exists(flnm.clone()) {
     Ok(true) => {
       match std::fs::remove_file(flnm.clone()) {
@@ -75,6 +74,26 @@ pub fn get_id() -> anyhow::Result<Option<String>, std::io::Error> {
       if e.kind() == std::io::ErrorKind::NotFound {
         tracing::error!("id file not found");
         return Ok(None);
+      }
+      tracing::error!("could not get id: {}", e);
+      Err(e)
+    }
+  }
+}
+
+pub fn remove_id() -> anyhow::Result<(), std::io::Error> {
+  let usr = env::var("USER").expect("No $USER env var found");
+  let cdir = "/home/".to_owned() + &usr + "/.config/remex/";
+  tracing::info!("Reading ID from: {}id", &cdir);
+  match std::fs::remove_file(cdir + "id") {
+    Ok(s) => {
+      tracing::info!("removed id file");
+      Ok(())
+    }
+    Err(e) => {
+      if e.kind() == std::io::ErrorKind::NotFound {
+        tracing::error!("id file not found");
+        return Ok(());
       }
       tracing::error!("could not get id: {}", e);
       Err(e)

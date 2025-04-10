@@ -43,20 +43,46 @@ fn encrypt(plaintext: String) -> Vec<u8> {
   encrypted_data
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub enum DisconnectReason {
+  AuthFailed,
+  InvalidClientId,
+}
+impl Into<String> for DisconnectReason {
+  fn into(self) -> String {
+    match self {
+      DisconnectReason::AuthFailed => "Authentication failed".to_string(),
+      DisconnectReason::InvalidClientId => "Invalid client id".to_string(),
+    }
+  }
+}
+impl std::fmt::Display for DisconnectReason {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      DisconnectReason::AuthFailed => {
+        write!(f, "Authentication failed")
+      }
+      DisconnectReason::InvalidClientId => {
+        write!(f, "Invalid client id")
+      }
+    }
+  }
+}
+
 /// Client request - come from client
 #[derive(Serialize, Deserialize, Debug, Message)]
 #[rtype(result = "()")]
 #[serde(tag = "cmd", content = "data")]
 pub enum ClientRequest {
-  /// Command
+  /// Command (Command)
   Command(String),
   /// IdentifySecret (Secret, Name)
   IdentifySecret(String, String),
   /// IdentifyId (Id, Name)
   IdentifyId(String, String),
-  /// Log
+  /// Log (Message)
   Log(String),
-  /// Result
+  /// Result (Req, Result)
   Result(Box<ClientRequest>, Result<String, String>),
   /// Ping
   Ping,
@@ -67,16 +93,18 @@ pub enum ClientRequest {
 #[rtype(result = "()")]
 #[serde(tag = "cmd", content = "data")]
 pub enum ClientResponse {
-  /// Command
+  /// Command (Command)
   Command(String),
-  /// Message
+  /// Message (Message)
   Message(String),
   /// Identify
   Identify,
-  /// Authenticated
+  /// Authenticated (Id, Name)
   Authenticated(String, String),
-  /// Result
+  /// Result (Req, Result)
   Result(Box<ClientResponse>, Result<String, String>),
+  /// Disconnect (Reason)
+  Disconnect(DisconnectReason),
   /// Ping
   Ping,
 }
