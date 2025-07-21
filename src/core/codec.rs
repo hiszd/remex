@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use serde_json as json;
 use tracing::error;
 
+use crate::endpoint::Endpoint;
+
 // const KEY: &str = "tZs3U%hqY^o$&*y%4HcF8&RyAKevUbZnkTsrjCzPGxfare3Yn9c7shVZETfPDPUc8xR%N38a!TL%2$WbkFhZqmH#jvw&d3^mryPD8Y8TqHoJHwyKSTJeQB7vK7QkW#&B";
 const KEY: &str = "tZs3U%hqY^o$&*y%4HcF8&RyAKevUbZn";
 
@@ -47,12 +49,14 @@ fn encrypt(plaintext: String) -> Vec<u8> {
 pub enum DisconnectReason {
   AuthFailed,
   InvalidClientId,
+  InvalidSecret,
 }
 impl Into<String> for DisconnectReason {
   fn into(self) -> String {
     match self {
       DisconnectReason::AuthFailed => "Authentication failed".to_string(),
       DisconnectReason::InvalidClientId => "Invalid client id".to_string(),
+      DisconnectReason::InvalidSecret => "Invalid secret".to_string(),
     }
   }
 }
@@ -65,6 +69,9 @@ impl std::fmt::Display for DisconnectReason {
       DisconnectReason::InvalidClientId => {
         write!(f, "Invalid client id")
       }
+      DisconnectReason::InvalidSecret => {
+        write!(f, "Invalid secret")
+      }
     }
   }
 }
@@ -76,14 +83,16 @@ impl std::fmt::Display for DisconnectReason {
 pub enum ClientRequest {
   /// Command (Command)
   Command(String),
-  /// IdentifySecret (Secret, Name)
-  IdentifySecret(String, String),
-  /// IdentifyId (Id, Name)
-  IdentifyId(String, String),
+  /// Try to allow connection with the server based on the ID that was saved on the client or the
+  /// secret
+  /// Identify (Id, Secret, Identity)
+  Identify(Option<String>, Option<String>, Endpoint),
   /// Log (Message)
   Log(String),
   /// Result (Req, Result)
   Result(Box<ClientRequest>, Result<String, String>),
+  /// Message (Message)
+  Message(String),
   /// Ping
   Ping,
 }
@@ -97,10 +106,11 @@ pub enum ClientResponse {
   Command(String),
   /// Message (Message)
   Message(String),
+  /// Request the client to identify itself using a saved ID, or using a secret
   /// Identify
   Identify,
-  /// Authenticated (Id, Name)
-  Authenticated(String, String),
+  /// Authenticated (Endpoint, Secret)
+  Authenticated(Endpoint, String),
   /// Result (Req, Result)
   Result(Box<ClientResponse>, Result<String, String>),
   /// Disconnect (Reason)

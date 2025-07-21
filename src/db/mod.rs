@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use actix::{Actor, AsyncContext, Context, Handler, Message};
-use tracing::{error, info};
+use tracing::info;
 
 pub mod clients;
 pub mod logs;
@@ -57,96 +57,12 @@ impl Actor for Db {
   fn started(&mut self, _ctx: &mut Context<Self>) -> () {
   }
 
-  fn stopped(&mut self, _ctx: &mut Context<Self>) { self.pool.close(); }
-}
-
-#[derive(Message)]
-#[rtype(result = "Vec<String>")]
-pub struct GetLogs {}
-impl Handler<GetLogs> for Db {
-  type Result = Vec<String>;
-  fn handle(&mut self, _msg: GetLogs, _ctx: &mut Context<Self>) -> Self::Result {
-    let _lgs = futures::executor::block_on(async {
-      sqlx::query("SELECT * FROM logs").fetch_all(&self.pool).await.unwrap()
-    });
-    vec!["bob".to_owned()]
-  }
-}
-
-#[derive(Debug)]
-pub struct NewClient {
-  pub id: Option<String>,
-  pub clientname: String,
-  pub addr: actix::Addr<crate::session::RemexSession>,
-}
-impl Message for NewClient {
-  type Result = Result<(), anyhow::Error>;
-}
-impl Handler<NewClient> for Db {
-  type Result = Result<(), anyhow::Error>;
-  fn handle(&mut self, msg: NewClient, ctx: &mut Context<Self>) -> Self::Result {
-    let clientname1 = msg.clientname.clone();
-    let id1 = msg.id.clone();
-    let addr = msg.addr.clone();
+  fn stopped(&mut self, ctx: &mut Context<Self>) {
     let pool = self.pool.clone();
-    let serv = self.server.clone();
     let futr = Box::pin(async move {
-      if id1.is_none() {
-        tracing::info!("Generating new id");
-        let id = clients::generate_id(pool.clone()).await.unwrap();
-        tracing::info!("Generated id: {}", id);
-        let b = clients::add_client(pool, id, clientname1).await;
-
-        match b {
-          Ok(client) => {
-            tracing::info!("Client added with id: {}", &client.id);
-            serv.do_send(crate::server::DbClientIdentified {
-              id: client.id,
-              clientname: client.name.clone(),
-              addr,
-            });
-          }
-          Err(e) => error!("130 - db error: {}", e),
-        }
-      } else {
-        tracing::info!("Using existing id");
-        let b = clients::get_client(&pool, id1.clone().unwrap()).await;
-        match b {
-          Ok(client) => {
-            serv.do_send(crate::server::DbClientIdentified {
-              id: client.id,
-              clientname: client.name.clone(),
-              addr,
-            });
-          }
-          Err(e) => match e {
-            sqlx::Error::RowNotFound => {
-              tracing::error!("client not found");
-              addr.do_send(crate::session::Disconnect {
-                reason: crate::core::codec::DisconnectReason::InvalidClientId,
-              });
-            }
-            _ => {}
-          },
-        }
-      }
+      pool.close().await;
     });
     let fut = actix::fut::wrap_future::<_, Self>(futr);
     ctx.spawn(fut);
-    Ok(())
-  }
-}
-
-#[derive(Message)]
-#[rtype(result = "()")]
-struct NewLog {
-  client: String,
-  message: String,
-  time_logged: chrono::NaiveDateTime,
-}
-impl Handler<NewLog> for Db {
-  type Result = ();
-  fn handle(&mut self, msg: NewLog, _ctx: &mut Context<Self>) {
-    futures::executor::block_on(self.new_log(&msg.client, &msg.message, msg.time_logged));
   }
 }

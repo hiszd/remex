@@ -2,11 +2,11 @@ use std::env;
 use std::io::Write;
 
 pub fn save_id(id: String) -> anyhow::Result<()> {
-  let usr = env::var("USER").expect("No $USER env var found");
-  let cdir = "/home/".to_owned() + &usr + "/.config/remex/";
+  let cdir = super::getcdir();
   let flnm = cdir.clone() + "id";
   match std::fs::exists(flnm.clone()) {
     Ok(true) => {
+      tracing::info!("Updating existing id file");
       match std::fs::remove_file(flnm.clone()) {
         Err(e) => {
           anyhow::bail!("could not remove id file: {}", e);
@@ -21,6 +21,7 @@ pub fn save_id(id: String) -> anyhow::Result<()> {
       }
     }
     Ok(false) => {
+      tracing::info!("Creating new id file");
       if std::fs::exists(cdir.clone()).unwrap() {
         let mut fle = match std::fs::File::create(flnm.clone()) {
           Err(e) => {
@@ -61,9 +62,8 @@ pub fn save_id(id: String) -> anyhow::Result<()> {
   }
 }
 
-pub fn get_id() -> anyhow::Result<Option<String>, std::io::Error> {
-  let usr = env::var("USER").expect("No $USER env var found");
-  let cdir = "/home/".to_owned() + &usr + "/.config/remex/";
+pub fn get_id_from_file() -> anyhow::Result<Option<String>, std::io::Error> {
+  let cdir = super::getcdir();
   tracing::info!("Reading ID from: {}id", &cdir);
   match std::fs::read_to_string(cdir + "id") {
     Ok(s) => {
@@ -82,9 +82,7 @@ pub fn get_id() -> anyhow::Result<Option<String>, std::io::Error> {
 }
 
 pub fn remove_id() -> anyhow::Result<(), std::io::Error> {
-  let usr = env::var("USER").expect("No $USER env var found");
-  let cdir = "/home/".to_owned() + &usr + "/.config/remex/";
-  tracing::info!("Reading ID from: {}id", &cdir);
+  let cdir = super::getcdir();
   match std::fs::remove_file(cdir + "id") {
     Ok(s) => {
       tracing::info!("removed id file");

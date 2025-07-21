@@ -1,9 +1,19 @@
 use std::collections::HashMap;
 
 use anyhow::anyhow;
+use tracing::{error, info};
+
+use crate::endpoint::Endpoint;
+pub mod maxarray;
+
+pub struct SessionItem {
+  pub identity: Endpoint,
+  pub addr: actix::Addr<crate::session::RemexSession>,
+  pub previous_ids: maxarray::MaxArray<String, 10>,
+}
 
 pub struct SessionMap {
-  pub sessions: HashMap<String, actix::Addr<crate::session::RemexSession>>,
+  pub sessions: HashMap<String, SessionItem>,
 }
 
 impl Default for SessionMap {
@@ -17,39 +27,44 @@ impl Default for SessionMap {
 impl SessionMap {
   pub fn insert(
     &mut self,
-    id: String,
+    identity: Endpoint,
     addr: actix::Addr<crate::session::RemexSession>,
   ) -> anyhow::Result<()> {
-    let _ = self.sessions.insert(id, addr);
+    info!("Creating new session with Endpoint {:?}", &identity);
+    let _ = self.sessions.insert(identity.machineid.clone(), SessionItem {
+      identity,
+      addr,
+      previous_ids: maxarray::MaxArray::new(),
+    });
     Ok(())
   }
 
-  pub fn remove(&mut self, id: String) -> Option<actix::Addr<crate::session::RemexSession>> {
-    self.sessions.remove(&id)
+  pub fn remove(&mut self, machineid: String) -> Option<SessionItem> {
+    self.sessions.remove(&machineid)
   }
 
-  pub fn exists(&self, id: String) -> bool { self.sessions.contains_key(&id) }
+  pub fn exists(&self, machineid: String) -> bool { self.sessions.contains_key(&machineid) }
 
-  pub fn change_id(&mut self, old_id: String, new_id: String) -> anyhow::Result<()> {
-    if !self.exists(old_id.clone()) {
-      return Err(anyhow!("Session does not exist"));
-    }
-    if self.exists(new_id.clone()) {
-      return Err(anyhow!("Duplicate session id, cannot assign"));
-    }
-    let old = match self.sessions.remove(&old_id) {
-      None => return Err(anyhow!("Session does not exist")),
-      Some(s) => s,
-    };
-    match self.sessions.insert(new_id, old) {
-      Some(_) => Ok(()),
-      None => Ok(()),
+  pub fn update_identity(
+    &mut self,
+    machineid: String,
+    identity: Endpoint,
+  ) -> Result<(), anyhow::Error> {
+    match self.sessions.get_mut(&machineid) {
+      Some(s) => {
+        s.identity = identity;
+        Ok(())
+      }
+      None => {
+        error!("Could not find session for machineid {}", &machineid);
+        Err(anyhow!("Could not find session for machineid {}", &machineid))
+      }
     }
   }
 
   pub fn get_addr(&self, id: String) -> anyhow::Result<actix::Addr<crate::session::RemexSession>> {
     match self.sessions.get(&id) {
-      Some(s) => Ok(s.clone()),
+      Some(s) => Ok(s.addr.clone()),
       None => Err(anyhow::anyhow!("Could not find addr for id {}", &id)),
     }
   }
