@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::anyhow;
-use tracing::{error, info};
+use tracing::error;
 
 use crate::endpoint::Endpoint;
 pub mod maxarray;
@@ -12,17 +12,11 @@ pub struct SessionItem {
   pub previous_ids: maxarray::MaxArray<String, 10>,
 }
 
+#[derive(Default)]
 pub struct SessionMap {
   pub sessions: HashMap<String, SessionItem>,
 }
 
-impl Default for SessionMap {
-  fn default() -> Self {
-    SessionMap {
-      sessions: HashMap::new(),
-    }
-  }
-}
 
 impl SessionMap {
   pub fn insert(

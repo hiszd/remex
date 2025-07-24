@@ -4,6 +4,10 @@ pub struct MaxArray<T, const S: usize> {
   items: Vec<T>,
 }
 
+impl<T, const S: usize> Default for MaxArray<T, S> {
+  fn default() -> Self { Self::new() }
+}
+
 impl<T, const S: usize> MaxArray<T, S> {
   pub fn new() -> Self {
     MaxArray {
@@ -26,4 +30,5 @@ impl<T, const S: usize> MaxArray<T, S> {
   }
 
   pub fn len(&self) -> usize { self.items.len() }
+  pub fn is_empty(&self) -> bool { self.items.is_empty() }
 }

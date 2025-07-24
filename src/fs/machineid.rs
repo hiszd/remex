@@ -34,7 +34,7 @@ fn generate_machineid() -> String {
   // Build the unique ID
   match builder.build("") {
     Ok(id) => id,
-    Err(e) => panic!("Failed to build machine ID: {}", e),
+    Err(e) => panic!("Failed to build machine ID: {e}"),
   }
 }
 
@@ -63,11 +63,8 @@ fn save_machineid(id: String) -> anyhow::Result<()> {
   match std::fs::exists(flnm.clone()) {
     Ok(true) => {
       tracing::info!("Updating existing machineid file");
-      match std::fs::remove_file(flnm.clone()) {
-        Err(e) => {
-          anyhow::bail!("could not remove machineid file: {}", e);
-        }
-        _ => {}
+      if let Err(e) = std::fs::remove_file(flnm.clone()) {
+        anyhow::bail!("could not remove machineid file: {}", e);
       };
       match std::fs::write(flnm.clone(), id.clone()) {
         Err(e) => {
@@ -92,11 +89,8 @@ fn save_machineid(id: String) -> anyhow::Result<()> {
           _ => Ok(()),
         }
       } else {
-        match std::fs::create_dir_all(cdir.clone()) {
-          Err(e) => {
-            anyhow::bail!("could not create machineid dir: {}", e);
-          }
-          _ => {}
+        if let Err(e) = std::fs::create_dir_all(cdir.clone()) {
+          anyhow::bail!("could not create machineid dir: {}", e);
         }
         let mut fle = match std::fs::File::create(flnm.clone()) {
           Err(e) => {
@@ -113,7 +107,7 @@ fn save_machineid(id: String) -> anyhow::Result<()> {
       }
     }
     Err(e) => {
-      return Err(anyhow::anyhow!("{}", e));
+      Err(anyhow::anyhow!("{}", e))
     }
   }
 }

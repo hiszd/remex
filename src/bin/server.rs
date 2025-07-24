@@ -10,7 +10,6 @@ use sqlx::migrate::MigrateDatabase;
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::SqlitePool;
 //SERVER
-use tracing_subscriber;
 
 use self::server::Server;
 

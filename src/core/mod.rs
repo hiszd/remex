@@ -28,10 +28,10 @@ impl Packet {
   }
 }
 
-impl Into<RawPacket> for Packet {
-  fn into(self) -> RawPacket {
-    let mut vc: StackVec<u8, 128> = StackVec::from_slice(&[self.number, self.total]).unwrap();
-    vc.extend(self.information);
+impl From<Packet> for RawPacket {
+  fn from(val: Packet) -> Self {
+    let mut vc: StackVec<u8, 128> = StackVec::from_slice(&[val.number, val.total]).unwrap();
+    vc.extend(val.information);
     let mut rtrn: [u8; 128] = [0; 128];
     for i in 0..vc.len() {
       rtrn[i] = vc[i];
@@ -40,12 +40,12 @@ impl Into<RawPacket> for Packet {
   }
 }
 
-impl Into<Packet> for RawPacket {
-  fn into(self) -> Packet {
+impl From<RawPacket> for Packet {
+  fn from(val: RawPacket) -> Self {
     Packet {
-      number: self[0],
-      total: self[1],
-      information: StackVec::from_slice(&self[2..]).unwrap(),
+      number: val[0],
+      total: val[1],
+      information: StackVec::from_slice(&val[2..]).unwrap(),
     }
   }
 }

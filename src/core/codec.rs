@@ -60,9 +60,9 @@ pub enum DisconnectReason {
   InvalidClientId,
   InvalidSecret,
 }
-impl Into<String> for DisconnectReason {
-  fn into(self) -> String {
-    match self {
+impl From<DisconnectReason> for String {
+  fn from(val: DisconnectReason) -> Self {
+    match val {
       DisconnectReason::AuthFailed => "Authentication failed".to_string(),
       DisconnectReason::InvalidClientId => "Invalid client id".to_string(),
       DisconnectReason::InvalidSecret => "Invalid secret".to_string(),
@@ -153,7 +153,7 @@ impl Decoder for ClientCodec {
           if e == "Failed to decrypt" {
             error!("Failed to decrypt, maybe the key is wrong");
           }
-          Err(io::Error::new(io::ErrorKind::Other, e))
+          Err(io::Error::other(e))
         }
       }
     } else {
@@ -203,7 +203,7 @@ impl Decoder for ServerCodec {
           if e == "Failed to decrypt" {
             error!("Failed to decrypt, maybe the key is wrong");
           }
-          Err(io::Error::new(io::ErrorKind::Other, e))
+          Err(io::Error::other(e))
         }
       }
     } else {

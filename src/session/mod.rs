@@ -13,9 +13,9 @@ use tokio::{
   net::{TcpListener, TcpStream},
 };
 use tokio_util::codec::FramedRead;
-use tracing::{error, info};
+use tracing::info;
 
-use crate::{core::codec::AuthRequest, messages::db, server::Server};
+use crate::{messages::db, server::Server};
 use crate::{
   core::codec::{ClientCodec, ClientRequest, ClientResponse},
   endpoint::Endpoint,

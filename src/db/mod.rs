@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use actix::{Actor, AsyncContext, Context};
-use tracing::{debug, info};
+use tracing::info;
 
 pub mod clients;
 pub mod logs;
@@ -45,7 +45,7 @@ impl Db {
 impl Actor for Db {
   type Context = Context<Db>;
 
-  fn started(&mut self, _ctx: &mut Context<Self>) -> () {
+  fn started(&mut self, _ctx: &mut Context<Self>) {
   }
 
   fn stopped(&mut self, ctx: &mut Context<Self>) {

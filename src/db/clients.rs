@@ -41,10 +41,9 @@ pub async fn add_client(
   let query = format!(
     r#"
 INSERT INTO clients( machineid, id, name, secret )
-VALUES ( {:?}, {:?}, {:?}, {:?} )
+VALUES ( {machineid:?}, {id:?}, {name:?}, {secret:?} )
 RETURNING *
-        "#,
-    machineid, id, name, secret
+        "#
   );
   let rec = sqlx::query_as(query.as_str()).fetch_one(pool).await;
   let r: crate::model::clients::ClientModel = match rec {
@@ -70,7 +69,7 @@ pub async fn get_client(
   machineid: String,
 ) -> Result<DbClient, sqlx::Error> {
   let qry =
-    sqlx::query_as(format!("SELECT * FROM clients WHERE machineid = {:?}", machineid).as_str())
+    sqlx::query_as(format!("SELECT * FROM clients WHERE machineid = {machineid:?}").as_str())
       .fetch_one(pool)
       .await;
   match qry {

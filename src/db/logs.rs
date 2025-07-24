@@ -8,10 +8,9 @@ pub async fn add_log(
     format!(
       "
 INSERT INTO logs( client, message, time_logged )
-VALUES ( {}, {}, {} )
+VALUES ( {client}, {message}, {time_logged} )
 RETURNING id
-        ",
-      client, message, time_logged
+        "
     )
     .as_str(),
   )

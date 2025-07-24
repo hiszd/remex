@@ -16,7 +16,6 @@ const SECRET: &str = "tZs3U%hqY^o$&*y%4HcF8&RyAKevUbZnkTsrjCzPGxfare3Yn9c7shVZET
 
 struct Context {
   identity: StoredEndpoint,
-  used_existing_id: bool,
   authenticated: bool,
 }
 
@@ -42,7 +41,6 @@ async fn main() {
       let mut ctx: Context = Context {
         identity: identity.clone(),
         authenticated: false,
-        used_existing_id: false,
       };
 
       // NOTE: handle server responses
@@ -58,15 +56,15 @@ async fn main() {
               }
               // respond to the server asking us to identify
               Ok(codec::ClientResponse::Identify) => {
-                let authreq: AuthRequest;
+                let authreq: AuthRequest =
                 if ctx.identity.secret.is_some() {
                   let identity = ctx.identity.clone();
                   info!("Using Id and Secret: {}, {}", ctx.identity.machineid.clone(), ctx.identity.secret.clone().unwrap());
-                  authreq = AuthRequest::IdSecret(identity.machineid, identity.secret.unwrap());
+                  AuthRequest::IdSecret(identity.machineid, identity.secret.unwrap())
                 } else {
                   info!("Using just Secret");
-                  authreq = AuthRequest::Secret(SECRET.to_string());
-                }
+                  AuthRequest::Secret(SECRET.to_string())
+                };
                 framed.send(codec::ClientRequest::Identify(ctx.identity.clone().into(), authreq)).await.unwrap()
               }
               Ok(codec::ClientResponse::Authenticated(epnt, secret)) => {
