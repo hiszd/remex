@@ -45,6 +45,15 @@ fn encrypt(plaintext: String) -> Vec<u8> {
   encrypted_data
 }
 
+/// Enum that describes the authentication request from the client
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum AuthRequest {
+  /// Client id and secret (Id, Secret)
+  IdSecret(String, String),
+  /// Shared secret (Secret)
+  Secret(String),
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub enum DisconnectReason {
   AuthFailed,
@@ -85,8 +94,8 @@ pub enum ClientRequest {
   Command(String),
   /// Try to allow connection with the server based on the ID that was saved on the client or the
   /// secret
-  /// Identify (Id, Secret, Identity)
-  Identify(Option<String>, Option<String>, Endpoint),
+  /// Identify (Identity, Secret)
+  Identify(Endpoint, AuthRequest),
   /// Log (Message)
   Log(String),
   /// Result (Req, Result)

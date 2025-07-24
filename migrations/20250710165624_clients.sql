@@ -1,7 +1,8 @@
 -- Add migration script here
 
 CREATE TABLE clients (
-  id TEXT PRIMARY KEY NOT NULL,
+  machineid TEXT PRIMARY KEY NOT NULL,
+  id TEXT NOT NULL,
   secret TEXT NOT NULL,
   name TEXT NOT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

@@ -18,7 +18,7 @@ impl Handler<Disconnect> for RemexSession {
   fn handle(&mut self, disc: Disconnect, _: &mut Context<Self>) -> Self::Result {
     if self.identity.is_some() {
       info!("Sending disconnect to server with reason: {}", &disc.reason);
-      self.addr.do_send(server::conn::Disconnect {
+      self.server.do_send(server::conn::Disconnect {
         identity: self.identity.clone().unwrap(),
       });
     }
@@ -27,33 +27,42 @@ impl Handler<Disconnect> for RemexSession {
   }
 }
 
-/// Message for chat server communications
-///
-/// New chat session is created
+// This message should come from the Db actor.
+// It means that the client has been authenticated.
 #[derive(Message)]
 #[rtype(result = "()")]
-pub struct Identified {
+pub struct Authenticated {
   pub identity: Endpoint,
   pub secret: String,
-  pub temp: bool,
 }
 /// Handler for Identified message.
-impl Handler<Identified> for RemexSession {
+impl Handler<Authenticated> for RemexSession {
   type Result = ();
-  fn handle(&mut self, id: Identified, ctx: &mut Context<Self>) -> Self::Result {
-    if id.temp {
-      self.identified = true;
-    } else {
-      self.identified = true;
-      info!("Sending auth to peer");
-      // send message to peer
-      self.framed.write(ClientResponse::Authenticated(id.identity.clone(), id.secret.clone()));
-    }
-    self.addr.do_send(server::conn::IdChange {
-      old_identity: self.identity.clone().unwrap(),
-      new_identity: id.identity.clone(),
-      addr: ctx.address(),
-    });
+  fn handle(&mut self, id: Authenticated, ctx: &mut Context<Self>) -> Self::Result {
+    self.authenticated = true;
+    // send message to peer
+    self.framed.write(ClientResponse::Authenticated(id.identity.clone(), id.secret.clone()));
+    // send message to peer
+    // register self in Remex server. `AsyncContext::wait` register
+    // future within context, but context waits until this future resolves
+    // before processing any other events.
+    let addr = ctx.address();
+    self
+      .server
+      .send(server::conn::Connect {
+        identity: id.identity.clone(),
+        addr: addr.clone(),
+      })
+      .into_actor(self)
+      .then(|res, _, ctx| {
+        match res {
+          Ok(_) => {}
+          // something is wrong with chat server
+          _ => ctx.stop(),
+        }
+        actix::fut::ready(())
+      })
+      .wait(ctx);
     self.identity = Some(id.identity.clone());
   }
 }

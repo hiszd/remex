@@ -1,14 +1,13 @@
-use common::endpoint::Endpoint;
+use common::fs::identity::StoredEndpoint;
 //ENDPOINT
 use futures_util::{SinkExt as _, StreamExt as _};
-use gethostname::gethostname;
 use tokio::{net::TcpStream, select};
 use tracing::info;
 
 extern crate common;
 
-use common::core::codec;
-use common::fs::id;
+use common::core::codec::{self, AuthRequest};
+use common::fs::{id, identity};
 
 const IP: &str = "127.0.0.1";
 const PORT: u16 = 4269;
@@ -16,7 +15,7 @@ const PORT: u16 = 4269;
 const SECRET: &str = "tZs3U%hqY^o$&*y%4HcF8&RyAKevUbZnkTsrjCzPGxfare3Yn9c7shVZETfPDPUc8xR%N38a!TL%2$WbkFhZqmH#jvw&d3^mryPD8Y8TqHoJHwyKSTJeQB7vK7QkW#&B";
 
 struct Context {
-  identity: Endpoint,
+  identity: StoredEndpoint,
   used_existing_id: bool,
   authenticated: bool,
 }
@@ -26,7 +25,7 @@ async fn main() {
   tracing_subscriber::fmt::init();
   info!("Running client");
 
-  let machineid = common::fs::machineid::get_machineid().unwrap();
+  let identity = identity::get_identity();
 
   let addr = (IP, PORT);
 
@@ -41,11 +40,7 @@ async fn main() {
       let stream = st.unwrap();
       let mut framed = actix_codec::Framed::new(stream, codec::ServerCodec);
       let mut ctx: Context = Context {
-        identity: Endpoint {
-          id: None,
-          name: gethostname().to_string_lossy().to_string(),
-          machineid: machineid.clone(),
-        },
+        identity: identity.clone(),
         authenticated: false,
         used_existing_id: false,
       };
@@ -63,38 +58,23 @@ async fn main() {
               }
               // respond to the server asking us to identify
               Ok(codec::ClientResponse::Identify) => {
-                info!("Name sent {}, and secret {}", ctx.identity.name.clone(), SECRET.to_string());
-                let id = id::get_id_from_file();
-                match id {
-                  Ok(s) => {
-                    if s.is_some() {
-                      let i = s.unwrap();
-                      ctx.used_existing_id = true;
-                      tracing::info!("Using existing id: {}", &i);
-                      tracing::info!("Id {} used for authentication", &i);
-                      framed.send(codec::ClientRequest::Identify(Some(i.clone()), None, ctx.identity.clone())).await.unwrap();
-                    } else {
-                      tracing::info!("Secret {} used for authentication", SECRET.to_string());
-                      framed.send(codec::ClientRequest::Identify(None, Some(SECRET.to_string()), ctx.identity.clone())).await.unwrap();
-                    }
-                  },
-                  Err(e) => {
-                    tracing::error!("{}",e);
-                  }
+                let authreq: AuthRequest;
+                if ctx.identity.secret.is_some() {
+                  let identity = ctx.identity.clone();
+                  info!("Using Id and Secret: {}, {}", ctx.identity.machineid.clone(), ctx.identity.secret.clone().unwrap());
+                  authreq = AuthRequest::IdSecret(identity.machineid, identity.secret.unwrap());
+                } else {
+                  info!("Using just Secret");
+                  authreq = AuthRequest::Secret(SECRET.to_string());
                 }
+                framed.send(codec::ClientRequest::Identify(ctx.identity.clone().into(), authreq)).await.unwrap()
               }
               Ok(codec::ClientResponse::Authenticated(epnt, secret)) => {
-                info!("Correct secret, session authenticated. Id: {:?}, Name: {}, Secret: {}", &epnt.id, &epnt.name, &secret);
-                // TODO: maybe add more verification that this is the correct endpoint, or create a
-                // merge function for the Endpoint struct that merges what makes sense, but leaves
-                // the stuff that shouldn't change.
-                ctx.identity.merge(epnt.clone());
+                info!("Session authenticated. Id: {:?}, Name: {}, Secret: {}", &epnt.id, &epnt.name, &secret);
+                ctx.identity = StoredEndpoint::from(epnt.clone());
+                ctx.identity.secret = Some(secret);
                 ctx.authenticated = true;
-                if !ctx.used_existing_id {
-                  id::save_id(epnt.id.clone().unwrap()).unwrap();
-                } else {
-                  info!("Using existing id");
-                }
+                identity::save_identity(ctx.identity.clone()).unwrap();
                 framed.send(codec::ClientRequest::Message("Successfully authenticated".to_string())).await.unwrap();
               }
               Ok(codec::ClientResponse::Disconnect(reason)) => {

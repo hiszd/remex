@@ -30,7 +30,6 @@ impl SessionMap {
     identity: Endpoint,
     addr: actix::Addr<crate::session::RemexSession>,
   ) -> anyhow::Result<()> {
-    info!("Creating new session with Endpoint {:?}", &identity);
     let _ = self.sessions.insert(identity.machineid.clone(), SessionItem {
       identity,
       addr,

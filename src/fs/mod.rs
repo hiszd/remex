@@ -1,6 +1,7 @@
 use std::env;
 
 pub mod id;
+pub mod identity;
 pub mod machineid;
 
 pub fn getcdir() -> String {

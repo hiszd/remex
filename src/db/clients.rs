@@ -1,4 +1,5 @@
-pub struct Client {
+pub struct DbClient {
+  pub machineid: String,
   pub id: String,
   pub name: String,
   pub secret: String,
@@ -31,24 +32,21 @@ pub fn generate_secret() -> String {
 }
 
 pub async fn add_client(
-  pool: sqlx::SqlitePool,
+  pool: &sqlx::SqlitePool,
+  machineid: String,
   id: String,
   name: String,
   secret: String,
-) -> Result<Client, sqlx::Error> {
-  let rec = sqlx::query_as(
-    format!(
-      r#"
-INSERT INTO clients( id, name, secret )
-VALUES ( {:?}, {:?}, {:?} )
+) -> Result<DbClient, sqlx::Error> {
+  let query = format!(
+    r#"
+INSERT INTO clients( machineid, id, name, secret )
+VALUES ( {:?}, {:?}, {:?}, {:?} )
 RETURNING *
         "#,
-      id, name, secret
-    )
-    .as_str(),
-  )
-  .fetch_one(&pool)
-  .await;
+    machineid, id, name, secret
+  );
+  let rec = sqlx::query_as(query.as_str()).fetch_one(pool).await;
   let r: crate::model::clients::ClientModel = match rec {
     Ok(rc) => rc,
     Err(e) => {
@@ -57,7 +55,8 @@ RETURNING *
     }
   };
 
-  Ok(Client {
+  Ok(DbClient {
+    machineid: r.machineid,
     id: r.id,
     name: r.name,
     secret: r.secret,
@@ -66,14 +65,19 @@ RETURNING *
   })
 }
 
-pub async fn get_client(pool: &sqlx::SqlitePool, id: String) -> Result<Client, sqlx::Error> {
-  let qry = sqlx::query_as(format!("SELECT * FROM clients WHERE id = {:?}", id).as_str())
-    .fetch_one(pool)
-    .await;
+pub async fn get_client(
+  pool: &sqlx::SqlitePool,
+  machineid: String,
+) -> Result<DbClient, sqlx::Error> {
+  let qry =
+    sqlx::query_as(format!("SELECT * FROM clients WHERE machineid = {:?}", machineid).as_str())
+      .fetch_one(pool)
+      .await;
   match qry {
     Ok(rec) => {
       let r: crate::model::clients::ClientModel = rec;
-      Ok(Client {
+      Ok(DbClient {
+        machineid: r.machineid,
         id: r.id,
         name: r.name,
         secret: r.secret,
