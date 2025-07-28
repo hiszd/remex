@@ -1,7 +1,7 @@
 use std::io::Write;
 
 use machineid_rs::{Encryption, HWIDComponent, IdBuilder};
-use tracing::info;
+use tracing::{info, warn};
 
 pub fn get_machineid() -> anyhow::Result<String> {
   match get_machineid_from_file() {
@@ -11,7 +11,7 @@ pub fn get_machineid() -> anyhow::Result<String> {
     }
     Ok(None) => {
       let id = generate_machineid();
-      info!("Generated new machineid {} and saving to file", &id);
+      warn!("Generated machineid {}", &id);
       match save_machineid(id.clone()) {
         Ok(_) => Ok(id),
         Err(e) => Err(e),
@@ -48,7 +48,7 @@ fn get_machineid_from_file() -> anyhow::Result<Option<String>, std::io::Error> {
     }
     Err(e) => {
       if e.kind() == std::io::ErrorKind::NotFound {
-        tracing::error!("id file not found");
+        tracing::warn!("machineid file not found");
         return Ok(None);
       }
       tracing::error!("could not get machineid: {}", e);
@@ -74,7 +74,7 @@ fn save_machineid(id: String) -> anyhow::Result<()> {
       }
     }
     Ok(false) => {
-      tracing::info!("Creating new machineid file");
+      tracing::warn!("Creating new machineid file");
       if std::fs::exists(cdir.clone()).unwrap() {
         let mut fle = match std::fs::File::create(flnm.clone()) {
           Err(e) => {
@@ -106,8 +106,6 @@ fn save_machineid(id: String) -> anyhow::Result<()> {
         }
       }
     }
-    Err(e) => {
-      Err(anyhow::anyhow!("{}", e))
-    }
+    Err(e) => Err(anyhow::anyhow!("{}", e)),
   }
 }

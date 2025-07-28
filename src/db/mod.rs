@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use actix::{Actor, AsyncContext, Context};
-use tracing::info;
+use tracing::{info, warn};
 
 pub mod clients;
 pub mod logs;
@@ -12,7 +12,7 @@ pub struct Db {
 }
 
 pub async fn migrate(pool: sqlx::SqlitePool) {
-  info!("Migrating db");
+  warn!("Migrating db");
 
   let crate_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
 
@@ -35,7 +35,9 @@ impl Db {
   }
 
   pub async fn new_log(&self, client: &str, message: &str, time_logged: chrono::NaiveDateTime) {
-    logs::add_log(&self.pool.clone(), client, message, time_logged).await.unwrap();
+    logs::add_log(&self.pool.clone(), client, message, time_logged)
+      .await
+      .unwrap();
   }
   pub async fn push_cmd() {
     // TODO: implement command push

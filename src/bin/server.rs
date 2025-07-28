@@ -17,6 +17,8 @@ const ADDRESS: &str = "127.0.0.1:4269";
 
 #[actix_web::main]
 async fn main() {
+    // TODO: find a way to log this to file for certain severity levels as well as log to terminal
+    // when over a certain severity.
   tracing_subscriber::fmt::init();
 
   let filename = "main.db";

@@ -37,7 +37,9 @@ fn encrypt(plaintext: String) -> Vec<u8> {
   let key = aes_gcm::Key::<Aes256Gcm>::from_slice(KEY.as_bytes());
   let nonce = Aes256Gcm::generate_nonce(&mut aes_gcm::aead::OsRng);
   let cipher = Aes256Gcm::new(key);
-  let ciphered_data = cipher.encrypt(&nonce, plaintext.as_bytes()).expect("failed to encrypt");
+  let ciphered_data = cipher
+    .encrypt(&nonce, plaintext.as_bytes())
+    .expect("failed to encrypt");
   // combining nonce and encrypted data together
   // for storage purpose
   let mut encrypted_data: Vec<u8> = nonce.to_vec();
@@ -106,6 +108,13 @@ pub enum ClientRequest {
   Ping,
 }
 
+#[derive(Serialize, Deserialize, Debug, Message)]
+#[rtype(result = "()")]
+#[serde(tag = "cmd", content = "data")]
+pub enum ClientToServer {
+  Conn(ClientRequest),
+}
+
 /// Server response - respond to client requests
 #[derive(Serialize, Deserialize, Debug, Message)]
 #[rtype(result = "()")]
@@ -128,11 +137,19 @@ pub enum ClientResponse {
   Ping,
 }
 
+///
+#[derive(Serialize, Deserialize, Debug, Message)]
+#[rtype(result = "()")]
+#[serde(tag = "cmd", content = "data")]
+pub enum ServerToClient {
+  Conn(ClientResponse),
+}
+
 /// Codec for Client -> Server transport
 pub struct ClientCodec;
 
 impl Decoder for ClientCodec {
-  type Item = ClientRequest;
+  type Item = ClientToServer;
   type Error = io::Error;
 
   fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -148,7 +165,7 @@ impl Decoder for ClientCodec {
       let buf = src.split_to(size);
       let dcpt = decrypt(buf.to_vec());
       match dcpt {
-        Ok(d) => Ok(Some(json::from_slice::<ClientRequest>(d.as_bytes())?)),
+        Ok(d) => Ok(Some(json::from_slice::<ClientToServer>(d.as_bytes())?)),
         Err(e) => {
           if e == "Failed to decrypt" {
             error!("Failed to decrypt, maybe the key is wrong");
@@ -162,10 +179,10 @@ impl Decoder for ClientCodec {
   }
 }
 
-impl Encoder<ClientResponse> for ClientCodec {
+impl Encoder<ServerToClient> for ClientCodec {
   type Error = io::Error;
 
-  fn encode(&mut self, msg: ClientResponse, dst: &mut BytesMut) -> Result<(), Self::Error> {
+  fn encode(&mut self, msg: ServerToClient, dst: &mut BytesMut) -> Result<(), Self::Error> {
     let msg = json::to_string(&msg).unwrap();
     let m = encrypt(msg);
     let msg_ref: &[u8] = m.as_slice();
@@ -182,7 +199,7 @@ impl Encoder<ClientResponse> for ClientCodec {
 pub struct ServerCodec;
 
 impl Decoder for ServerCodec {
-  type Item = ClientResponse;
+  type Item = ServerToClient;
   type Error = io::Error;
 
   fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -198,7 +215,7 @@ impl Decoder for ServerCodec {
       let buf = src.split_to(size);
       let dcpt = decrypt(buf.to_vec());
       match dcpt {
-        Ok(d) => Ok(Some(json::from_slice::<ClientResponse>(d.as_bytes())?)),
+        Ok(d) => Ok(Some(json::from_slice::<ServerToClient>(d.as_bytes())?)),
         Err(e) => {
           if e == "Failed to decrypt" {
             error!("Failed to decrypt, maybe the key is wrong");
@@ -212,10 +229,10 @@ impl Decoder for ServerCodec {
   }
 }
 
-impl Encoder<ClientRequest> for ServerCodec {
+impl Encoder<ClientToServer> for ServerCodec {
   type Error = io::Error;
 
-  fn encode(&mut self, msg: ClientRequest, dst: &mut BytesMut) -> Result<(), Self::Error> {
+  fn encode(&mut self, msg: ClientToServer, dst: &mut BytesMut) -> Result<(), Self::Error> {
     let msg = json::to_string(&msg).unwrap();
     let m = encrypt(msg);
     let msg_ref: &[u8] = m.as_slice();

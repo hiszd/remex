@@ -76,7 +76,7 @@ pub fn remove_id() -> anyhow::Result<(), std::io::Error> {
   let cdir = super::getcdir();
   match std::fs::remove_file(cdir + "id") {
     Ok(_s) => {
-      tracing::info!("removed id file");
+      tracing::warn!("removed id file");
       Ok(())
     }
     Err(e) => {

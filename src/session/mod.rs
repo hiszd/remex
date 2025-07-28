@@ -13,14 +13,14 @@ use tokio::{
   net::{TcpListener, TcpStream},
 };
 use tokio_util::codec::FramedRead;
-use tracing::info;
+use tracing::{error, info};
 
-use crate::{messages::db, server::Server};
 use crate::{
   core::codec::{ClientCodec, ClientRequest, ClientResponse},
   endpoint::Endpoint,
 };
 use crate::{db::Db, messages::server};
+use crate::{messages::db, server::Server};
 
 /// `RemexSession` actor is responsible for tcp peer communications.
 pub struct RemexSession {
@@ -115,7 +115,7 @@ impl RemexSession {
       // check client heartbeats
       if Instant::now().duration_since(act.hb) > Duration::new(10, 0) {
         // heartbeat timed out
-        info!("Client heartbeat failed, disconnecting!");
+        error!("Client heartbeat failed, disconnecting!");
 
         // notify Remex server
         if act.identity.is_some() {

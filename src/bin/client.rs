@@ -2,7 +2,7 @@ use common::fs::identity::StoredEndpoint;
 //ENDPOINT
 use futures_util::{SinkExt as _, StreamExt as _};
 use tokio::{net::TcpStream, select};
-use tracing::info;
+use tracing::{error, info};
 
 extern crate common;
 
@@ -65,7 +65,11 @@ async fn main() {
                   info!("Using just Secret");
                   AuthRequest::Secret(SECRET.to_string())
                 };
-                framed.send(codec::ClientRequest::Identify(ctx.identity.clone().into(), authreq)).await.unwrap()
+                framed.send(
+                  codec::ClientRequest::Identify(ctx.identity.clone().into(), authreq)
+                  )
+                  .await
+                  .unwrap();
               }
               Ok(codec::ClientResponse::Authenticated(epnt, secret)) => {
                 info!("Session authenticated. Id: {:?}, Name: {}, Secret: {}", &epnt.id, &epnt.name, &secret);
@@ -73,10 +77,14 @@ async fn main() {
                 ctx.identity.secret = Some(secret);
                 ctx.authenticated = true;
                 identity::save_identity(ctx.identity.clone()).unwrap();
-                framed.send(codec::ClientRequest::Message("Successfully authenticated".to_string())).await.unwrap();
+                framed.send(
+                  codec::ClientRequest::Message("Successfully authenticated".to_string())
+                  )
+                  .await
+                  .unwrap();
               }
               Ok(codec::ClientResponse::Disconnect(reason)) => {
-                info!("Disconnected: {}", reason.to_string());
+                error!("Disconnected: {}", reason.to_string());
                 match reason {
                   codec::DisconnectReason::InvalidClientId => {
                     // if the client id is invalid, then remove it so you can get a new
@@ -91,7 +99,13 @@ async fn main() {
               }
 
               // respond to pings with a "pong"
-              Ok(codec::ClientResponse::Ping) => { framed.send(codec::ClientRequest::Ping).await.unwrap(); },
+              Ok(codec::ClientResponse::Ping) => {
+                framed.send(
+                  codec::ClientRequest::Ping
+                  )
+                  .await
+                  .unwrap();
+                },
 
               _ => { eprintln!("{msg:?}"); }
             }

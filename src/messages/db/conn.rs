@@ -1,6 +1,6 @@
 use actix::{Addr, AsyncContext};
 use actix::{Context, Handler, Message};
-use tracing::info;
+use tracing::{error, info, warn};
 
 use crate::core::codec::AuthRequest;
 use crate::db;
@@ -35,40 +35,42 @@ impl Handler<ClientAuth> for db::Db {
                   secret: dbclient.secret.clone(),
                 });
               }
-              Err(e) => if let sqlx::Error::RowNotFound = e {
-                info!("Valid secret, but client not found. Creating new one now");
-                match db::clients::add_client(
-                  &pool,
-                  m.identity.machineid,
-                  db::clients::generate_id(pool.clone()).await.unwrap(),
-                  m.identity.name.clone(),
-                  db::clients::generate_secret(),
-                )
-                .await
-                {
-                  Ok(dbclient) => {
-                    tracing::info!(
-                      "Client with id: {}, and secret: {} connected",
-                      &dbclient.id,
-                      &dbclient.secret
-                    );
-                    m.session.do_send(super::session::conn::Authenticated {
-                      identity: Endpoint {
-                        id: Some(dbclient.id.clone()),
-                        name: dbclient.name.clone(),
-                        machineid: dbclient.machineid.clone(),
-                      },
-                      secret: dbclient.secret.clone(),
-                    });
-                  }
-                  Err(e) => {
-                    info!("Error creating client: {}", e);
-                    m.session.do_send(super::session::conn::Disconnect {
-                      reason: super::DisconnectReason::InvalidClientId,
-                    });
+              Err(e) => {
+                if let sqlx::Error::RowNotFound = e {
+                  warn!("Valid secret, but client not found. Creating new one now");
+                  match db::clients::add_client(
+                    &pool,
+                    m.identity.machineid,
+                    db::clients::generate_id(pool.clone()).await.unwrap(),
+                    m.identity.name.clone(),
+                    db::clients::generate_secret(),
+                  )
+                  .await
+                  {
+                    Ok(dbclient) => {
+                      tracing::info!(
+                        "Client with id: {}, and secret: {} connected",
+                        &dbclient.id,
+                        &dbclient.secret
+                      );
+                      m.session.do_send(super::session::conn::Authenticated {
+                        identity: Endpoint {
+                          id: Some(dbclient.id.clone()),
+                          name: dbclient.name.clone(),
+                          machineid: dbclient.machineid.clone(),
+                        },
+                        secret: dbclient.secret.clone(),
+                      });
+                    }
+                    Err(e) => {
+                      error!("Error creating client: {}", e);
+                      m.session.do_send(super::session::conn::Disconnect {
+                        reason: super::DisconnectReason::InvalidClientId,
+                      });
+                    }
                   }
                 }
-              },
+              }
             }
           }
         };
@@ -97,7 +99,7 @@ impl Handler<ClientAuth> for db::Db {
               }
             }
             Err(e) => {
-              info!("Invalid client id and secret: {}", e);
+              error!("Invalid client id and secret: {}", e);
               m.session.do_send(super::session::conn::Disconnect {
                 reason: super::DisconnectReason::InvalidClientId,
               });
@@ -110,4 +112,3 @@ impl Handler<ClientAuth> for db::Db {
     }
   }
 }
-
