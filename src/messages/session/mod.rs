@@ -2,10 +2,11 @@ use actix::prelude::*;
 use tracing::info;
 
 use super::server;
-use crate::core::codec::ClientResponse;
+use crate::core::codec::s2c;
 use crate::session::RemexSession;
 
 pub mod conn;
+pub mod exchange;
 
 /// Message from client to log on host
 #[derive(Message)]
@@ -41,6 +42,8 @@ impl Handler<Command> for RemexSession {
       return;
     }
     // send message to peer
-    self.framed.write(ClientResponse::Command(cmd.cmd));
+    self
+      .framed
+      .write(s2c::S2C::Conn(s2c::Conn::Command(cmd.cmd)));
   }
 }

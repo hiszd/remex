@@ -1,26 +1,38 @@
+use thiserror::Error;
+
 pub struct DbClient {
   pub machineid: String,
   pub id: String,
   pub name: String,
   pub secret: String,
-  pub created_at: chrono::DateTime<chrono::Utc>,
-  pub updated_at: chrono::DateTime<chrono::Utc>,
+  pub created_at: chrono::NaiveDateTime,
+  pub updated_at: chrono::NaiveDateTime,
 }
 
-pub async fn generate_id(pool: sqlx::SqlitePool) -> Result<String, anyhow::Error> {
-  let qry = sqlx::query_as("SELECT id, name FROM clients ORDER BY id DESC").fetch_all(&pool).await;
+#[derive(Error, Debug)]
+pub enum Error {
+  #[error("SQLX error: {0}")]
+  Sqlx(sqlx::Error),
+  #[error("Client SQLX Error: {0}")]
+  Other(String),
+}
+
+pub async fn generate_id(pool: sqlx::PgPool) -> Result<String, Error> {
+  let qry = sqlx::query_as("SELECT id, name FROM clients ORDER BY id DESC")
+    .fetch_all(&pool)
+    .await;
   match qry {
     Ok(rec) => {
       let r: Vec<(String, String)> = rec;
       let id = uuid::Uuid::new_v4().to_string();
       match r.iter().find(|c| c.0 == id) {
-        Some(_) => Err(anyhow::anyhow!("id already exists")),
+        Some(_) => Err(Error::Other(format!("id already exists"))),
         None => Ok(id),
       }
     }
     Err(e) => {
       tracing::error!("clients 21 - db error: {}", e);
-      Err(anyhow::anyhow!(e))
+      Err(Error::Sqlx(e))
     }
   }
 }
@@ -32,16 +44,16 @@ pub fn generate_secret() -> String {
 }
 
 pub async fn add_client(
-  pool: &sqlx::SqlitePool,
+  pool: &sqlx::PgPool,
   machineid: String,
   id: String,
   name: String,
   secret: String,
-) -> Result<DbClient, sqlx::Error> {
+) -> Result<DbClient, Error> {
   let query = format!(
     r#"
 INSERT INTO clients( machineid, id, name, secret )
-VALUES ( {machineid:?}, {id:?}, {name:?}, {secret:?} )
+VALUES ( '{machineid}', '{id}', '{name}', '{secret}' )
 RETURNING *
         "#
   );
@@ -50,7 +62,7 @@ RETURNING *
     Ok(rc) => rc,
     Err(e) => {
       tracing::error!("clients 50 - db error: {}", e);
-      return Err(e);
+      return Err(Error::Sqlx(e));
     }
   };
 
@@ -64,14 +76,9 @@ RETURNING *
   })
 }
 
-pub async fn get_client(
-  pool: &sqlx::SqlitePool,
-  machineid: String,
-) -> Result<DbClient, sqlx::Error> {
-  let qry =
-    sqlx::query_as(format!("SELECT * FROM clients WHERE machineid = {machineid:?}").as_str())
-      .fetch_one(pool)
-      .await;
+pub async fn get_client(pool: &sqlx::PgPool, machineid: String) -> Result<DbClient, Error> {
+  let txt = format!("SELECT * FROM clients WHERE machineid = '{machineid}'");
+  let qry = sqlx::query_as(txt.as_str()).fetch_one(pool).await;
   match qry {
     Ok(rec) => {
       let r: crate::model::clients::ClientModel = rec;
@@ -86,12 +93,12 @@ pub async fn get_client(
     }
     Err(e) => match e {
       sqlx::Error::RowNotFound => {
-        tracing::error!("client not found");
-        Err(e)
+        tracing::warn!("client not found");
+        Err(Error::Sqlx(e))
       }
       _ => {
-        tracing::error!("clients 89 - db error: {}", e);
-        Err(e)
+        tracing::error!("clients 89 - db error: {:?}", e);
+        Err(Error::Sqlx(e))
       }
     },
   }

@@ -1,9 +1,9 @@
 pub async fn add_log(
-  pool: &sqlx::SqlitePool,
+  pool: &sqlx::PgPool,
   client: &str,
   message: &str,
   time_logged: chrono::NaiveDateTime,
-) -> anyhow::Result<String> {
+) -> Result<String, sqlx::Error> {
   let rec: crate::model::logs::LogModel = sqlx::query_as(
     format!(
       "

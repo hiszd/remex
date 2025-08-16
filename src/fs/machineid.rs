@@ -1,9 +1,19 @@
 use std::io::Write;
 
 use machineid_rs::{Encryption, HWIDComponent, IdBuilder};
+use thiserror::Error;
 use tracing::{info, warn};
 
-pub fn get_machineid() -> anyhow::Result<String> {
+// FIXME: use polyerror
+#[derive(Error, Debug)]
+pub enum Error {
+  #[error("IO error: {0}")]
+  Io(std::io::Error),
+  #[error("MachineId Error: {0}")]
+  Other(String),
+}
+
+pub fn get_machineid() -> Result<String, Error> {
   match get_machineid_from_file() {
     Ok(Some(id)) => {
       info!("Using existing machineid {} from file", &id);
@@ -17,7 +27,7 @@ pub fn get_machineid() -> anyhow::Result<String> {
         Err(e) => Err(e),
       }
     }
-    Err(e) => Err(e.into()),
+    Err(e) => Err(e),
   }
 }
 
@@ -33,12 +43,12 @@ fn generate_machineid() -> String {
 
   // Build the unique ID
   match builder.build("") {
-    Ok(id) => id,
+    Ok(id) => id.split_at(60).0.to_string(),
     Err(e) => panic!("Failed to build machine ID: {e}"),
   }
 }
 
-fn get_machineid_from_file() -> anyhow::Result<Option<String>, std::io::Error> {
+fn get_machineid_from_file() -> Result<Option<String>, Error> {
   let cdir = super::getcdir();
   tracing::info!("Reading ID from: {}id", &cdir);
   match std::fs::read_to_string(cdir + "machineid") {
@@ -52,23 +62,24 @@ fn get_machineid_from_file() -> anyhow::Result<Option<String>, std::io::Error> {
         return Ok(None);
       }
       tracing::error!("could not get machineid: {}", e);
-      Err(e)
+      Err(Error::Io(e))
     }
   }
 }
 
-fn save_machineid(id: String) -> anyhow::Result<()> {
+// TODO: Use polyerror and thiserror
+fn save_machineid(id: String) -> Result<(), Error> {
   let cdir = super::getcdir();
   let flnm = cdir.clone() + "machineid";
   match std::fs::exists(flnm.clone()) {
     Ok(true) => {
       tracing::info!("Updating existing machineid file");
       if let Err(e) = std::fs::remove_file(flnm.clone()) {
-        anyhow::bail!("could not remove machineid file: {}", e);
+        return Err(Error::Other(format!("could not remove machineid file: {}", e)));
       };
       match std::fs::write(flnm.clone(), id.clone()) {
         Err(e) => {
-          anyhow::bail!("could not write machineid file: {}", e);
+          return Err(Error::Other(format!("could not write machineid file: {}", e)));
         }
         _ => Ok(()),
       }
@@ -78,34 +89,34 @@ fn save_machineid(id: String) -> anyhow::Result<()> {
       if std::fs::exists(cdir.clone()).unwrap() {
         let mut fle = match std::fs::File::create(flnm.clone()) {
           Err(e) => {
-            anyhow::bail!("Could not create machineid file: {}", e);
+            return Err(Error::Other(format!("Could not create machineid file: {}", e)));
           }
           Ok(f) => f,
         };
         match fle.write(id.clone().as_bytes()) {
           Err(e) => {
-            anyhow::bail!("could not write machineid file: {}", e);
+            return Err(Error::Other(format!("could not write machineid file: {}", e)));
           }
           _ => Ok(()),
         }
       } else {
         if let Err(e) = std::fs::create_dir_all(cdir.clone()) {
-          anyhow::bail!("could not create machineid dir: {}", e);
+          return Err(Error::Other(format!("could not create machineid dir: {}", e)));
         }
         let mut fle = match std::fs::File::create(flnm.clone()) {
           Err(e) => {
-            anyhow::bail!("Could not create machineid file: {}", e);
+            return Err(Error::Other(format!("Could not create machineid file: {}", e)));
           }
           Ok(f) => f,
         };
         match fle.write(id.clone().as_bytes()) {
           Err(e) => {
-            anyhow::bail!("could not write machineid file: {}", e);
+            return Err(Error::Other(format!("could not write machineid file: {}", e)));
           }
           _ => Ok(()),
         }
       }
     }
-    Err(e) => Err(anyhow::anyhow!("{}", e)),
+    Err(e) => Err(Error::Io(e)),
   }
 }

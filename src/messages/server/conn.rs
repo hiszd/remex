@@ -17,7 +17,7 @@ pub struct Connect {
 impl Handler<Connect> for Server {
   type Result = ();
   fn handle(&mut self, msg: Connect, _ctx: &mut Context<Self>) -> Self::Result {
-    self.sessions.insert(msg.identity.clone(), msg.addr.clone()).unwrap();
+    self.sessions.insert(msg.identity.clone(), msg.addr.clone());
   }
 }
 
@@ -31,7 +31,7 @@ pub struct Disconnect {
 impl Handler<Disconnect> for Server {
   type Result = ();
   fn handle(&mut self, msg: Disconnect, _: &mut Context<Self>) {
-    info!("Session {:?} disconnected", &msg.identity);
+    info!("Session {:?} disconnected", &msg.identity.name);
     // remove address
     self.sessions.remove(msg.identity.id.clone().unwrap());
   }

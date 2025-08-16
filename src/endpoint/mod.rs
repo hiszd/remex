@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+pub mod executor;
+pub mod messagehandler;
+
 /// Identifying data for an endpoint
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Endpoint {
@@ -21,4 +24,11 @@ impl Endpoint {
       machineid: self.machineid.clone(),
     }
   }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct Context {
+  pub identity: crate::fs::identity::StoredEndpoint,
+  pub connected: bool,
+  pub executors: Vec<executor::Executor>,
 }

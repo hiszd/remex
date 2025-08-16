@@ -1,10 +1,10 @@
 -- Add migration script here
 
-CREATE TABLE clients (
-  machineid TEXT PRIMARY KEY NOT NULL,
-  id TEXT NOT NULL,
-  secret TEXT NOT NULL,
+CREATE TABLE executors (
+  id TEXT PRIMARY KEY  NOT NULL,
   name TEXT NOT NULL,
+  command TEXT NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+

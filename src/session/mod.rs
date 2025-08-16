@@ -16,7 +16,7 @@ use tokio_util::codec::FramedRead;
 use tracing::{error, info};
 
 use crate::{
-  core::codec::{ClientCodec, ClientRequest, ClientResponse},
+  core::codec::{c2s, s2c, ClientCodec},
   endpoint::Endpoint,
 };
 use crate::{db::Db, messages::server};
@@ -37,7 +37,7 @@ pub struct RemexSession {
   /// connection.
   pub hb: Instant,
   /// Framed wrapper
-  pub framed: actix::io::FramedWrite<ClientResponse, WriteHalf<TcpStream>, ClientCodec>,
+  pub framed: actix::io::FramedWrite<s2c::S2C, WriteHalf<TcpStream>, ClientCodec>,
 }
 
 impl Actor for RemexSession {
@@ -49,7 +49,7 @@ impl Actor for RemexSession {
     // we'll start heartbeat process on session start.
     self.hb(ctx);
 
-    self.framed.write(ClientResponse::Identify);
+    self.framed.write(s2c::S2C::Conn(s2c::Conn::Identify));
   }
 
   fn stopping(&mut self, _: &mut Self::Context) -> Running {
@@ -68,22 +68,33 @@ impl actix::io::WriteHandler<io::Error> for RemexSession {
 
 // NOTE: handle client requests
 /// To use `Framed` we have to define Io type and Codec
-impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
+impl StreamHandler<Result<c2s::C2S, io::Error>> for RemexSession {
   /// This is main event loop for client requests
-  fn handle(&mut self, msg: Result<ClientRequest, io::Error>, ctx: &mut Context<Self>) {
-    match msg {
-      Ok(ClientRequest::Identify(epnt, authreq)) => {
-        self.db.do_send(db::conn::ClientAuth {
-          identity: epnt.clone(),
-          authreq: authreq.clone(),
-          session: ctx.address(),
-        });
-      }
-      Ok(ClientRequest::Ping) => self.hb = Instant::now(),
-      Ok(ClientRequest::Message(msg)) => {
-        let identity = self.identity.clone().unwrap();
-        info!("Client {} sent message: {}", &identity.name, &msg);
-      }
+  fn handle(&mut self, m: Result<c2s::C2S, io::Error>, ctx: &mut Context<Self>) {
+    match m {
+      Ok(c2s::C2S::Conn(msg)) => match msg {
+        c2s::Conn::Identify(epnt, authreq) => {
+          self.db.do_send(db::conn::ClientAuth {
+            identity: epnt.clone(),
+            authreq: authreq.clone(),
+            session: ctx.address(),
+          });
+        }
+        c2s::Conn::Ping => self.hb = Instant::now(),
+        c2s::Conn::Message(msg) => {
+          let identity = self.identity.clone().unwrap();
+          info!("Client {} sent message: {}", &identity.name, &msg);
+        }
+        _ => ctx.stop(),
+      },
+      Ok(c2s::C2S::Exchange(msg)) => match msg {
+        c2s::Exchange::SendConfiguration => {
+          self.db.do_send(db::exchange::SendConfiguration {
+            identity: self.identity.clone().unwrap(),
+            session: ctx.address(),
+          });
+        }
+      },
       _ => ctx.stop(),
     }
   }
@@ -94,7 +105,7 @@ impl RemexSession {
   pub fn new(
     server: Addr<Server>,
     db: Addr<Db>,
-    framed: actix::io::FramedWrite<ClientResponse, WriteHalf<TcpStream>, ClientCodec>,
+    framed: actix::io::FramedWrite<s2c::S2C, WriteHalf<TcpStream>, ClientCodec>,
   ) -> RemexSession {
     RemexSession {
       identity: None,
@@ -128,7 +139,7 @@ impl RemexSession {
         ctx.stop();
       }
 
-      act.framed.write(ClientResponse::Ping);
+      act.framed.write(s2c::S2C::Conn(s2c::Conn::Ping));
       // if we can not send message to sink, sink is closed (disconnected)
     });
   }

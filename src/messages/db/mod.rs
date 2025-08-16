@@ -1,6 +1,7 @@
 use actix::{Context, Handler, Message};
 
 pub mod conn;
+pub mod exchange;
 
 use super::session;
 use crate::core::codec::DisconnectReason;

@@ -1,6 +1,6 @@
 use actix::{Addr, AsyncContext};
 use actix::{Context, Handler, Message};
-use tracing::{error, info, warn};
+use tracing::{error, warn};
 
 use crate::core::codec::AuthRequest;
 use crate::db;
@@ -36,7 +36,7 @@ impl Handler<ClientAuth> for db::Db {
                 });
               }
               Err(e) => {
-                if let sqlx::Error::RowNotFound = e {
+                if let db::clients::Error::Sqlx(sqlx::Error::RowNotFound) = e {
                   warn!("Valid secret, but client not found. Creating new one now");
                   match db::clients::add_client(
                     &pool,

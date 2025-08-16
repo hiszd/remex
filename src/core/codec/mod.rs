@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 use std::io;
 
-use actix::prelude::*;
 use actix_codec::{Decoder, Encoder};
 use actix_web::web::{BufMut, BytesMut};
 use aes_gcm::aead::Aead;
@@ -11,7 +10,8 @@ use serde::{Deserialize, Serialize};
 use serde_json as json;
 use tracing::error;
 
-use crate::endpoint::Endpoint;
+pub mod c2s;
+pub mod s2c;
 
 // const KEY: &str = "tZs3U%hqY^o$&*y%4HcF8&RyAKevUbZnkTsrjCzPGxfare3Yn9c7shVZETfPDPUc8xR%N38a!TL%2$WbkFhZqmH#jvw&d3^mryPD8Y8TqHoJHwyKSTJeQB7vK7QkW#&B";
 const KEY: &str = "tZs3U%hqY^o$&*y%4HcF8&RyAKevUbZn";
@@ -87,69 +87,11 @@ impl std::fmt::Display for DisconnectReason {
   }
 }
 
-/// Client request - come from client
-#[derive(Serialize, Deserialize, Debug, Message)]
-#[rtype(result = "()")]
-#[serde(tag = "cmd", content = "data")]
-pub enum ClientRequest {
-  /// Command (Command)
-  Command(String),
-  /// Try to allow connection with the server based on the ID that was saved on the client or the
-  /// secret
-  /// Identify (Identity, Secret)
-  Identify(Endpoint, AuthRequest),
-  /// Log (Message)
-  Log(String),
-  /// Result (Req, Result)
-  Result(Box<ClientRequest>, Result<String, String>),
-  /// Message (Message)
-  Message(String),
-  /// Ping
-  Ping,
-}
-
-#[derive(Serialize, Deserialize, Debug, Message)]
-#[rtype(result = "()")]
-#[serde(tag = "cmd", content = "data")]
-pub enum ClientToServer {
-  Conn(ClientRequest),
-}
-
-/// Server response - respond to client requests
-#[derive(Serialize, Deserialize, Debug, Message)]
-#[rtype(result = "()")]
-#[serde(tag = "cmd", content = "data")]
-pub enum ClientResponse {
-  /// Command (Command)
-  Command(String),
-  /// Message (Message)
-  Message(String),
-  /// Request the client to identify itself using a saved ID, or using a secret
-  /// Identify
-  Identify,
-  /// Authenticated (Endpoint, Secret)
-  Authenticated(Endpoint, String),
-  /// Result (Req, Result)
-  Result(Box<ClientResponse>, Result<String, String>),
-  /// Disconnect (Reason)
-  Disconnect(DisconnectReason),
-  /// Ping
-  Ping,
-}
-
-///
-#[derive(Serialize, Deserialize, Debug, Message)]
-#[rtype(result = "()")]
-#[serde(tag = "cmd", content = "data")]
-pub enum ServerToClient {
-  Conn(ClientResponse),
-}
-
 /// Codec for Client -> Server transport
 pub struct ClientCodec;
 
 impl Decoder for ClientCodec {
-  type Item = ClientToServer;
+  type Item = c2s::C2S;
   type Error = io::Error;
 
   fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -165,7 +107,7 @@ impl Decoder for ClientCodec {
       let buf = src.split_to(size);
       let dcpt = decrypt(buf.to_vec());
       match dcpt {
-        Ok(d) => Ok(Some(json::from_slice::<ClientToServer>(d.as_bytes())?)),
+        Ok(d) => Ok(Some(json::from_slice::<c2s::C2S>(d.as_bytes())?)),
         Err(e) => {
           if e == "Failed to decrypt" {
             error!("Failed to decrypt, maybe the key is wrong");
@@ -179,10 +121,10 @@ impl Decoder for ClientCodec {
   }
 }
 
-impl Encoder<ServerToClient> for ClientCodec {
+impl Encoder<s2c::S2C> for ClientCodec {
   type Error = io::Error;
 
-  fn encode(&mut self, msg: ServerToClient, dst: &mut BytesMut) -> Result<(), Self::Error> {
+  fn encode(&mut self, msg: s2c::S2C, dst: &mut BytesMut) -> Result<(), Self::Error> {
     let msg = json::to_string(&msg).unwrap();
     let m = encrypt(msg);
     let msg_ref: &[u8] = m.as_slice();
@@ -199,7 +141,7 @@ impl Encoder<ServerToClient> for ClientCodec {
 pub struct ServerCodec;
 
 impl Decoder for ServerCodec {
-  type Item = ServerToClient;
+  type Item = s2c::S2C;
   type Error = io::Error;
 
   fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -215,7 +157,7 @@ impl Decoder for ServerCodec {
       let buf = src.split_to(size);
       let dcpt = decrypt(buf.to_vec());
       match dcpt {
-        Ok(d) => Ok(Some(json::from_slice::<ServerToClient>(d.as_bytes())?)),
+        Ok(d) => Ok(Some(json::from_slice::<s2c::S2C>(d.as_bytes())?)),
         Err(e) => {
           if e == "Failed to decrypt" {
             error!("Failed to decrypt, maybe the key is wrong");
@@ -229,10 +171,10 @@ impl Decoder for ServerCodec {
   }
 }
 
-impl Encoder<ClientToServer> for ServerCodec {
+impl Encoder<c2s::C2S> for ServerCodec {
   type Error = io::Error;
 
-  fn encode(&mut self, msg: ClientToServer, dst: &mut BytesMut) -> Result<(), Self::Error> {
+  fn encode(&mut self, msg: c2s::C2S, dst: &mut BytesMut) -> Result<(), Self::Error> {
     let msg = json::to_string(&msg).unwrap();
     let m = encrypt(msg);
     let msg_ref: &[u8] = m.as_slice();

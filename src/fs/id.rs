@@ -1,17 +1,28 @@
 use std::io::Write;
 
-pub fn save_id(id: String) -> anyhow::Result<()> {
+use thiserror::Error;
+
+// FIXME: use polyerror
+#[derive(Error, Debug)]
+pub enum Error {
+  #[error("IO error: {0}")]
+  Io(std::io::Error),
+  #[error("Id Error: {0}")]
+  Other(String),
+}
+
+pub fn save_id(id: String) -> Result<(), Error> {
   let cdir = super::getcdir();
   let flnm = cdir.clone() + "id";
   match std::fs::exists(flnm.clone()) {
     Ok(true) => {
       tracing::info!("Updating existing id file");
       if let Err(e) = std::fs::remove_file(flnm.clone()) {
-        anyhow::bail!("could not remove id file: {}", e);
+        return Err(Error::Other(format!("could not remove id file: {}", e)));
       };
       match std::fs::write(flnm.clone(), id.clone()) {
         Err(e) => {
-          anyhow::bail!("could not write id file: {}", e);
+          return Err(Error::Other(format!("could not write id file: {}", e)));
         }
         _ => Ok(()),
       }
@@ -21,39 +32,39 @@ pub fn save_id(id: String) -> anyhow::Result<()> {
       if std::fs::exists(cdir.clone()).unwrap() {
         let mut fle = match std::fs::File::create(flnm.clone()) {
           Err(e) => {
-            anyhow::bail!("Could not create id file: {}", e);
+            return Err(Error::Other(format!("Could not create id file: {}", e)));
           }
           Ok(f) => f,
         };
         match fle.write(id.clone().as_bytes()) {
           Err(e) => {
-            anyhow::bail!("could not write id file: {}", e);
+            return Err(Error::Other(format!("could not write id file: {}", e)));
           }
           _ => Ok(()),
         }
       } else {
         if let Err(e) = std::fs::create_dir_all(cdir.clone()) {
-          anyhow::bail!("could not create id dir: {}", e);
+          return Err(Error::Other(format!("could not create id dir: {}", e)));
         }
         let mut fle = match std::fs::File::create(flnm.clone()) {
           Err(e) => {
-            anyhow::bail!("Could not create id file: {}", e);
+            return Err(Error::Other(format!("Could not create id file: {}", e)));
           }
           Ok(f) => f,
         };
         match fle.write(id.clone().as_bytes()) {
           Err(e) => {
-            anyhow::bail!("could not write id file: {}", e);
+            return Err(Error::Other(format!("could not write id file: {}", e)));
           }
           _ => Ok(()),
         }
       }
     }
-    Err(e) => Err(anyhow::anyhow!("{}", e)),
+    Err(e) => return Err(Error::Io(e)),
   }
 }
 
-pub fn get_id_from_file() -> anyhow::Result<Option<String>, std::io::Error> {
+pub fn get_id_from_file() -> Result<Option<String>, std::io::Error> {
   let cdir = super::getcdir();
   tracing::info!("Reading ID from: {}id", &cdir);
   match std::fs::read_to_string(cdir + "id") {
@@ -72,7 +83,7 @@ pub fn get_id_from_file() -> anyhow::Result<Option<String>, std::io::Error> {
   }
 }
 
-pub fn remove_id() -> anyhow::Result<(), std::io::Error> {
+pub fn remove_id() -> Result<(), std::io::Error> {
   let cdir = super::getcdir();
   match std::fs::remove_file(cdir + "id") {
     Ok(_s) => {

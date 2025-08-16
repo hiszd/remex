@@ -39,11 +39,12 @@ impl From<Endpoint> for StoredEndpoint {
   }
 }
 
-pub fn save_identity(id: StoredEndpoint) -> anyhow::Result<()> {
+pub fn save_identity(id: StoredEndpoint) -> Result<(), std::io::Error> {
   let cdir = super::getcdir();
   let flnm = cdir.clone() + "identity.json";
   let mut f = std::fs::File::create(flnm).unwrap();
-  f.write_all(serde_json::to_string(&id).unwrap().as_bytes()).unwrap();
+  f.write_all(serde_json::to_string(&id).unwrap().as_bytes())
+    .unwrap();
   Ok(())
 }
 
@@ -66,4 +67,14 @@ pub fn exists_identity() -> bool {
   let cdir = super::getcdir();
   let flnm = cdir.clone() + "identity.json";
   std::fs::exists(flnm).unwrap()
+}
+
+pub fn reset_identity() -> Result<(), std::io::Error> {
+  let cdir = super::getcdir();
+  let flnm = cdir.clone() + "identity.json";
+  let f = std::fs::File::open(flnm)?;
+  let mut id: StoredEndpoint = serde_json::from_reader(f)?;
+  id.secret = None;
+  save_identity(id.clone())?;
+  Ok(())
 }

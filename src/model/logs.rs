@@ -9,7 +9,7 @@ pub struct LogModel {
   pub client_name: String,
   pub log: String,
   #[serde(rename = "createdAt")]
-  pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+  pub created_at: Option<chrono::NaiveDateTime>,
   #[serde(rename = "updatedAt")]
-  pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
+  pub updated_at: Option<chrono::NaiveDateTime>,
 }

@@ -2,7 +2,7 @@ use actix::prelude::*;
 use tracing::info;
 
 use super::server;
-use crate::core::codec::{ClientResponse, DisconnectReason};
+use crate::core::codec::{s2c, DisconnectReason};
 use crate::endpoint::Endpoint;
 use crate::session::RemexSession;
 
@@ -23,7 +23,9 @@ impl Handler<Disconnect> for RemexSession {
       });
     }
     info!("Sending disconnect to peer with reason: {}", &disc.reason);
-    self.framed.write(ClientResponse::Disconnect(disc.reason));
+    self
+      .framed
+      .write(s2c::S2C::Conn(s2c::Conn::Disconnect(disc.reason)));
   }
 }
 
@@ -41,7 +43,9 @@ impl Handler<Authenticated> for RemexSession {
   fn handle(&mut self, id: Authenticated, ctx: &mut Context<Self>) -> Self::Result {
     self.authenticated = true;
     // send message to peer
-    self.framed.write(ClientResponse::Authenticated(id.identity.clone(), id.secret.clone()));
+    self
+      .framed
+      .write(s2c::S2C::Conn(s2c::Conn::Authenticated(id.identity.clone(), id.secret.clone())));
     // send message to peer
     // register self in Remex server. `AsyncContext::wait` register
     // future within context, but context waits until this future resolves

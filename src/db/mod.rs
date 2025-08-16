@@ -1,17 +1,28 @@
+use core::time::Duration;
 use std::path::Path;
+use std::time::Instant;
 
 use actix::{Actor, AsyncContext, Context};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 pub mod clients;
+pub mod executors;
 pub mod logs;
 
-pub struct Db {
-  pub pool: sqlx::SqlitePool,
-  pub server: actix::Addr<crate::server::Server>,
+struct UpdateInfo {
+  machineid: String,
+  lastchecked: Instant,
+  lastupdated: Instant,
 }
 
-pub async fn migrate(pool: sqlx::SqlitePool) {
+pub struct Db {
+  pub pool: sqlx::PgPool,
+  pub server: actix::Addr<crate::server::Server>,
+  updates: Vec<UpdateInfo>,
+  lastchecked: Option<Instant>,
+}
+
+pub async fn migrate(pool: sqlx::PgPool) {
   warn!("Migrating db");
 
   let crate_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -19,12 +30,21 @@ pub async fn migrate(pool: sqlx::SqlitePool) {
   sqlx::migrate::Migrator::new(Path::new(&crate_dir).join("./migrations"))
     .await
     .unwrap()
-    .run(&<sqlx::SqlitePool>::clone(&pool))
+    .run(&<sqlx::PgPool>::clone(&pool))
     .await
     .unwrap();
 }
 
 impl Db {
+  pub fn new(pool: sqlx::PgPool, server: actix::Addr<crate::server::Server>) -> Db {
+    Db {
+      pool,
+      server,
+      updates: Vec::new(),
+      lastchecked: None,
+    }
+  }
+
   pub async fn connect(&mut self) {
   }
 
@@ -41,6 +61,13 @@ impl Db {
   }
   pub async fn push_cmd() {
     // TODO: implement command push
+  }
+  pub fn update(&self, ctx: &mut Context<Self>) {
+    ctx.run_interval(Duration::new(10, 0), |act, ctx| {
+      if act.lastchecked.is_none() {}
+
+      act.lastchecked = Some(Instant::now());
+    });
   }
 }
 

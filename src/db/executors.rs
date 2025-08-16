@@ -1,0 +1,126 @@
+use thiserror::Error;
+
+pub struct DbExecutor {
+  pub id: String,
+  pub name: String,
+  pub command: String,
+  pub created_at: chrono::NaiveDateTime,
+  pub updated_at: chrono::NaiveDateTime,
+}
+
+#[derive(Error, Debug)]
+pub enum Error {
+  #[error("SQLX error: {0}")]
+  Sqlx(sqlx::Error),
+  #[error("Executor SQLX Error: {0}")]
+  Other(String),
+}
+
+pub async fn add_executor(
+  pool: &sqlx::PgPool,
+  id: String,
+  name: String,
+  command: String,
+) -> Result<DbExecutor, Error> {
+  let query = format!(
+    r#"
+INSERT INTO executors( id, name, command )
+VALUES ( {id:?}, {name:?}, {command:?} )
+RETURNING *
+        "#
+  );
+  let rec = sqlx::query_as(query.as_str()).fetch_one(pool).await;
+  let r: crate::model::executors::ExecutorModel = match rec {
+    Ok(rc) => rc,
+    Err(e) => {
+      tracing::error!("executors 62 - db error: {}", e);
+      return Err(Error::Sqlx(e));
+    }
+  };
+
+  Ok(DbExecutor {
+    id: r.id,
+    name: r.name,
+    command: r.command,
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+  })
+}
+
+pub async fn get_executor(pool: &sqlx::PgPool, id: String) -> Result<DbExecutor, Error> {
+  let qry = sqlx::query_as(format!("SELECT * FROM executors WHERE id = '{id}'").as_str())
+    .fetch_one(pool)
+    .await;
+  match qry {
+    Ok(rec) => {
+      let r: crate::model::executors::ExecutorModel = rec;
+      Ok(DbExecutor {
+        id: r.id,
+        name: r.name,
+        command: r.command,
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+      })
+    }
+    Err(e) => match e {
+      sqlx::Error::RowNotFound => {
+        tracing::error!("executor not found");
+        Err(Error::Sqlx(e))
+      }
+      _ => {
+        tracing::error!("executors 97 - db error: {}", e);
+        Err(Error::Sqlx(e))
+      }
+    },
+  }
+}
+
+pub async fn get_executor_from_machineid(
+  pool: &sqlx::PgPool,
+  machineid: String,
+) -> Result<Vec<DbExecutor>, Error> {
+  let qry = sqlx::query_as(
+    format!(
+      r#"
+          SELECT
+  e.*
+FROM
+  clients_executors ce
+JOIN
+  executors e ON ce.executor_id = e.id
+WHERE
+  ce.machineid = '{}';
+          "#,
+      machineid
+    )
+    .as_str(),
+  )
+  .fetch_all(pool)
+  .await;
+  match qry {
+    Ok(rec) => {
+      let r: Vec<crate::model::executors::ExecutorModel> = rec;
+      Ok(
+        r.iter()
+          .map(|r| DbExecutor {
+            id: r.id.clone(),
+            name: r.name.clone(),
+            command: r.command.clone(),
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+          })
+          .collect(),
+      )
+    }
+    Err(e) => match e {
+      sqlx::Error::RowNotFound => {
+        tracing::error!("executor not found");
+        Err(Error::Sqlx(e))
+      }
+      _ => {
+        tracing::error!("executors 121 - db error: {}", e);
+        Err(Error::Sqlx(e))
+      }
+    },
+  }
+}
