@@ -1,0 +1,43 @@
+[package]
+name = "remex-server"
+version = "0.1.0"
+authors = ["Zion Koyl<hiszd1@gmail.com>"]
+edition = "2021"
+
+[dependencies]
+remex-core = { path = "../core" }
+chrono = { version = "0.4.38", features = ["serde"] }
+heapless = "0.8.0"
+tokio = { version = "1.38.1", features = ["full", "signal"] }
+tracing = { version = "0.1.40", features = ["async-await"] }
+tracing-subscriber = { version = "0.3.18", features = ["chrono"] }
+sqlx = { version = "0.8.0", features = ["sqlite", "runtime-tokio", "migrate", "chrono", "derive", "uuid", "postgres"] }
+actix = "0.13"
+actix-codec = "0.5.2"
+actix-files = "0.6"
+actix-web = "4.9"
+actix-web-actors = "4.1"
+actix-ws = "0.3"
+actix-rt = "2.10.0"
+byteorder = "1.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+aes-gcm = { version = "0.10.3", features = ["heapless"] }
+gethostname = "0.5.0"
+machine-uid = "0.5.2"
+uuid = { version = "1.6", features = ["v4", "v7", "serde"] }
+tokio-stream = "0.1.17"
+tokio-util = "0.7.4"
+futures-util = "0.3.31"
+anyhow = "1.0.97"
+clap = { version = "4.5.9", features = ["derive"] }
+rand = "0.9"
+derive_more = {version = "2", features = ["full"]}
+dotenvy = "0.15"
+futures = "0.3.31"
+openssl = "0.10.73"
+machineid-rs = "1.2.4"
+polyerror = "0.0.2"
+thiserror = "2.0.12"
+signal-hook-tokio = { version = "0.3.1", features = ["futures-v0_3"] }
+signal-hook = "0.3.18"
