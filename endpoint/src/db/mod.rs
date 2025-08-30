@@ -1,6 +1,7 @@
 use std::path::Path;
 
 pub mod model;
+pub mod query;
 
 pub async fn migrate(pool: sqlx::SqlitePool) {
   tracing::warn!("Migrating db");

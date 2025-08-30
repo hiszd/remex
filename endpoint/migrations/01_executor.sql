@@ -1,7 +1,8 @@
 -- Add migration script here
 
 CREATE TABLE executors (
-  id TEXT PRIMARY KEY  NOT NULL,
+  id INTEGER PRIMARY KEY NOT NULL,
+  uuid TEXT NOT NULL,
   name TEXT NOT NULL,
   command TEXT NOT NULL,
   status TEXT NOT NULL,
