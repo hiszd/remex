@@ -1,8 +1,13 @@
 use heapless::Vec as StackVec;
 
+pub mod actors;
 pub mod codec;
+pub mod db;
+pub mod sessionmap;
 
 pub type RawPacket = [u8; 128];
+
+const SECRET: &str = "tZs3U%hqY^o$&*y%4HcF8&RyAKevUbZnkTsrjCzPGxfare3Yn9c7shVZETfPDPUc8xR%N38a!TL%2$WbkFhZqmH#jvw&d3^mryPD8Y8TqHoJHwyKSTJeQB7vK7QkW#&B";
 
 // [packet number, total packets, ...information]
 #[derive(Debug, Clone)]
@@ -28,10 +33,10 @@ impl Packet {
   }
 }
 
-impl Into<RawPacket> for Packet {
-  fn into(self) -> RawPacket {
-    let mut vc: StackVec<u8, 128> = StackVec::from_slice(&[self.number, self.total]).unwrap();
-    vc.extend(self.information);
+impl From<Packet> for RawPacket {
+  fn from(pckt: Packet) -> RawPacket {
+    let mut vc: StackVec<u8, 128> = StackVec::from_slice(&[pckt.number, pckt.total]).unwrap();
+    vc.extend(pckt.information);
     let mut rtrn: [u8; 128] = [0; 128];
     for i in 0..vc.len() {
       rtrn[i] = vc[i];
@@ -40,12 +45,12 @@ impl Into<RawPacket> for Packet {
   }
 }
 
-impl Into<Packet> for RawPacket {
-  fn into(self) -> Packet {
+impl From<RawPacket> for Packet {
+  fn from(raw: RawPacket) -> Packet {
     Packet {
-      number: self[0],
-      total: self[1],
-      information: StackVec::from_slice(&self[2..]).unwrap(),
+      number: raw[0],
+      total: raw[1],
+      information: StackVec::from_slice(&raw[2..]).unwrap(),
     }
   }
 }

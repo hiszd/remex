@@ -7,18 +7,13 @@ pub fn save_id(id: String) -> anyhow::Result<()> {
   let flnm = cdir.clone() + "id";
   match std::fs::exists(flnm.clone()) {
     Ok(true) => {
-      match std::fs::remove_file(flnm.clone()) {
-        Err(e) => {
-          anyhow::bail!("could not remove id file: {}", e);
-        }
-        _ => {}
-      };
-      match std::fs::write(flnm.clone(), id.clone()) {
-        Err(e) => {
-          anyhow::bail!("could not write id file: {}", e);
-        }
-        _ => Ok(()),
+      if let Err(e) = std::fs::remove_file(flnm.clone()) {
+        anyhow::bail!("could not remove id file: {}", e);
       }
+      if let Err(e) = std::fs::write(flnm.clone(), id.clone()) {
+        anyhow::bail!("could not write id file: {}", e);
+      }
+      Ok(())
     }
     Ok(false) => {
       if std::fs::exists(cdir.clone()).unwrap() {
@@ -35,11 +30,8 @@ pub fn save_id(id: String) -> anyhow::Result<()> {
           _ => Ok(()),
         }
       } else {
-        match std::fs::create_dir_all(cdir.clone()) {
-          Err(e) => {
-            anyhow::bail!("could not create id dir: {}", e);
-          }
-          _ => {}
+        if let Err(e) = std::fs::create_dir_all(cdir.clone()) {
+          anyhow::bail!("could not create id dir: {}", e);
         }
         let mut fle = match std::fs::File::create(flnm.clone()) {
           Err(e) => {
@@ -47,17 +39,13 @@ pub fn save_id(id: String) -> anyhow::Result<()> {
           }
           Ok(f) => f,
         };
-        match fle.write(id.clone().as_bytes()) {
-          Err(e) => {
-            anyhow::bail!("could not write id file: {}", e);
-          }
-          _ => Ok(()),
+        if let Err(e) = fle.write(id.clone().as_bytes()) {
+          anyhow::bail!("could not write id file: {}", e);
         }
+        Ok(())
       }
     }
-    Err(e) => {
-      return Err(anyhow::anyhow!("{}", e));
-    }
+    Err(e) => Err(anyhow::anyhow!("{}", e)),
   }
 }
 
@@ -86,7 +74,7 @@ pub fn remove_id() -> anyhow::Result<(), std::io::Error> {
   let cdir = "/home/".to_owned() + &usr + "/.config/remex/";
   tracing::info!("Reading ID from: {}id", &cdir);
   match std::fs::remove_file(cdir + "id") {
-    Ok(s) => {
+    Ok(_) => {
       tracing::info!("removed id file");
       Ok(())
     }

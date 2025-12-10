@@ -2,29 +2,33 @@ use std::collections::HashMap;
 
 use anyhow::anyhow;
 
+#[derive(Default)]
 pub struct SessionMap {
-  pub sessions: HashMap<String, actix::Addr<crate::session::RemexSession>>,
+  pub sessions: HashMap<String, actix::Addr<crate::actors::session::RemexSession>>,
 }
 
-impl Default for SessionMap {
-  fn default() -> Self {
-    SessionMap {
-      sessions: HashMap::new(),
-    }
-  }
-}
+// impl Default for SessionMap {
+//   fn default() -> Self {
+//     SessionMap {
+//       sessions: HashMap::new(),
+//     }
+//   }
+// }
 
 impl SessionMap {
   pub fn insert(
     &mut self,
     id: String,
-    addr: actix::Addr<crate::session::RemexSession>,
+    addr: actix::Addr<crate::actors::session::RemexSession>,
   ) -> anyhow::Result<()> {
     let _ = self.sessions.insert(id, addr);
     Ok(())
   }
 
-  pub fn remove(&mut self, id: String) -> Option<actix::Addr<crate::session::RemexSession>> {
+  pub fn remove(
+    &mut self,
+    id: String,
+  ) -> Option<actix::Addr<crate::actors::session::RemexSession>> {
     self.sessions.remove(&id)
   }
 
@@ -47,7 +51,10 @@ impl SessionMap {
     }
   }
 
-  pub fn get_addr(&self, id: String) -> anyhow::Result<actix::Addr<crate::session::RemexSession>> {
+  pub fn get_addr(
+    &self,
+    id: String,
+  ) -> anyhow::Result<actix::Addr<crate::actors::session::RemexSession>> {
     match self.sessions.get(&id) {
       Some(s) => Ok(s.clone()),
       None => Err(anyhow::anyhow!("Could not find addr for id {}", &id)),

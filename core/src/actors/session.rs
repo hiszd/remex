@@ -15,14 +15,14 @@ use tokio::{
 use tokio_util::codec::FramedRead;
 use tracing::info;
 
-use crate::core::codec::{ClientCodec, ClientRequest, ClientResponse};
-use crate::server::{self, Server};
+use crate::actors::server::{self, Server};
+use crate::codec::{ClientCodec, ClientRequest, ClientResponse};
 
 /// Force session close
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct Disconnect {
-  pub reason: crate::core::codec::DisconnectReason,
+  pub reason: crate::codec::DisconnectReason,
 }
 /// Handler for Disconnect message.
 impl Handler<Disconnect> for RemexSession {
@@ -99,6 +99,7 @@ impl Handler<Command> for RemexSession {
   }
 }
 
+#[allow(dead_code)]
 /// `RemexSession` actor is responsible for tcp peer communications.
 pub struct RemexSession {
   /// unique session id
@@ -188,7 +189,7 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
           let addr = ctx.address();
           self
             .addr
-            .send(crate::server::Connect {
+            .send(crate::actors::server::Connect {
               id: None,
               clientname: self.name.clone().unwrap(),
               addr: addr.clone(),
@@ -219,7 +220,7 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
         let addr = ctx.address();
         self
           .addr
-          .send(crate::server::Connect {
+          .send(crate::actors::server::Connect {
             id: Some(id),
             clientname: self.name.clone().unwrap(),
             addr: addr.clone(),

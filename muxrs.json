@@ -1,0 +1,27 @@
+{
+  "session": {
+    "name": "%selected_directory_short%",
+    "starting_dir": "%selected_directory%"
+  },
+  "windows": [
+    {
+      "name": "nvim",
+      "starting_dir": null,
+      "set_active": true,
+      "panes": [
+        {
+          "command": "nvim",
+          "is_vertical_split": null
+        }
+      ]
+    },
+    {
+      "name": "server",
+      "starting_dir": "%selected_directory%/server"
+    },
+    {
+      "name": "endpoint",
+      "starting_dir": "%selected_directory%/endpoint"
+    }
+  ]
+}

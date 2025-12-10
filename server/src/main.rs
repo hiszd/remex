@@ -1,16 +1,12 @@
 use actix::Actor;
 use actix::AsyncContext;
-use common::db;
-use common::server;
-use common::session;
-use common::sessionmap;
+use remex_core as core;
+use remex_core::actors::server::Server;
+use remex_core::db::clients::Pools;
+//SERVER
 use sqlx::migrate::MigrateDatabase;
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::SqlitePool;
-//SERVER
-use tracing_subscriber;
-
-use self::server::Server;
 
 const ADDRESS: &str = "127.0.0.1:4269";
 
@@ -25,10 +21,10 @@ async fn main() {
   }
   let options = SqliteConnectOptions::new().filename(filename);
 
-  let pool = SqlitePool::connect_with(options).await.unwrap();
+  let pool = Pools::Sqlite(SqlitePool::connect_with(options).await.unwrap());
 
   let server = Server::create(move |ctx| {
-    let dbb = crate::db::Db {
+    let dbb = core::db::Db {
       pool: pool.clone(),
       server: ctx.address(),
     }
@@ -36,8 +32,8 @@ async fn main() {
 
     Server {
       db: dbb,
-      sessions: sessionmap::SessionMap::default(),
+      sessions: remex_core::sessionmap::SessionMap::default(),
     }
   });
-  session::tcp_server(ADDRESS, server).await;
+  remex_core::actors::session::tcp_server(ADDRESS, server).await;
 }

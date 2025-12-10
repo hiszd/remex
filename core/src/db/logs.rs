@@ -4,7 +4,7 @@ pub async fn add_log(
   message: &str,
   time_logged: chrono::NaiveDateTime,
 ) -> anyhow::Result<String> {
-  let rec: crate::model::logs::LogModel = sqlx::query_as(
+  let rec: super::model::logs::LogModel = sqlx::query_as(
     format!(
       "
 INSERT INTO logs( client, message, time_logged )

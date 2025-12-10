@@ -48,14 +48,16 @@ pub enum DisconnectReason {
   AuthFailed,
   InvalidClientId,
 }
-impl Into<String> for DisconnectReason {
-  fn into(self) -> String {
-    match self {
+
+impl From<DisconnectReason> for String {
+  fn from(reason: DisconnectReason) -> String {
+    match reason {
       DisconnectReason::AuthFailed => "Authentication failed".to_string(),
       DisconnectReason::InvalidClientId => "Invalid client id".to_string(),
     }
   }
 }
+
 impl std::fmt::Display for DisconnectReason {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
@@ -134,7 +136,7 @@ impl Decoder for ClientCodec {
           if e == "Failed to decrypt" {
             error!("Failed to decrypt, maybe the key is wrong");
           }
-          Err(io::Error::new(io::ErrorKind::Other, e))
+          Err(io::Error::other(e))
         }
       }
     } else {
@@ -184,7 +186,7 @@ impl Decoder for ServerCodec {
           if e == "Failed to decrypt" {
             error!("Failed to decrypt, maybe the key is wrong");
           }
-          Err(io::Error::new(io::ErrorKind::Other, e))
+          Err(io::Error::other(e))
         }
       }
     } else {

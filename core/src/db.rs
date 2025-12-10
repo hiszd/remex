@@ -3,18 +3,26 @@ use std::path::Path;
 use actix::{Actor, AsyncContext, Context, Handler, Message};
 use tracing::{error, info};
 
+use crate::db::clients::Pools;
+
+pub mod actions;
 pub mod clients;
 pub mod logs;
+pub mod model;
 
+#[derive(Clone)]
 pub struct Db {
-  pub pool: sqlx::SqlitePool,
-  pub server: actix::Addr<crate::server::Server>,
+  pub pool: Pools,
+  pub server: actix::Addr<crate::actors::server::Server>,
 }
 
-impl Db {
-  pub async fn migrate(&self) {
+#[allow(async_fn_in_trait)]
+pub trait DbMigrate {
+  async fn migrate(&self);
+}
+impl DbMigrate for Db {
+  async fn migrate(&self) {
     info!("migrating db {}", cfg!(debug_assertions));
-
     // Migrate the database
     let migrations = if !cfg!(debug_assertions) {
       // Productions migrations dir
@@ -25,39 +33,41 @@ impl Db {
       let crate_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
       Path::new(&crate_dir).join("./migrations/dev")
     };
-
-    sqlx::migrate::Migrator::new(migrations)
-      .await
-      .unwrap()
-      .run(&<sqlx::SqlitePool>::clone(&self.pool))
-      .await
-      .unwrap();
-  }
-
-  pub async fn connect(&mut self) {
-  }
-
-  pub async fn get_logs(&self) {
-  }
-
-  pub async fn get_cmds(&self) {
-  }
-
-  pub async fn new_log(&self, client: &str, message: &str, time_logged: chrono::NaiveDateTime) {
-    logs::add_log(&self.pool.clone(), client, message, time_logged).await.unwrap();
-  }
-  pub async fn push_cmd() {
-    // TODO: implement command push
+    match self.pool.clone() {
+      Pools::Postgres(pool) => {
+        sqlx::migrate::Migrator::new(migrations).await.unwrap().run(&pool).await.unwrap();
+      }
+      Pools::Sqlite(pool) => {
+        sqlx::migrate::Migrator::new(migrations).await.unwrap().run(&pool).await.unwrap();
+      }
+    }
   }
 }
 
 impl Actor for Db {
   type Context = Context<Db>;
 
-  fn started(&mut self, _ctx: &mut Context<Self>) -> () {
+  fn started(&mut self, _ctx: &mut Context<Self>) {
   }
 
-  fn stopped(&mut self, _ctx: &mut Context<Self>) { self.pool.close(); }
+  fn stopped(&mut self, ctx: &mut Context<Self>) {
+    match self.pool.clone() {
+      Pools::Postgres(pool) => {
+        let futr = async move {
+          pool.close().await;
+        };
+        let fut = actix::fut::wrap_future::<_, Self>(futr);
+        ctx.spawn(fut);
+      }
+      Pools::Sqlite(pool) => {
+        let futr = async move {
+          pool.close().await;
+        };
+        let fut = actix::fut::wrap_future::<_, Self>(futr);
+        ctx.spawn(fut);
+      }
+    }
+  }
 }
 
 #[derive(Message)]
@@ -66,9 +76,19 @@ pub struct GetLogs {}
 impl Handler<GetLogs> for Db {
   type Result = Vec<String>;
   fn handle(&mut self, _msg: GetLogs, _ctx: &mut Context<Self>) -> Self::Result {
-    let _lgs = futures::executor::block_on(async {
-      sqlx::query("SELECT * FROM logs").fetch_all(&self.pool).await.unwrap()
-    });
+    match &self.pool.clone() {
+      Pools::Sqlite(p) => {
+        futures::executor::block_on(async {
+          sqlx::query("SELECT * FROM logs").fetch_all(p).await.unwrap()
+        });
+      }
+      Pools::Postgres(p) => {
+        futures::executor::block_on(async {
+          sqlx::query("SELECT * FROM logs").fetch_all(p).await.unwrap()
+        });
+      }
+    }
+    // FIXME: this should use the output of the match
     vec!["bob".to_owned()]
   }
 }
@@ -77,7 +97,7 @@ impl Handler<GetLogs> for Db {
 pub struct NewClient {
   pub id: Option<String>,
   pub clientname: String,
-  pub addr: actix::Addr<crate::session::RemexSession>,
+  pub addr: actix::Addr<crate::actors::session::RemexSession>,
 }
 impl Message for NewClient {
   type Result = Result<(), anyhow::Error>;
@@ -93,14 +113,14 @@ impl Handler<NewClient> for Db {
     let futr = Box::pin(async move {
       if id1.is_none() {
         tracing::info!("Generating new id");
-        let id = clients::generate_id(pool.clone()).await.unwrap();
+        let id = actions::clients::generate_id(pool.clone()).await.unwrap();
         tracing::info!("Generated id: {}", id);
-        let b = clients::add_client(pool, id, clientname1).await;
+        let b = actions::clients::add_client(pool, id, clientname1).await;
 
         match b {
           Ok(client) => {
             tracing::info!("Client added with id: {}", &client.id);
-            serv.do_send(crate::server::DbClientIdentified {
+            serv.do_send(crate::actors::server::DbClientIdentified {
               id: client.id,
               clientname: client.name.clone(),
               addr,
@@ -110,43 +130,28 @@ impl Handler<NewClient> for Db {
         }
       } else {
         tracing::info!("Using existing id");
-        let b = clients::get_client(&pool, id1.clone().unwrap()).await;
+        let b = actions::clients::get_client(pool, id1.clone().unwrap()).await;
         match b {
           Ok(client) => {
-            serv.do_send(crate::server::DbClientIdentified {
+            serv.do_send(crate::actors::server::DbClientIdentified {
               id: client.id,
               clientname: client.name.clone(),
               addr,
             });
           }
-          Err(e) => match e {
-            sqlx::Error::RowNotFound => {
+          Err(e) => {
+            if let sqlx::Error::RowNotFound = e {
               tracing::error!("client not found");
-              addr.do_send(crate::session::Disconnect {
-                reason: crate::core::codec::DisconnectReason::InvalidClientId,
+              addr.do_send(crate::actors::session::Disconnect {
+                reason: crate::codec::DisconnectReason::InvalidClientId,
               });
             }
-            _ => {}
-          },
+          }
         }
       }
     });
     let fut = actix::fut::wrap_future::<_, Self>(futr);
     ctx.spawn(fut);
     Ok(())
-  }
-}
-
-#[derive(Message)]
-#[rtype(result = "()")]
-struct NewLog {
-  client: String,
-  message: String,
-  time_logged: chrono::NaiveDateTime,
-}
-impl Handler<NewLog> for Db {
-  type Result = ();
-  fn handle(&mut self, msg: NewLog, _ctx: &mut Context<Self>) {
-    futures::executor::block_on(self.new_log(&msg.client, &msg.message, msg.time_logged));
   }
 }

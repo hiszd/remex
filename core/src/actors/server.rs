@@ -5,7 +5,7 @@
 use actix::prelude::*;
 use tracing::{error, info};
 
-use crate::session;
+use crate::actors::session;
 use crate::sessionmap::SessionMap;
 
 /// Message for chat server communications
@@ -74,7 +74,7 @@ impl Handler<DbClientIdentified> for Server {
     match self.sessions.insert(db.id.clone(), db.addr.clone()) {
       Err(e) => error!("Could not create session with id: {}", e),
       _ => {
-        db.addr.do_send(crate::session::Identified {
+        db.addr.do_send(crate::actors::session::Identified {
           id: db.id.clone(),
           name: db.clientname,
         });

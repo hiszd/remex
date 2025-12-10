@@ -1,13 +1,11 @@
 //ENDPOINT
 use futures_util::{SinkExt as _, StreamExt as _};
 use gethostname::gethostname;
+use remex_core::codec;
 use tokio::{net::TcpStream, select};
 use tracing::info;
 
-extern crate common;
-
-use common::core::codec;
-use common::id;
+mod id;
 
 const IP: &str = "127.0.0.1";
 const PORT: u16 = 4269;
