@@ -22,23 +22,22 @@ pub trait DbMigrate {
 }
 impl DbMigrate for Db {
   async fn migrate(&self) {
-    info!("migrating db {}", cfg!(debug_assertions));
+    info!("migrating db");
     // Migrate the database
-    let migrations = if !cfg!(debug_assertions) {
-      // Productions migrations dir
-      let crate_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-      Path::new(&crate_dir).join("./migrations/prod")
-    } else {
-      // Development migrations dir
-      let crate_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-      Path::new(&crate_dir).join("./migrations/dev")
-    };
-    match self.pool.clone() {
-      Pools::Postgres(pool) => {
-        sqlx::migrate::Migrator::new(migrations).await.unwrap().run(&pool).await.unwrap();
+    match &self.pool.clone() {
+      Pools::Postgres(p) => {
+        let migrations = {
+          let crate_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+          Path::new(&crate_dir).join("../migrations/postgres")
+        };
+        sqlx::migrate::Migrator::new(migrations).await.unwrap().run(p).await.unwrap();
       }
-      Pools::Sqlite(pool) => {
-        sqlx::migrate::Migrator::new(migrations).await.unwrap().run(&pool).await.unwrap();
+      Pools::Sqlite(p) => {
+        let migrations = {
+          let crate_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+          Path::new(&crate_dir).join("../migrations/sqlite")
+        };
+        sqlx::migrate::Migrator::new(migrations).await.unwrap().run(p).await.unwrap();
       }
     }
   }
@@ -47,21 +46,25 @@ impl DbMigrate for Db {
 impl Actor for Db {
   type Context = Context<Db>;
 
-  fn started(&mut self, _ctx: &mut Context<Self>) {
+  fn started(&mut self, ctx: &mut Context<Self>) {
+    let db = self.clone();
+    let futr = async move { db.migrate().await };
+    let fut = actix::fut::wrap_future::<_, Self>(futr);
+    ctx.spawn(fut);
   }
 
   fn stopped(&mut self, ctx: &mut Context<Self>) {
     match self.pool.clone() {
-      Pools::Postgres(pool) => {
+      Pools::Postgres(p) => {
         let futr = async move {
-          pool.close().await;
+          p.close().await;
         };
         let fut = actix::fut::wrap_future::<_, Self>(futr);
         ctx.spawn(fut);
       }
-      Pools::Sqlite(pool) => {
+      Pools::Sqlite(p) => {
         let futr = async move {
-          pool.close().await;
+          p.close().await;
         };
         let fut = actix::fut::wrap_future::<_, Self>(futr);
         ctx.spawn(fut);
@@ -96,7 +99,7 @@ impl Handler<GetLogs> for Db {
 #[derive(Debug)]
 pub struct NewClient {
   pub id: Option<String>,
-  pub clientname: String,
+  pub client_name: String,
   pub addr: actix::Addr<crate::actors::session::RemexSession>,
 }
 impl Message for NewClient {
@@ -105,7 +108,7 @@ impl Message for NewClient {
 impl Handler<NewClient> for Db {
   type Result = Result<(), anyhow::Error>;
   fn handle(&mut self, msg: NewClient, ctx: &mut Context<Self>) -> Self::Result {
-    let clientname1 = msg.clientname.clone();
+    let clientname1 = msg.client_name.clone();
     let id1 = msg.id.clone();
     let addr = msg.addr.clone();
     let pool = self.pool.clone();
@@ -122,11 +125,11 @@ impl Handler<NewClient> for Db {
             tracing::info!("Client added with id: {}", &client.id);
             serv.do_send(crate::actors::server::DbClientIdentified {
               id: client.id,
-              clientname: client.name.clone(),
+              client_name: client.name.clone(),
               addr,
             });
           }
-          Err(e) => error!("130 - db error: {}", e),
+          Err(e) => error!("132 - db error: {}", e),
         }
       } else {
         tracing::info!("Using existing id");
@@ -135,7 +138,7 @@ impl Handler<NewClient> for Db {
           Ok(client) => {
             serv.do_send(crate::actors::server::DbClientIdentified {
               id: client.id,
-              clientname: client.name.clone(),
+              client_name: client.name.clone(),
               addr,
             });
           }

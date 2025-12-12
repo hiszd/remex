@@ -5,7 +5,8 @@ use sqlx::FromRow;
 #[allow(non_snake_case)]
 pub struct ClientModel {
   pub id: String,
-  pub name: String,
+  pub secret: Option<String>,
+  pub client_name: String,
   #[serde(rename = "createdAt")]
   pub created_at: chrono::DateTime<chrono::Utc>,
   #[serde(rename = "updatedAt")]
