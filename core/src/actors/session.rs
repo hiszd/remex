@@ -191,7 +191,7 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
             .addr
             .send(crate::actors::server::Connect {
               id: None,
-              clientname: self.name.clone().unwrap(),
+              client_name: self.name.clone().unwrap(),
               addr: addr.clone(),
             })
             .into_actor(self)
@@ -222,7 +222,7 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
           .addr
           .send(crate::actors::server::Connect {
             id: Some(id),
-            clientname: self.name.clone().unwrap(),
+            client_name: self.name.clone().unwrap(),
             addr: addr.clone(),
           })
           .into_actor(self)

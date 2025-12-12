@@ -15,7 +15,7 @@ use crate::sessionmap::SessionMap;
 #[rtype(result = "()")]
 pub struct Connect {
   pub id: Option<String>,
-  pub clientname: String,
+  pub client_name: String,
   pub addr: Addr<session::RemexSession>,
 }
 
@@ -61,7 +61,7 @@ impl Actor for Server {
 #[rtype(result = "()")]
 pub struct DbClientIdentified {
   pub id: String,
-  pub clientname: String,
+  pub client_name: String,
   pub addr: Addr<session::RemexSession>,
 }
 /// Handler for DbClientIDentified message.
@@ -76,7 +76,7 @@ impl Handler<DbClientIdentified> for Server {
       _ => {
         db.addr.do_send(crate::actors::session::Identified {
           id: db.id.clone(),
-          name: db.clientname,
+          name: db.client_name,
         });
       }
     }
@@ -92,12 +92,12 @@ impl Handler<Connect> for Server {
   fn handle(&mut self, msg: Connect, ctx: &mut Context<Self>) -> Self::Result {
     // TODO: make this try and enroll based on a previous id
     let db = self.db.clone();
-    info!("Session connection made with clientname {}", &msg.clientname);
+    info!("Session connection made with client_name {}", &msg.client_name);
 
     let futr = async move {
       db.send(crate::db::NewClient {
         id: msg.id,
-        clientname: msg.clientname,
+        client_name: msg.client_name,
         addr: msg.addr.clone(),
       })
       .await

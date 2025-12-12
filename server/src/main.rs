@@ -4,9 +4,8 @@ use remex_core as core;
 use remex_core::actors::server::Server;
 use remex_core::db::clients::Pools;
 //SERVER
-use sqlx::migrate::MigrateDatabase;
-use sqlx::sqlite::SqliteConnectOptions;
-use sqlx::SqlitePool;
+use sqlx::postgres::PgConnectOptions;
+use sqlx::PgPool;
 
 const ADDRESS: &str = "127.0.0.1:4269";
 
@@ -14,24 +13,22 @@ const ADDRESS: &str = "127.0.0.1:4269";
 async fn main() {
   tracing_subscriber::fmt::init();
 
-  let filename = "main.db";
+  let options = PgConnectOptions::new()
+    .host("192.168.10.133")
+    .username("postgres")
+    .password("H@ck3r345")
+    .database("remex");
 
-  if !sqlx::Sqlite::database_exists(filename).await.unwrap() {
-    sqlx::Sqlite::create_database(filename).await.unwrap();
-  }
-  let options = SqliteConnectOptions::new().filename(filename);
-
-  let pool = Pools::Sqlite(SqlitePool::connect_with(options).await.unwrap());
+  let pool = Pools::Postgres(PgPool::connect_with(options).await.unwrap());
 
   let server = Server::create(move |ctx| {
     let dbb = core::db::Db {
       pool: pool.clone(),
       server: ctx.address(),
-    }
-    .start();
+    };
 
     Server {
-      db: dbb,
+      db: dbb.start(),
       sessions: remex_core::sessionmap::SessionMap::default(),
     }
   });

@@ -7,10 +7,10 @@ use crate::db::clients::{Client, Pools};
 pub async fn generate_id(pool: Pools) -> Result<String, anyhow::Error> {
   let qry = match pool {
     Pools::Sqlite(p) => {
-      sqlx::query_as("SELECT id, clientname FROM clients ORDER BY id DESC").fetch_all(&p).await
+      sqlx::query_as("SELECT id, client_name FROM clients ORDER BY id DESC").fetch_all(&p).await
     }
     Pools::Postgres(p) => {
-      sqlx::query_as("SELECT id, clientname FROM clients ORDER BY id DESC").fetch_all(&p).await
+      sqlx::query_as("SELECT id, client_name FROM clients ORDER BY id DESC").fetch_all(&p).await
     }
   };
   match qry {
@@ -32,12 +32,12 @@ pub async fn generate_id(pool: Pools) -> Result<String, anyhow::Error> {
 pub async fn get_client(pool: Pools, client_id: String) -> Result<Client, sqlx::Error> {
   let qry = match pool {
     Pools::Sqlite(p) => {
-      sqlx::query_as(format!("SELECT * FROM clients WHERE client_id = {}", client_id).as_str())
+      sqlx::query_as(format!("SELECT * FROM clients WHERE id = {}", client_id).as_str())
         .fetch_one(&p)
         .await
     }
     Pools::Postgres(p) => {
-      sqlx::query_as(format!("SELECT * FROM clients WHERE client_id = {}", client_id).as_str())
+      sqlx::query_as(format!("SELECT * FROM clients WHERE id = \'{}\'", client_id).as_str())
         .fetch_one(&p)
         .await
     }
@@ -47,7 +47,7 @@ pub async fn get_client(pool: Pools, client_id: String) -> Result<Client, sqlx::
       let r: crate::db::model::clients::ClientModel = rec;
       Ok(Client {
         id: r.id,
-        name: r.name,
+        name: r.client_name,
         created_at: r.created_at,
         updated_at: r.updated_at,
       })
@@ -72,18 +72,18 @@ pub async fn get_client(pool: Pools, client_id: String) -> Result<Client, sqlx::
 pub async fn add_client(
   pool: Pools,
   client_id: String,
-  clientname: String,
+  client_name: String,
 ) -> anyhow::Result<Client> {
   let qry = match pool {
     Pools::Sqlite(p) => {
       sqlx::query_as(
         format!(
           "
-INSERT INTO clients( client_id, clientname )
+INSERT INTO clients( id, client_name )
 VALUES ( {}, {} )
 RETURNING *
 ",
-          client_id, clientname
+          client_id, client_name
         )
         .as_str(),
       )
@@ -94,11 +94,11 @@ RETURNING *
       sqlx::query_as(
         format!(
           "
-INSERT INTO clients( client_id, clientname )
-VALUES ( {}, {} )
+INSERT INTO clients( id, client_name )
+VALUES ( \'{}\', \'{}\' )
 RETURNING *
 ",
-          client_id, clientname
+          client_id, client_name
         )
         .as_str(),
       )
@@ -115,7 +115,7 @@ RETURNING *
 
   Ok(Client {
     id: r.id,
-    name: r.name,
+    name: r.client_name,
     created_at: r.created_at,
     updated_at: r.updated_at,
   })
