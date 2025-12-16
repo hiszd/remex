@@ -1,0 +1,9 @@
+-- Add migration script here
+
+CREATE TABLE clients (
+    id TEXT PRIMARY KEY NOT NULL,
+    secret TEXT,
+    client_name TEXT NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

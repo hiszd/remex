@@ -62,6 +62,7 @@ impl Actor for Server {
 pub struct DbClientIdentified {
   pub id: String,
   pub client_name: String,
+  pub secret: String,
   pub addr: Addr<session::RemexSession>,
 }
 /// Handler for DbClientIDentified message.

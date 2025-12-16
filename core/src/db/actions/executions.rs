@@ -1,30 +1,33 @@
-use crate::db::{model::clients::ClientModel, Pools};
+use crate::db::{model::executions::ExecutionModel, Pools};
 
 /* **************************************************************************** */
 /* *********************************** Queries ******************************** */
 /* **************************************************************************** */
 
-pub async fn get_client(pool: Pools, client_id: String) -> Result<ClientModel, sqlx::Error> {
+pub async fn get_execution(
+  pool: Pools,
+  execution_id: String,
+) -> Result<ExecutionModel, sqlx::Error> {
   let qry = match pool {
     Pools::Sqlite(p) => {
-      sqlx::query_as(format!("SELECT * FROM clients WHERE id = {}", client_id).as_str())
+      sqlx::query_as(format!("SELECT * FROM executions WHERE id = {}", execution_id).as_str())
         .fetch_one(&p)
         .await
     }
     Pools::Postgres(p) => {
-      sqlx::query_as(format!("SELECT * FROM clients WHERE id = \'{}\'", client_id).as_str())
+      sqlx::query_as(format!("SELECT * FROM executions WHERE id = \'{}\'", execution_id).as_str())
         .fetch_one(&p)
         .await
     }
   };
   match qry {
     Ok(rec) => {
-      let r: crate::db::model::clients::ClientModel = rec;
+      let r: crate::db::model::executions::ExecutionModel = rec;
       Ok(r)
     }
     Err(e) => match e {
       sqlx::Error::RowNotFound => {
-        tracing::error!("client not found");
+        tracing::error!("execution not found");
         Err(e)
       }
       _ => {
@@ -39,21 +42,23 @@ pub async fn get_client(pool: Pools, client_id: String) -> Result<ClientModel, s
 /* ********************************** Commands ******************************** */
 /* **************************************************************************** */
 
-pub async fn add_client(
+pub async fn add_execution(
   pool: Pools,
-  client_name: String,
-  secret: String,
-) -> anyhow::Result<ClientModel> {
+  job_id: String,
+  client_id: String,
+  executed_at: chrono::DateTime<chrono::Utc>,
+  execution_result: String,
+) -> anyhow::Result<ExecutionModel> {
   let qry = match pool {
     Pools::Sqlite(p) => {
       sqlx::query_as(
         format!(
           "
-INSERT INTO clients( client_name, secret )
-VALUES ( {}, {} )
+INSERT INTO executions( job_id, client_id, executed_at, execution_result )
+VALUES ( {}, {}, {}, {} )
 RETURNING *
 ",
-          client_name, secret
+          job_id, client_id, executed_at, execution_result
         )
         .as_str(),
       )
@@ -64,11 +69,11 @@ RETURNING *
       sqlx::query_as(
         format!(
           "
-INSERT INTO clients( client_name, secret )
-VALUES ( \'{}\', \'{}\' )
+INSERT INTO executions( job_id, client_id, executed_at, execution_result )
+VALUES ( \'{}\', \'{}\', \'{}\', \'{}\' )
 RETURNING *
 ",
-          client_name, secret
+          job_id, client_id, executed_at, execution_result
         )
         .as_str(),
       )
@@ -76,7 +81,7 @@ RETURNING *
       .await
     }
   };
-  let r: crate::db::model::clients::ClientModel = match qry {
+  let r: crate::db::model::executions::ExecutionModel = match qry {
     Ok(rc) => rc,
     Err(e) => {
       anyhow::bail!("db error: {}", e);

@@ -2,7 +2,7 @@ use actix::Actor;
 use actix::AsyncContext;
 use remex_core as core;
 use remex_core::actors::server::Server;
-use remex_core::db::clients::Pools;
+use remex_core::db::Pools;
 //SERVER
 use sqlx::postgres::PgConnectOptions;
 use sqlx::PgPool;

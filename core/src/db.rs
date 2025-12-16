@@ -1,14 +1,17 @@
 use std::path::Path;
 
 use actix::{Actor, AsyncContext, Context, Handler, Message};
+use rand::Rng;
 use tracing::{error, info};
 
-use crate::db::clients::Pools;
-
 pub mod actions;
-pub mod clients;
-pub mod logs;
 pub mod model;
+
+#[derive(Debug, Clone)]
+pub enum Pools {
+  Sqlite(sqlx::SqlitePool),
+  Postgres(sqlx::PgPool),
+}
 
 #[derive(Clone)]
 pub struct Db {
@@ -28,14 +31,14 @@ impl DbMigrate for Db {
       Pools::Postgres(p) => {
         let migrations = {
           let crate_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-          Path::new(&crate_dir).join("../migrations/postgres")
+          Path::new(&crate_dir).join("../migrations/server")
         };
         sqlx::migrate::Migrator::new(migrations).await.unwrap().run(p).await.unwrap();
       }
       Pools::Sqlite(p) => {
         let migrations = {
           let crate_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-          Path::new(&crate_dir).join("../migrations/sqlite")
+          Path::new(&crate_dir).join("../migrations/endpoint")
         };
         sqlx::migrate::Migrator::new(migrations).await.unwrap().run(p).await.unwrap();
       }
@@ -113,19 +116,19 @@ impl Handler<NewClient> for Db {
     let addr = msg.addr.clone();
     let pool = self.pool.clone();
     let serv = self.server.clone();
+    let secret: String =
+      rand::rng().sample_iter(&rand::distr::Alphanumeric).take(32).map(char::from).collect();
     let futr = Box::pin(async move {
       if id1.is_none() {
-        tracing::info!("Generating new id");
-        let id = actions::clients::generate_id(pool.clone()).await.unwrap();
-        tracing::info!("Generated id: {}", id);
-        let b = actions::clients::add_client(pool, id, clientname1).await;
+        let b = actions::clients::add_client(pool, clientname1, secret).await;
 
         match b {
           Ok(client) => {
             tracing::info!("Client added with id: {}", &client.id);
             serv.do_send(crate::actors::server::DbClientIdentified {
               id: client.id,
-              client_name: client.name.clone(),
+              client_name: client.client_name.clone(),
+              secret: client.secret.clone(),
               addr,
             });
           }
@@ -138,7 +141,8 @@ impl Handler<NewClient> for Db {
           Ok(client) => {
             serv.do_send(crate::actors::server::DbClientIdentified {
               id: client.id,
-              client_name: client.name.clone(),
+              client_name: client.client_name.clone(),
+              secret: client.secret.clone(),
               addr,
             });
           }

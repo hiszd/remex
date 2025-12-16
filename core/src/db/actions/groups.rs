@@ -1,30 +1,30 @@
-use crate::db::{model::clients::ClientModel, Pools};
+use crate::db::{model::groups::GroupModel, Pools};
 
 /* **************************************************************************** */
 /* *********************************** Queries ******************************** */
 /* **************************************************************************** */
 
-pub async fn get_client(pool: Pools, client_id: String) -> Result<ClientModel, sqlx::Error> {
+pub async fn get_group(pool: Pools, group_id: String) -> Result<GroupModel, sqlx::Error> {
   let qry = match pool {
     Pools::Sqlite(p) => {
-      sqlx::query_as(format!("SELECT * FROM clients WHERE id = {}", client_id).as_str())
+      sqlx::query_as(format!("SELECT * FROM groups WHERE id = {}", group_id).as_str())
         .fetch_one(&p)
         .await
     }
     Pools::Postgres(p) => {
-      sqlx::query_as(format!("SELECT * FROM clients WHERE id = \'{}\'", client_id).as_str())
+      sqlx::query_as(format!("SELECT * FROM groups WHERE id = \'{}\'", group_id).as_str())
         .fetch_one(&p)
         .await
     }
   };
   match qry {
     Ok(rec) => {
-      let r: crate::db::model::clients::ClientModel = rec;
+      let r: crate::db::model::groups::GroupModel = rec;
       Ok(r)
     }
     Err(e) => match e {
       sqlx::Error::RowNotFound => {
-        tracing::error!("client not found");
+        tracing::error!("group not found");
         Err(e)
       }
       _ => {
@@ -39,21 +39,17 @@ pub async fn get_client(pool: Pools, client_id: String) -> Result<ClientModel, s
 /* ********************************** Commands ******************************** */
 /* **************************************************************************** */
 
-pub async fn add_client(
-  pool: Pools,
-  client_name: String,
-  secret: String,
-) -> anyhow::Result<ClientModel> {
+pub async fn add_group(pool: Pools, group_name: String) -> anyhow::Result<GroupModel> {
   let qry = match pool {
     Pools::Sqlite(p) => {
       sqlx::query_as(
         format!(
           "
-INSERT INTO clients( client_name, secret )
-VALUES ( {}, {} )
+INSERT INTO groups( group_name )
+VALUES ( {} )
 RETURNING *
 ",
-          client_name, secret
+          group_name
         )
         .as_str(),
       )
@@ -64,11 +60,11 @@ RETURNING *
       sqlx::query_as(
         format!(
           "
-INSERT INTO clients( client_name, secret )
-VALUES ( \'{}\', \'{}\' )
+INSERT INTO groups( group_name )
+VALUES ( \'{}\' )
 RETURNING *
 ",
-          client_name, secret
+          group_name
         )
         .as_str(),
       )
@@ -76,7 +72,7 @@ RETURNING *
       .await
     }
   };
-  let r: crate::db::model::clients::ClientModel = match qry {
+  let r: crate::db::model::groups::GroupModel = match qry {
     Ok(rc) => rc,
     Err(e) => {
       anyhow::bail!("db error: {}", e);

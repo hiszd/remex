@@ -1,30 +1,42 @@
-use crate::db::{model::clients::ClientModel, Pools};
+use crate::db::{model::jobs_groups::JobsGroupsModel, Pools};
 
 /* **************************************************************************** */
 /* *********************************** Queries ******************************** */
 /* **************************************************************************** */
 
-pub async fn get_client(pool: Pools, client_id: String) -> Result<ClientModel, sqlx::Error> {
+pub enum JobsGroupsSelector {
+  JobId(String),
+  GroupId(String),
+}
+
+pub async fn get_jobs_groups(
+  pool: Pools,
+  id: JobsGroupsSelector,
+) -> Result<JobsGroupsModel, sqlx::Error> {
+  let (sel, id) = match id {
+    JobsGroupsSelector::JobId(id) => ("job_id", id),
+    JobsGroupsSelector::GroupId(id) => ("group_id", id),
+  };
   let qry = match pool {
     Pools::Sqlite(p) => {
-      sqlx::query_as(format!("SELECT * FROM clients WHERE id = {}", client_id).as_str())
+      sqlx::query_as(format!("SELECT * FROM jobs_groups WHERE {} = {}", sel, id).as_str())
         .fetch_one(&p)
         .await
     }
     Pools::Postgres(p) => {
-      sqlx::query_as(format!("SELECT * FROM clients WHERE id = \'{}\'", client_id).as_str())
+      sqlx::query_as(format!("SELECT * FROM jobs_groups WHERE {} = \'{}\'", sel, id).as_str())
         .fetch_one(&p)
         .await
     }
   };
   match qry {
     Ok(rec) => {
-      let r: crate::db::model::clients::ClientModel = rec;
+      let r: JobsGroupsModel = rec;
       Ok(r)
     }
     Err(e) => match e {
       sqlx::Error::RowNotFound => {
-        tracing::error!("client not found");
+        tracing::error!("group not found");
         Err(e)
       }
       _ => {
@@ -39,21 +51,21 @@ pub async fn get_client(pool: Pools, client_id: String) -> Result<ClientModel, s
 /* ********************************** Commands ******************************** */
 /* **************************************************************************** */
 
-pub async fn add_client(
+pub async fn add_jobs_groups(
   pool: Pools,
-  client_name: String,
-  secret: String,
-) -> anyhow::Result<ClientModel> {
+  job_id: String,
+  group_id: String,
+) -> anyhow::Result<JobsGroupsModel> {
   let qry = match pool {
     Pools::Sqlite(p) => {
       sqlx::query_as(
         format!(
           "
-INSERT INTO clients( client_name, secret )
+INSERT INTO groups_clients( job_id, group_id )
 VALUES ( {}, {} )
 RETURNING *
 ",
-          client_name, secret
+          job_id, group_id
         )
         .as_str(),
       )
@@ -64,11 +76,11 @@ RETURNING *
       sqlx::query_as(
         format!(
           "
-INSERT INTO clients( client_name, secret )
+INSERT INTO groups_clients( job_id, group_id )
 VALUES ( \'{}\', \'{}\' )
 RETURNING *
 ",
-          client_name, secret
+          job_id, group_id
         )
         .as_str(),
       )
@@ -76,7 +88,7 @@ RETURNING *
       .await
     }
   };
-  let r: crate::db::model::clients::ClientModel = match qry {
+  let r: JobsGroupsModel = match qry {
     Ok(rc) => rc,
     Err(e) => {
       anyhow::bail!("db error: {}", e);
