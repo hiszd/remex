@@ -1,12 +1,12 @@
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
+use sqlx::{types::Uuid, FromRow};
 
 #[derive(Debug, FromRow, Deserialize, Serialize)]
 #[allow(non_snake_case)]
 pub struct LogModel {
-  pub id: String,
-  pub client_id: String,
-  pub execution_id: String,
+  pub id: Uuid,
+  pub client_id: Uuid,
+  pub execution_id: Uuid,
   pub log: String,
   #[serde(rename = "createdAt")]
   pub created_at: chrono::DateTime<chrono::Utc>,

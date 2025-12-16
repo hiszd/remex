@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
+use sqlx::{types::Uuid, FromRow};
 
 #[derive(Debug, FromRow, Deserialize, Serialize)]
 #[allow(non_snake_case)]
 pub struct JobModel {
-  pub id: String,
+  pub id: Uuid,
   pub job_name: String,
   pub job_type: String,
   pub job_status: String,

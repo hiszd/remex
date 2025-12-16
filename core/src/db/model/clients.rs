@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
+use sqlx::{types::Uuid, FromRow};
 
 #[derive(Debug, FromRow, Deserialize, Serialize)]
 #[allow(non_snake_case)]
 pub struct ClientModel {
-  pub id: String,
+  pub id: Uuid,
   pub secret: String,
   pub client_name: String,
   #[serde(rename = "createdAt")]

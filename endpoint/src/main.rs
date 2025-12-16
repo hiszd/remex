@@ -2,6 +2,7 @@
 use futures_util::{SinkExt as _, StreamExt as _};
 use gethostname::gethostname;
 use remex_core::codec;
+use sqlx::types::Uuid;
 use tokio::{net::TcpStream, select};
 use tracing::info;
 
@@ -13,7 +14,7 @@ const PORT: u16 = 4269;
 const SECRET: &str = "tZs3U%hqY^o$&*y%4HcF8&RyAKevUbZnkTsrjCzPGxfare3Yn9c7shVZETfPDPUc8xR%N38a!TL%2$WbkFhZqmH#jvw&d3^mryPD8Y8TqHoJHwyKSTJeQB7vK7QkW#&B";
 
 struct Context {
-  id: Option<String>,
+  id: Option<Uuid>,
   name: String,
   authenticated: bool,
 }
@@ -75,9 +76,9 @@ async fn main() {
                     Ok(codec::ClientResponse::Authenticated(id, name)) => {
                         info!("Correct secret, session authenticated. Id: {}, Name: {}", &id, &name);
                         ctx.name = name.clone();
-                        ctx.id = Some( id.clone() );
+                        ctx.id = Some( id );
                         ctx.authenticated = true;
-                        id::save_id(id.clone()).unwrap();
+                        id::save_id(id.to_string()).unwrap();
                     }
                     Ok(codec::ClientResponse::Disconnect(reason)) => {
                         info!("Disconnected: {}", reason.to_string());

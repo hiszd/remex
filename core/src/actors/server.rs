@@ -3,6 +3,7 @@
 //! room through `RemexServer`.
 
 use actix::prelude::*;
+use sqlx::types::Uuid;
 use tracing::{error, info};
 
 use crate::actors::session;
@@ -60,7 +61,7 @@ impl Actor for Server {
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct DbClientIdentified {
-  pub id: String,
+  pub id: Uuid,
   pub client_name: String,
   pub secret: String,
   pub addr: Addr<session::RemexSession>,
@@ -72,11 +73,11 @@ impl Handler<DbClientIdentified> for Server {
   type Result = ();
   fn handle(&mut self, db: DbClientIdentified, _: &mut Context<Self>) -> Self::Result {
     info!("Database client id being created with id {}", &db.id);
-    match self.sessions.insert(db.id.clone(), db.addr.clone()) {
+    match self.sessions.insert(db.id, db.addr.clone()) {
       Err(e) => error!("Could not create session with id: {}", e),
       _ => {
         db.addr.do_send(crate::actors::session::Identified {
-          id: db.id.clone(),
+          id: db.id,
           name: db.client_name,
         });
       }
@@ -122,7 +123,7 @@ impl Handler<Disconnect> for Server {
   fn handle(&mut self, msg: Disconnect, _: &mut Context<Self>) {
     info!("Session {} disconnected", &msg.id);
     // remove address
-    self.sessions.remove(msg.id.clone());
+    self.sessions.remove(sqlx::types::Uuid::parse_str(&msg.id.clone()).unwrap());
   }
 }
 

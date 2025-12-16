@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
 use anyhow::anyhow;
+use sqlx::types::Uuid;
 
 #[derive(Default)]
 pub struct SessionMap {
-  pub sessions: HashMap<String, actix::Addr<crate::actors::session::RemexSession>>,
+  pub sessions: HashMap<Uuid, actix::Addr<crate::actors::session::RemexSession>>,
 }
 
 // impl Default for SessionMap {
@@ -18,27 +19,24 @@ pub struct SessionMap {
 impl SessionMap {
   pub fn insert(
     &mut self,
-    id: String,
+    id: Uuid,
     addr: actix::Addr<crate::actors::session::RemexSession>,
   ) -> anyhow::Result<()> {
     let _ = self.sessions.insert(id, addr);
     Ok(())
   }
 
-  pub fn remove(
-    &mut self,
-    id: String,
-  ) -> Option<actix::Addr<crate::actors::session::RemexSession>> {
+  pub fn remove(&mut self, id: Uuid) -> Option<actix::Addr<crate::actors::session::RemexSession>> {
     self.sessions.remove(&id)
   }
 
-  pub fn exists(&self, id: String) -> bool { self.sessions.contains_key(&id) }
+  pub fn exists(&self, id: Uuid) -> bool { self.sessions.contains_key(&id) }
 
-  pub fn change_id(&mut self, old_id: String, new_id: String) -> anyhow::Result<()> {
-    if !self.exists(old_id.clone()) {
+  pub fn change_id(&mut self, old_id: Uuid, new_id: Uuid) -> anyhow::Result<()> {
+    if !self.exists(old_id) {
       return Err(anyhow!("Session does not exist"));
     }
-    if self.exists(new_id.clone()) {
+    if self.exists(new_id) {
       return Err(anyhow!("Duplicate session id, cannot assign"));
     }
     let old = match self.sessions.remove(&old_id) {
@@ -53,7 +51,7 @@ impl SessionMap {
 
   pub fn get_addr(
     &self,
-    id: String,
+    id: Uuid,
   ) -> anyhow::Result<actix::Addr<crate::actors::session::RemexSession>> {
     match self.sessions.get(&id) {
       Some(s) => Ok(s.clone()),

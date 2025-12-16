@@ -9,6 +9,7 @@ use aes_gcm::{AeadCore, Aes256Gcm, KeyInit};
 use byteorder::{BigEndian, ByteOrder};
 use serde::{Deserialize, Serialize};
 use serde_json as json;
+use sqlx::types::Uuid;
 use tracing::error;
 
 // const KEY: &str = "tZs3U%hqY^o$&*y%4HcF8&RyAKevUbZnkTsrjCzPGxfare3Yn9c7shVZETfPDPUc8xR%N38a!TL%2$WbkFhZqmH#jvw&d3^mryPD8Y8TqHoJHwyKSTJeQB7vK7QkW#&B";
@@ -102,7 +103,7 @@ pub enum ClientResponse {
   /// Identify
   Identify,
   /// Authenticated (Id, Name)
-  Authenticated(String, String),
+  Authenticated(Uuid, String),
   /// Result (Req, Result)
   Result(Box<ClientResponse>, Result<String, String>),
   /// Disconnect (Reason)

@@ -8,6 +8,7 @@ use std::{
 };
 
 use actix::prelude::*;
+use sqlx::types::Uuid;
 use tokio::{
   io::{split, WriteHalf},
   net::{TcpListener, TcpStream},
@@ -40,7 +41,7 @@ impl Handler<Disconnect> for RemexSession {
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct Identified {
-  pub id: String,
+  pub id: Uuid,
   pub name: String,
 }
 /// Handler for Identified message.
@@ -53,7 +54,7 @@ impl Handler<Identified> for RemexSession {
     }
     info!("Sending auth to peer");
     // send message to peer
-    self.framed.write(ClientResponse::Authenticated(id.id.clone(), id.name));
+    self.framed.write(ClientResponse::Authenticated(id.id, id.name));
   }
 }
 
@@ -250,7 +251,7 @@ impl RemexSession {
     framed: actix::io::FramedWrite<ClientResponse, WriteHalf<TcpStream>, ClientCodec>,
   ) -> RemexSession {
     RemexSession {
-      id: "".to_string(),
+      id: Uuid::new_v4().to_string(),
       client_id: None,
       name: None,
       addr,
