@@ -4,7 +4,8 @@ CREATE TABLE groups (
     id UUID PRIMARY KEY NOT NULL DEFAULT gen_random_uuid(),
     group_name TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (group_name)
 );
 
 CREATE TRIGGER update_groups_updated_at

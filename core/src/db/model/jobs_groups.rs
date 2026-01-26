@@ -8,6 +8,4 @@ pub struct JobsGroupsModel {
   pub group_id: Uuid,
   #[serde(rename = "createdAt")]
   pub created_at: chrono::DateTime<chrono::Utc>,
-  #[serde(rename = "updatedAt")]
-  pub updated_at: chrono::DateTime<chrono::Utc>,
 }

@@ -3,7 +3,7 @@ use sqlx::{types::Uuid, FromRow};
 
 #[derive(Debug, FromRow, Deserialize, Serialize)]
 #[allow(non_snake_case)]
-pub struct LogModel {
+pub struct LogsModel {
   pub id: Uuid,
   pub client_id: Uuid,
   pub execution_id: Uuid,

@@ -42,3 +42,5 @@ rand = "0.9"
 derive_more = { version = "2", features = ["full"] }
 dotenvy = "0.15"
 futures = "0.3.31"
+thiserror = "2.0.17"
+sea-query = "0.32.7"

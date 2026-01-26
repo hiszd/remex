@@ -3,7 +3,7 @@ use sqlx::{types::Uuid, FromRow};
 
 #[derive(Debug, FromRow, Deserialize, Serialize)]
 #[allow(non_snake_case)]
-pub struct ExecutionModel {
+pub struct ExecutionsModel {
   pub id: Uuid,
   pub job_id: Option<String>,
   pub client_id: String,

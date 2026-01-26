@@ -4,8 +4,15 @@ use actix::{Actor, AsyncContext, Context, Handler, Message};
 use rand::Rng;
 use tracing::{error, info};
 
+use crate::db::{
+  self,
+  containers::{groups::GroupCont, jobs::JobCont},
+};
+
 pub mod actions;
+pub mod containers;
 pub mod model;
+pub mod util;
 
 #[derive(Debug, Clone)]
 pub enum Pools {
@@ -50,10 +57,68 @@ impl Actor for Db {
   type Context = Context<Db>;
 
   fn started(&mut self, ctx: &mut Context<Self>) {
-    let db = self.clone();
-    let futr = async move { db.migrate().await };
-    let fut = actix::fut::wrap_future::<_, Self>(futr);
-    ctx.spawn(fut);
+    {
+      let db = self.clone();
+      let futr = async move { db.migrate().await };
+      let fut = actix::fut::wrap_future::<_, Self>(futr);
+      ctx.wait(fut);
+    }
+    {
+      let db2 = self.clone();
+      let futr2 = async move {
+        let job = actions::jobs::requests::get_job_complete(
+          db2.pool.clone(),
+          sqlx::types::Uuid::parse_str("03d82934-3bf2-45f1-a14c-7bace871d5a4").unwrap(),
+        )
+        .await
+        .unwrap();
+        println!("job: {:?}", job);
+        tracing::info!("testing table join");
+        match db2.pool.clone() {
+          Pools::Postgres(pool) => {
+            let mut g = GroupCont::new(&pool, "test_group".to_string()).await;
+            println!("gotten group: {:?}", g);
+            if g.clients.is_empty() {
+              tracing::info!("group has no clients");
+              let c = actions::clients::requests::get_client(
+                db::Pools::Postgres(pool.clone()),
+                None,
+                Some("devel".to_string()),
+              )
+              .await;
+              match c {
+                Ok(c) => {
+                  g.add_client(&pool, c).await;
+                }
+                Err(e) => match e {
+                  sqlx::Error::RowNotFound => {
+                    tracing::error!("Client with the name \"devel\" not found");
+                  }
+                  _ => {
+                    tracing::error!("db error: {}", e);
+                  }
+                },
+              }
+            } else {
+              for c in g.clients {
+                println!("client: {}", c.client_name);
+              }
+            }
+            let mut j = JobCont::new(
+              &pool,
+              "test_job".to_string(),
+              "test".to_string(),
+              "disabled".to_string(),
+              "bash".to_string(),
+            )
+            .await;
+          }
+          _ => panic!("Client pool is not allowed for this purpose"),
+        }
+      };
+      let fut2 = actix::fut::wrap_future::<_, Self>(futr2);
+      ctx.spawn(fut2);
+    }
   }
 
   fn stopped(&mut self, ctx: &mut Context<Self>) {
@@ -120,7 +185,7 @@ impl Handler<NewClient> for Db {
       rand::rng().sample_iter(&rand::distr::Alphanumeric).take(32).map(char::from).collect();
     let futr = Box::pin(async move {
       if id1.is_none() {
-        let b = actions::clients::add_client(pool, clientname1, secret).await;
+        let b = actions::clients::commands::add_client(pool, clientname1, secret).await;
 
         match b {
           Ok(client) => {
@@ -136,7 +201,12 @@ impl Handler<NewClient> for Db {
         }
       } else {
         tracing::info!("Using existing id");
-        let b = actions::clients::get_client(pool, id1.clone().unwrap()).await;
+        let b = actions::clients::requests::get_client(
+          pool,
+          Some(sqlx::types::Uuid::parse_str(id1.clone().unwrap().as_str()).unwrap()),
+          None,
+        )
+        .await;
         match b {
           Ok(client) => {
             serv.do_send(crate::actors::server::DbClientIdentified {
