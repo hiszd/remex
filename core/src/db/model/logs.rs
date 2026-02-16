@@ -1,15 +1,31 @@
+use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
-use sqlx::{types::Uuid, FromRow};
-
-#[derive(Debug, FromRow, Deserialize, Serialize)]
-#[allow(non_snake_case)]
-pub struct LogModel {
-  pub id: Uuid,
-  pub client_id: Uuid,
-  pub execution_id: Uuid,
+#[derive(Queryable, Selectable)]
+#[diesel(table_name = crate::db::schema::logs)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct Log {
+  pub id: String,
+  pub client_id: String,
+  pub execution_id: String,
   pub log: String,
-  #[serde(rename = "createdAt")]
-  pub created_at: chrono::DateTime<chrono::Utc>,
-  #[serde(rename = "updatedAt")]
-  pub updated_at: chrono::DateTime<chrono::Utc>,
+  pub created_at: chrono::NaiveDateTime,
+  pub updated_at: chrono::NaiveDateTime,
+}
+
+#[derive(Queryable, Insertable, Serialize, Deserialize)]
+#[diesel(table_name = crate::db::schema::logs)]
+pub struct NewLog {
+  pub id: String,
+  pub client_id: String,
+  pub execution_id: String,
+  pub log: String,
+}
+
+#[derive(Deserialize, AsChangeset)]
+#[diesel(table_name = crate::db::schema::logs)]
+pub struct UpdateLog {
+  id: String,
+  client_id: String,
+  execution_id: String,
+  log: String,
 }

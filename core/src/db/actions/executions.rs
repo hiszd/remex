@@ -1,20 +1,20 @@
-use crate::db::{model::executions::ExecutionModel, Pools};
+use crate::db::{model::executions::ExecutionModel, Connections};
 
 /* **************************************************************************** */
 /* *********************************** Queries ******************************** */
 /* **************************************************************************** */
 
 pub async fn get_execution(
-  pool: Pools,
+  pool: Connections,
   execution_id: String,
 ) -> Result<ExecutionModel, sqlx::Error> {
   let qry = match pool {
-    Pools::Sqlite(p) => {
+    Connections::Sqlite(p) => {
       sqlx::query_as(format!("SELECT * FROM executions WHERE id = {}", execution_id).as_str())
         .fetch_one(&p)
         .await
     }
-    Pools::Postgres(p) => {
+    Connections::Postgres(p) => {
       sqlx::query_as(format!("SELECT * FROM executions WHERE id = \'{}\'", execution_id).as_str())
         .fetch_one(&p)
         .await
@@ -43,14 +43,14 @@ pub async fn get_execution(
 /* **************************************************************************** */
 
 pub async fn add_execution(
-  pool: Pools,
+  pool: Connections,
   job_id: String,
   client_id: String,
   executed_at: chrono::DateTime<chrono::Utc>,
   execution_result: String,
 ) -> anyhow::Result<ExecutionModel> {
   let qry = match pool {
-    Pools::Sqlite(p) => {
+    Connections::Sqlite(p) => {
       sqlx::query_as(
         format!(
           "
@@ -65,7 +65,7 @@ RETURNING *
       .fetch_one(&p)
       .await
     }
-    Pools::Postgres(p) => {
+    Connections::Postgres(p) => {
       sqlx::query_as(
         format!(
           "

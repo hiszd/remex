@@ -1,14 +1,31 @@
+use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
-use sqlx::{types::Uuid, FromRow};
 
-#[derive(Debug, FromRow, Deserialize, Serialize)]
-#[allow(non_snake_case)]
-pub struct ClientModel {
-  pub id: Uuid,
+#[derive(Queryable, Selectable, Serialize)]
+#[diesel(table_name = crate::db::schema::clients)]
+pub struct Client {
+  pub id: String,
+  pub secret: String,
+  pub client_name: String,
+  pub created_at: chrono::DateTime<chrono::Utc>,
+  pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Queryable, Insertable, Serialize, Deserialize)]
+#[diesel(table_name = crate::db::schema::clients)]
+pub struct NewClient {
+  pub id: String,
   pub secret: String,
   pub client_name: String,
   #[serde(rename = "createdAt")]
   pub created_at: chrono::DateTime<chrono::Utc>,
   #[serde(rename = "updatedAt")]
   pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Deserialize, AsChangeset)]
+#[diesel(table_name = crate::db::schema::clients)]
+pub struct UpdateClient {
+  secret: String,
+  client_name: String,
 }

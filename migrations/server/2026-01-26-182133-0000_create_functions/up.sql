@@ -1,3 +1,4 @@
+-- Your SQL goes here
 CREATE OR REPLACE FUNCTION update_modified_column()
 RETURNS TRIGGER AS $$
 BEGIN

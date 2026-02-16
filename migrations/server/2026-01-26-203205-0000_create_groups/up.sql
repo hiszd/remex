@@ -1,7 +1,7 @@
--- Add migration script here
+-- Your SQL goes here
 
 CREATE TABLE groups (
-    id UUID PRIMARY KEY NOT NULL DEFAULT gen_random_uuid(),
+    id TEXT PRIMARY KEY NOT NULL,
     group_name TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP

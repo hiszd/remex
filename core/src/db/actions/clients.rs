@@ -1,32 +1,25 @@
-use crate::db::{model::clients::ClientModel, Pools};
+use diesel::{ExpressionMethods, QueryDsl, RunQueryDsl, SelectableHelper};
+
+use crate::db::{
+  establish_connection,
+  model::clients::{Client, NewClient, UpdateClient},
+  ConnectionType,
+};
 
 /* **************************************************************************** */
 /* *********************************** Queries ******************************** */
 /* **************************************************************************** */
 
-pub async fn get_client(pool: Pools, client_id: String) -> Result<ClientModel, sqlx::Error> {
-  let qry = match pool {
-    Pools::Sqlite(p) => {
-      sqlx::query_as(format!("SELECT * FROM clients WHERE id = {}", client_id).as_str())
-        .fetch_one(&p)
-        .await
-    }
-    Pools::Postgres(p) => {
-      sqlx::query_as(format!("SELECT * FROM clients WHERE id = \'{}\'", client_id).as_str())
-        .fetch_one(&p)
-        .await
-    }
-  };
+pub async fn get_client(
+  ctype: ConnectionType,
+  client_id: uuid::Uuid,
+) -> Result<Client, diesel::result::Error> {
+  use crate::db::schema::clients::dsl::*;
+  let mut conn = establish_connection(ctype);
+  let qry = clients.filter(id.eq(client_id)).select(Client::as_select()).get_result(&mut conn);
   match qry {
-    Ok(rec) => {
-      let r: crate::db::model::clients::ClientModel = rec;
-      Ok(r)
-    }
+    Ok(rec) => Ok(rec),
     Err(e) => match e {
-      sqlx::Error::RowNotFound => {
-        tracing::error!("client not found");
-        Err(e)
-      }
       _ => {
         tracing::error!("db error: {}", e);
         Err(e)
@@ -40,12 +33,12 @@ pub async fn get_client(pool: Pools, client_id: String) -> Result<ClientModel, s
 /* **************************************************************************** */
 
 pub async fn add_client(
-  pool: Pools,
+  pool: Connections,
   client_name: String,
   secret: String,
 ) -> anyhow::Result<ClientModel> {
   let qry = match pool {
-    Pools::Sqlite(p) => {
+    Connections::Sqlite(p) => {
       sqlx::query_as(
         format!(
           "
@@ -60,7 +53,7 @@ RETURNING *
       .fetch_one(&p)
       .await
     }
-    Pools::Postgres(p) => {
+    Connections::Postgres(p) => {
       sqlx::query_as(
         format!(
           "

@@ -8,7 +8,6 @@ use std::{
 };
 
 use actix::prelude::*;
-use sqlx::types::Uuid;
 use tokio::{
   io::{split, WriteHalf},
   net::{TcpListener, TcpStream},
@@ -41,7 +40,7 @@ impl Handler<Disconnect> for RemexSession {
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct Identified {
-  pub id: Uuid,
+  pub id: uuid::Uuid,
   pub name: String,
 }
 /// Handler for Identified message.
@@ -115,6 +114,8 @@ pub struct RemexSession {
   identified: bool,
   /// this is address of Remex server
   addr: Addr<Server>,
+  /// this is address of Remex db
+  db: Addr<crate::db::Db>,
   /// Client must send ping at least once per 10 seconds, otherwise we drop
   /// connection.
   hb: Instant,
@@ -136,7 +137,7 @@ impl Actor for RemexSession {
 
   fn stopping(&mut self, _: &mut Self::Context) -> Running {
     // notify Remex server
-    self.addr.do_send(server::Disconnect {
+    self.addr.do_send(server::msg::Disconnect {
       id: self.id.clone(),
     });
     Running::Stop
@@ -157,7 +158,7 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
         info!("Receive message");
         self
           .addr
-          .send(server::Command {
+          .send(server::msg::Command {
             id: self.id.clone(),
             command: cmd,
           })
@@ -190,7 +191,7 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
           let addr = ctx.address();
           self
             .addr
-            .send(crate::actors::server::Connect {
+            .send(server::msg::Connect {
               id: None,
               client_name: self.name.clone().unwrap(),
               addr: addr.clone(),
@@ -221,7 +222,7 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
         let addr = ctx.address();
         self
           .addr
-          .send(crate::actors::server::Connect {
+          .send(server::msg::Connect {
             id: Some(id),
             client_name: self.name.clone().unwrap(),
             addr: addr.clone(),
@@ -247,14 +248,16 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
 /// Helper methods
 impl RemexSession {
   pub fn new(
-    addr: Addr<Server>,
+    server: Addr<crate::actors::server::Server>,
+    db: Addr<crate::db::Db>,
     framed: actix::io::FramedWrite<ClientResponse, WriteHalf<TcpStream>, ClientCodec>,
   ) -> RemexSession {
     RemexSession {
-      id: Uuid::new_v4().to_string(),
+      id: uuid::Uuid::new_v4().to_string(),
       client_id: None,
       name: None,
-      addr,
+      addr: server,
+      db,
       hb: Instant::now(),
       authenticated: false,
       identified: false,
@@ -273,7 +276,7 @@ impl RemexSession {
         info!("Client heartbeat failed, disconnecting!");
 
         // notify Remex server
-        act.addr.do_send(server::Disconnect { id: act.id.clone() });
+        act.addr.do_send(server::msg::Disconnect { id: act.id.clone() });
 
         // stop actor
         ctx.stop();
@@ -287,18 +290,19 @@ impl RemexSession {
 
 /// Define TCP server that will accept incoming TCP connection and create
 /// Client actors.
-pub async fn tcp_server(s: &str, server: Addr<Server>) {
+pub async fn tcp_server(s: &str, db: Addr<crate::db::Db>, server: Addr<Server>) {
   // Create server listener
   let addr = net::SocketAddr::from_str(s).unwrap();
 
   let listener = TcpListener::bind(&addr).await.unwrap();
 
   while let Ok((stream, _)) = listener.accept().await {
+    let db = db.clone();
     let server = server.clone();
     RemexSession::create(|ctx| {
       let (r, w) = split(stream);
       RemexSession::add_stream(FramedRead::new(r, ClientCodec), ctx);
-      RemexSession::new(server, actix::io::FramedWrite::new(w, ClientCodec, ctx))
+      RemexSession::new(server, db, actix::io::FramedWrite::new(w, ClientCodec, ctx))
     });
   }
 }

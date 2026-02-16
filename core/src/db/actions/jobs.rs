@@ -1,17 +1,17 @@
-use crate::db::{model::jobs::JobModel, Pools};
+use crate::db::{model::jobs::JobModel, Connections};
 
 /* **************************************************************************** */
 /* *********************************** Queries ******************************** */
 /* **************************************************************************** */
 
-pub async fn get_job(pool: Pools, job_id: String) -> Result<JobModel, sqlx::Error> {
+pub async fn get_job(pool: Connections, job_id: String) -> Result<JobModel, sqlx::Error> {
   let qry = match pool {
-    Pools::Sqlite(p) => {
+    Connections::Sqlite(p) => {
       sqlx::query_as(format!("SELECT * FROM jobs WHERE id = {}", job_id).as_str())
         .fetch_one(&p)
         .await
     }
-    Pools::Postgres(p) => {
+    Connections::Postgres(p) => {
       sqlx::query_as(format!("SELECT * FROM jobs WHERE id = \'{}\'", job_id).as_str())
         .fetch_one(&p)
         .await
@@ -40,7 +40,7 @@ pub async fn get_job(pool: Pools, job_id: String) -> Result<JobModel, sqlx::Erro
 /* **************************************************************************** */
 
 pub async fn add_job(
-  pool: Pools,
+  pool: Connections,
   job_name: String,
   job_type: String,
   job_status: Option<String>,
@@ -52,7 +52,7 @@ pub async fn add_job(
     "active".to_string()
   };
   let qry = match pool {
-    Pools::Sqlite(p) => {
+    Connections::Sqlite(p) => {
       sqlx::query_as(
         format!(
           "
@@ -67,7 +67,7 @@ RETURNING *
       .fetch_one(&p)
       .await
     }
-    Pools::Postgres(p) => {
+    Connections::Postgres(p) => {
       sqlx::query_as(
         format!(
           "

@@ -1,7 +1,7 @@
--- Add migration script here
+-- Your SQL goes here
 
 CREATE TABLE jobs (
-    id UUID PRIMARY KEY NOT NULL DEFAULT gen_random_uuid(),
+    id TEXT PRIMARY KEY NOT NULL,
     job_name TEXT NOT NULL,
     job_type TEXT NOT NULL,
     job_status TEXT NOT NULL,

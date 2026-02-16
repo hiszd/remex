@@ -1,17 +1,17 @@
-use crate::db::{model::groups::GroupModel, Pools};
+use crate::db::{model::groups::GroupModel, Connections};
 
 /* **************************************************************************** */
 /* *********************************** Queries ******************************** */
 /* **************************************************************************** */
 
-pub async fn get_group(pool: Pools, group_id: String) -> Result<GroupModel, sqlx::Error> {
+pub async fn get_group(pool: Connections, group_id: String) -> Result<GroupModel, sqlx::Error> {
   let qry = match pool {
-    Pools::Sqlite(p) => {
+    Connections::Sqlite(p) => {
       sqlx::query_as(format!("SELECT * FROM groups WHERE id = {}", group_id).as_str())
         .fetch_one(&p)
         .await
     }
-    Pools::Postgres(p) => {
+    Connections::Postgres(p) => {
       sqlx::query_as(format!("SELECT * FROM groups WHERE id = \'{}\'", group_id).as_str())
         .fetch_one(&p)
         .await
@@ -39,9 +39,9 @@ pub async fn get_group(pool: Pools, group_id: String) -> Result<GroupModel, sqlx
 /* ********************************** Commands ******************************** */
 /* **************************************************************************** */
 
-pub async fn add_group(pool: Pools, group_name: String) -> anyhow::Result<GroupModel> {
+pub async fn add_group(pool: Connections, group_name: String) -> anyhow::Result<GroupModel> {
   let qry = match pool {
-    Pools::Sqlite(p) => {
+    Connections::Sqlite(p) => {
       sqlx::query_as(
         format!(
           "
@@ -56,7 +56,7 @@ RETURNING *
       .fetch_one(&p)
       .await
     }
-    Pools::Postgres(p) => {
+    Connections::Postgres(p) => {
       sqlx::query_as(
         format!(
           "

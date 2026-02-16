@@ -1,4 +1,4 @@
-use crate::db::{model::jobs_groups::JobsGroupsModel, Pools};
+use crate::db::{model::jobs_groups::JobsGroupsModel, Connections};
 
 /* **************************************************************************** */
 /* *********************************** Queries ******************************** */
@@ -10,7 +10,7 @@ pub enum JobsGroupsSelector {
 }
 
 pub async fn get_jobs_groups(
-  pool: Pools,
+  pool: Connections,
   id: JobsGroupsSelector,
 ) -> Result<JobsGroupsModel, sqlx::Error> {
   let (sel, id) = match id {
@@ -18,12 +18,12 @@ pub async fn get_jobs_groups(
     JobsGroupsSelector::GroupId(id) => ("group_id", id),
   };
   let qry = match pool {
-    Pools::Sqlite(p) => {
+    Connections::Sqlite(p) => {
       sqlx::query_as(format!("SELECT * FROM jobs_groups WHERE {} = {}", sel, id).as_str())
         .fetch_one(&p)
         .await
     }
-    Pools::Postgres(p) => {
+    Connections::Postgres(p) => {
       sqlx::query_as(format!("SELECT * FROM jobs_groups WHERE {} = \'{}\'", sel, id).as_str())
         .fetch_one(&p)
         .await
@@ -52,12 +52,12 @@ pub async fn get_jobs_groups(
 /* **************************************************************************** */
 
 pub async fn add_jobs_groups(
-  pool: Pools,
+  pool: Connections,
   job_id: String,
   group_id: String,
 ) -> anyhow::Result<JobsGroupsModel> {
   let qry = match pool {
-    Pools::Sqlite(p) => {
+    Connections::Sqlite(p) => {
       sqlx::query_as(
         format!(
           "
@@ -72,7 +72,7 @@ RETURNING *
       .fetch_one(&p)
       .await
     }
-    Pools::Postgres(p) => {
+    Connections::Postgres(p) => {
       sqlx::query_as(
         format!(
           "

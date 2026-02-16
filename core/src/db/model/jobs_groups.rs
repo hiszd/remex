@@ -1,13 +1,25 @@
+use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
-use sqlx::{types::Uuid, FromRow};
 
-#[derive(Debug, FromRow, Deserialize, Serialize)]
-#[allow(non_snake_case)]
-pub struct JobsGroupsModel {
-  pub job_id: Uuid,
-  pub group_id: Uuid,
-  #[serde(rename = "createdAt")]
+#[derive(Queryable, Serialize)]
+#[diesel(table_name = crate::db::schema::jobs_groups)]
+pub struct JobGroups {
+  pub job_id: String,
+  pub group_id: String,
   pub created_at: chrono::DateTime<chrono::Utc>,
-  #[serde(rename = "updatedAt")]
   pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Queryable, Insertable, Serialize, Deserialize)]
+#[diesel(table_name = crate::db::schema::jobs_groups)]
+pub struct NewJobGroups {
+  pub job_id: String,
+  pub group_id: String,
+}
+
+#[derive(Deserialize, AsChangeset)]
+#[diesel(table_name = crate::db::schema::jobs_groups)]
+pub struct UpdateJobGroups {
+  job_id: String,
+  group_id: String,
 }

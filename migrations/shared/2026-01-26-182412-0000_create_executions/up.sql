@@ -1,10 +1,10 @@
--- Add migration script here
+-- Your SQL goes here
 
 CREATE TABLE executions (
-    id UUID PRIMARY KEY NOT NULL DEFAULT gen_random_uuid(),
-    job_id UUID,
+    id TEXT PRIMARY KEY NOT NULL,
+    job_id TEXT,
     FOREIGN KEY (job_id) REFERENCES jobs (id),
-    client_id UUID NOT NULL,
+    client_id TEXT NOT NULL,
     FOREIGN KEY (client_id) REFERENCES clients (id) ON DELETE CASCADE,
     executed_at TIMESTAMPTZ,
     execution_result TEXT,

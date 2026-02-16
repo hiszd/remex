@@ -1,17 +1,17 @@
-use crate::db::{model::logs::LogModel, Pools};
+use crate::db::{model::logs::LogModel, Connections};
 
 /* *********************************** Queries ******************************** */
 /* **************************************************************************** */
 /* **************************************************************************** */
 
-pub async fn get_log(pool: Pools, log_id: String) -> Result<LogModel, sqlx::Error> {
+pub async fn get_log(pool: Connections, log_id: String) -> Result<LogModel, sqlx::Error> {
   let qry = match pool {
-    Pools::Sqlite(p) => {
+    Connections::Sqlite(p) => {
       sqlx::query_as(format!("SELECT * FROM logs WHERE id = {}", log_id).as_str())
         .fetch_one(&p)
         .await
     }
-    Pools::Postgres(p) => {
+    Connections::Postgres(p) => {
       sqlx::query_as(format!("SELECT * FROM logs WHERE id = \'{}\'", log_id).as_str())
         .fetch_one(&p)
         .await
@@ -40,12 +40,12 @@ pub async fn get_log(pool: Pools, log_id: String) -> Result<LogModel, sqlx::Erro
 /* **************************************************************************** */
 
 pub async fn add_log(
-  pool: Pools,
+  pool: Connections,
   client_id: String,
   execution_id: Option<String>,
 ) -> anyhow::Result<LogModel> {
   let qry = match pool {
-    Pools::Sqlite(p) => {
+    Connections::Sqlite(p) => {
       sqlx::query_as(
         format!(
           "
@@ -70,7 +70,7 @@ RETURNING *
       .fetch_one(&p)
       .await
     }
-    Pools::Postgres(p) => {
+    Connections::Postgres(p) => {
       sqlx::query_as(
         format!(
           "
