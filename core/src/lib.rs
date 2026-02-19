@@ -4,6 +4,7 @@ pub mod actors;
 pub mod codec;
 pub mod db;
 pub mod sessionmap;
+pub mod utils;
 
 pub type RawPacket = [u8; 128];
 

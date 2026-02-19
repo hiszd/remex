@@ -3,7 +3,6 @@
 CREATE TABLE logs (
     id TEXT PRIMARY KEY NOT NULL,
     client_id TEXT NOT NULL,
-    FOREIGN KEY (client_id) REFERENCES clients (id) ON DELETE CASCADE,
     execution_id TEXT NOT NULL,
     FOREIGN KEY (execution_id) REFERENCES executions (id) ON DELETE CASCADE,
     log TEXT NOT NULL,

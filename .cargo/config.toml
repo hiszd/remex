@@ -1,4 +1,4 @@
 [env]
-DATABASE_URL="postgres://postgres:H@ck3r345@localhost/remex"
-POSTGRES_USER="postgres"
-POSTGRES_PASSWORD="H@ck3r345"
+DATABASE_URL = "postgresql://postgres:H%40ck3r345@192.168.10.132:5432/remex"
+POSTGRES_USER = "postgres"
+POSTGRES_PASSWORD = "H@ck3r345"

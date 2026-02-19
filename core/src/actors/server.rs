@@ -1,6 +1,4 @@
-//! `RemexServer` is an actor. It maintains list of connection client session.
-//! And manages available rooms. Peers send messages to other peers in same
-//! room through `RemexServer`.
+//! `RemexServer` is an actor. It maintains list of connected client sessions.
 
 use actix::prelude::*;
 
@@ -8,15 +6,26 @@ use crate::sessionmap::SessionMap;
 
 pub mod msg;
 
-/// `RemexServer` manages chat rooms and responsible for coordinating chat
-/// session. implementation is super primitive
-pub struct Server {
-  pub sessions: SessionMap<uuid::Uuid>,
+/// `RemexServer` manages connected clients and keeps track of the currently connected ones.
+// TODO: store more than just the session ID from each client. Maybe things like:
+// time connection started, ip address, etc...
+pub struct RemexServer {
+  pub sessions: SessionMap<String>,
+  pub migrated: bool,
 }
 
 /// Make actor from `RemexServer`
-impl Actor for Server {
+impl Actor for RemexServer {
   /// We are going to use simple Context, we just need ability to communicate
   /// with other actors.
   type Context = Context<Self>;
+  fn started(&mut self, _ctx: &mut Context<Self>) {
+    self.migrated = false;
+    // migrate the database and panic if migration fails
+    futures::executor::block_on(async {
+      crate::db::migrate(crate::db::ConnectionType::Postgres).await.unwrap();
+      self.migrated = true;
+      tracing::info!("Database migrated");
+    });
+  }
 }

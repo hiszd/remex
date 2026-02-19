@@ -2,7 +2,6 @@
 use futures_util::{SinkExt as _, StreamExt as _};
 use gethostname::gethostname;
 use remex_core::codec;
-use sqlx::types::Uuid;
 use tokio::{net::TcpStream, select};
 use tracing::info;
 
@@ -14,7 +13,7 @@ const PORT: u16 = 4269;
 const SECRET: &str = "tZs3U%hqY^o$&*y%4HcF8&RyAKevUbZnkTsrjCzPGxfare3Yn9c7shVZETfPDPUc8xR%N38a!TL%2$WbkFhZqmH#jvw&d3^mryPD8Y8TqHoJHwyKSTJeQB7vK7QkW#&B";
 
 struct Context {
-  id: Option<Uuid>,
+  id: Option<String>,
   name: String,
   authenticated: bool,
 }
@@ -47,13 +46,13 @@ async fn main() {
         select! {
             Some(msg) = framed.next() => {
                 match msg {
-                    Ok(codec::ClientResponse::Command(ref cmd)) => {
+                    Ok(codec::ServerResponse::Command(ref cmd)) => {
                         info!("command: {cmd}");
                     }
-                    Ok(codec::ClientResponse::Message(ref msg)) => {
+                    Ok(codec::ServerResponse::Message(ref msg)) => {
                         info!("message: {msg}");
                     }
-                    Ok(codec::ClientResponse::Identify) => {
+                    Ok(codec::ServerResponse::Identify) => {
                         info!("Name sent {}, and secret {}", ctx.name.clone(), SECRET.to_string());
                         let id = id::get_id();
                         match id {
@@ -73,14 +72,14 @@ async fn main() {
                             }
                         }
                     }
-                    Ok(codec::ClientResponse::Authenticated(id, name)) => {
+                    Ok(codec::ServerResponse::Authenticated(id, name)) => {
                         info!("Correct secret, session authenticated. Id: {}, Name: {}", &id, &name);
                         ctx.name = name.clone();
                         ctx.id = Some( id );
                         ctx.authenticated = true;
                         id::save_id(id.to_string()).unwrap();
                     }
-                    Ok(codec::ClientResponse::Disconnect(reason)) => {
+                    Ok(codec::ServerResponse::Disconnect(reason)) => {
                         info!("Disconnected: {}", reason.to_string());
                         match reason {
                             codec::DisconnectReason::InvalidClientId => {
@@ -96,7 +95,7 @@ async fn main() {
                     }
 
                     // respond to pings with a "pong"
-                    Ok(codec::ClientResponse::Ping) => { framed.send(codec::ClientRequest::Ping).await.unwrap(); },
+                    Ok(codec::ServerResponse::Ping) => { framed.send(codec::ClientRequest::Ping).await.unwrap(); },
 
                     _ => { eprintln!("{msg:?}"); }
                 }

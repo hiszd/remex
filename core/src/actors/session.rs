@@ -8,6 +8,7 @@ use std::{
 };
 
 use actix::prelude::*;
+use diesel::{ExpressionMethods, QueryDsl, RunQueryDsl, SelectableHelper};
 use tokio::{
   io::{split, WriteHalf},
   net::{TcpListener, TcpStream},
@@ -15,89 +16,15 @@ use tokio::{
 use tokio_util::codec::FramedRead;
 use tracing::info;
 
-use crate::actors::server::{self, Server};
-use crate::codec::{ClientCodec, ClientRequest, ClientResponse};
+use crate::codec::{
+  ClientCodec, ClientRequest, ConnectionRequest, ConnectionResponse, ServerResponse,
+};
+use crate::{
+  actors::server::{self, RemexServer},
+  codec::IdentifyType,
+};
 
-/// Force session close
-#[derive(Message)]
-#[rtype(result = "()")]
-pub struct Disconnect {
-  pub reason: crate::codec::DisconnectReason,
-}
-/// Handler for Disconnect message.
-impl Handler<Disconnect> for RemexSession {
-  type Result = ();
-  fn handle(&mut self, disc: Disconnect, _: &mut Context<Self>) -> Self::Result {
-    info!("Sending disconnect to peer");
-    // send message to peer
-    self.framed.write(ClientResponse::Disconnect(disc.reason));
-  }
-}
-
-/// Message for chat server communications
-///
-/// New chat session is created
-#[derive(Message)]
-#[rtype(result = "()")]
-pub struct Identified {
-  pub id: uuid::Uuid,
-  pub name: String,
-}
-/// Handler for Identified message.
-impl Handler<Identified> for RemexSession {
-  type Result = ();
-  fn handle(&mut self, id: Identified, _: &mut Context<Self>) -> Self::Result {
-    if !self.authenticated {
-      self.authenticated = true;
-      self.identified = true;
-    }
-    info!("Sending auth to peer");
-    // send message to peer
-    self.framed.write(ClientResponse::Authenticated(id.id, id.name));
-  }
-}
-
-/// Message for chat server communications
-///
-/// New chat session is created
-#[derive(Message)]
-#[rtype(result = "()")]
-pub struct Message {
-  pub msg: String,
-}
-/// Handler for Identified message.
-impl Handler<Message> for RemexSession {
-  type Result = ();
-  fn handle(&mut self, msg: Message, _: &mut Context<Self>) -> Self::Result {
-    info!("session message: {}", &msg.msg);
-    if !self.authenticated {
-      return;
-    }
-    // send message to peer
-    self.framed.write(ClientResponse::Message(msg.msg));
-  }
-}
-
-/// Message for chat server communications
-///
-/// New chat session is created
-#[derive(Message)]
-#[rtype(result = "()")]
-pub struct Command {
-  pub cmd: String,
-}
-/// Handler for Identified message.
-impl Handler<Command> for RemexSession {
-  type Result = ();
-  fn handle(&mut self, cmd: Command, _: &mut Context<Self>) -> Self::Result {
-    info!("session command: {}", &cmd.cmd);
-    if !self.authenticated {
-      return;
-    }
-    // send message to peer
-    self.framed.write(ClientResponse::Command(cmd.cmd));
-  }
-}
+pub mod msg;
 
 #[allow(dead_code)]
 /// `RemexSession` actor is responsible for tcp peer communications.
@@ -113,14 +40,12 @@ pub struct RemexSession {
   /// is client identified
   identified: bool,
   /// this is address of Remex server
-  addr: Addr<Server>,
-  /// this is address of Remex db
-  db: Addr<crate::db::Db>,
+  addr: Addr<RemexServer>,
   /// Client must send ping at least once per 10 seconds, otherwise we drop
   /// connection.
   hb: Instant,
   /// Framed wrapper
-  framed: actix::io::FramedWrite<ClientResponse, WriteHalf<TcpStream>, ClientCodec>,
+  framed: actix::io::FramedWrite<ServerResponse, WriteHalf<TcpStream>, ClientCodec>,
 }
 
 impl Actor for RemexSession {
@@ -132,13 +57,14 @@ impl Actor for RemexSession {
     // we'll start heartbeat process on session start.
     self.hb(ctx);
 
-    self.framed.write(ClientResponse::Identify);
+    self.framed.write(ServerResponse::ConnectionResponse(ConnectionResponse::Identify));
   }
 
   fn stopping(&mut self, _: &mut Self::Context) -> Running {
     // notify Remex server
-    self.addr.do_send(server::msg::Disconnect {
+    self.addr.do_send(server::msg::ClientDisconnect {
       id: self.id.clone(),
+      reason: crate::codec::DisconnectReason::Unknown,
     });
     Running::Stop
   }
@@ -153,93 +79,68 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
   /// This is main event loop for client requests
   fn handle(&mut self, msg: Result<ClientRequest, io::Error>, ctx: &mut Context<Self>) {
     match msg {
-      Ok(ClientRequest::Command(cmd)) => {
-        // Send Command message to Remex server and wait for response
-        info!("Receive message");
-        self
-          .addr
-          .send(server::msg::Command {
-            id: self.id.clone(),
-            command: cmd,
-          })
-          .into_actor(self)
-          .then(|res, act, _| {
-            match res {
-              Ok(res) => {
-                act.framed.write(ClientResponse::Message(res));
+      Ok(ClientRequest::ConnectionRequest(c)) => match c {
+        ConnectionRequest::Identify(i) => {
+          let (name, id, secret): (String, String, String) = match i {
+            IdentifyType::Secret(sec, name) => {
+              if sec == crate::SECRET {
+                let c: crate::db::model::clients::Client = futures::executor::block_on(async {
+                  let mut c = crate::db::establish_connection_postgres();
+                  use crate::db::model::clients::NewClient;
+                  use crate::db::schema::clients;
+                  diesel::insert_into(clients::table)
+                    .values(&NewClient {
+                      id: uuid::Uuid::new_v4().to_string(),
+                      client_name: name.clone(),
+                      secret: sec.clone(),
+                    })
+                    .on_conflict_do_nothing()
+                    .get_result(&mut c)
+                    .unwrap()
+                });
+                (c.client_name, c.id, c.secret)
+              } else {
+                self.framed.write(ServerResponse::ConnectionResponse(
+                  ConnectionResponse::Disconnect(crate::codec::DisconnectReason::AuthFailed),
+                ));
+                ctx.stop();
+                return;
               }
-              _ => info!("Something is wrong"),
             }
-            actix::fut::ready(())
-          })
-          .wait(ctx)
-        // .wait(ctx) pauses all events in context,
-        // so actor wont receive any new messages until it get list of rooms back
-      }
-      Ok(ClientRequest::IdentifySecret(sec, name)) => {
-        // TODO: implement way to synchronize secret with a client once their secret is expired
-        // by using a username and password, or something like that.
-        if sec == crate::SECRET {
-          info!("Correct secret. Session authenticated for {}, {}", self.id, &name);
+            IdentifyType::ClientSecret(sec, name, id) => {
+              let c = futures::executor::block_on(async {
+                let mut c = crate::db::establish_connection_postgres();
+                use crate::db::model::clients::Client;
+                use crate::db::schema::clients;
+                clients::table
+                  .select(Client::as_select())
+                  .filter(clients::client_name.eq(&name))
+                  .filter(clients::id.eq(&id))
+                  .get_result(&mut c)
+                  .unwrap()
+              });
+              if c.secret == sec {
+                (c.client_name, c.id, c.secret)
+              } else {
+                self.framed.write(ServerResponse::ConnectionResponse(
+                  ConnectionResponse::Disconnect(crate::codec::DisconnectReason::AuthFailed),
+                ));
+                ctx.stop();
+                return;
+              }
+            }
+          };
+
+          self.name = Some(name);
           self.authenticated = true;
-          self.identified = true;
-          self.name = Some(name.clone());
-
-          // register self in Remex server. `AsyncContext::wait` register
-          // future within context, but context waits until this future resolves
-          // before processing any other events.
-          let addr = ctx.address();
-          self
-            .addr
-            .send(server::msg::Connect {
-              id: None,
-              client_name: self.name.clone().unwrap(),
-              addr: addr.clone(),
-            })
-            .into_actor(self)
-            .then(|res, _, ctx| {
-              match res {
-                Ok(_) => {}
-                // something is wrong with chat server
-                _ => ctx.stop(),
-              }
-              actix::fut::ready(())
-            })
-            .wait(ctx);
-        } else {
-          info!("Invalid secret. Stopping session");
-          ctx.stop();
+          self.id = id.clone();
+          self.framed.write(ServerResponse::ConnectionResponse(ConnectionResponse::Authenticated(
+            id,
+            secret.clone(),
+          )));
         }
-      }
-      Ok(ClientRequest::IdentifyId(id, name)) => {
-        // TODO: implement way to synchronize secret with a client once their secret is expired
-        // by using a username and password, or something like that.
-        self.name = Some(name.clone());
-
-        // register self in Remex server. `AsyncContext::wait` register
-        // future within context, but context waits until this future resolves
-        // before processing any other events.
-        let addr = ctx.address();
-        self
-          .addr
-          .send(server::msg::Connect {
-            id: Some(id),
-            client_name: self.name.clone().unwrap(),
-            addr: addr.clone(),
-          })
-          .into_actor(self)
-          .then(|res, _, ctx| {
-            match res {
-              Ok(_) => {}
-              // something is wrong with chat server
-              _ => ctx.stop(),
-            }
-            actix::fut::ready(())
-          })
-          .wait(ctx);
-      }
-      // we update heartbeat time on ping from peer
-      Ok(ClientRequest::Ping) => self.hb = Instant::now(),
+        ConnectionRequest::Ping => self.hb = Instant::now(),
+      },
       _ => ctx.stop(),
     }
   }
@@ -248,16 +149,14 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
 /// Helper methods
 impl RemexSession {
   pub fn new(
-    server: Addr<crate::actors::server::Server>,
-    db: Addr<crate::db::Db>,
-    framed: actix::io::FramedWrite<ClientResponse, WriteHalf<TcpStream>, ClientCodec>,
+    server: Addr<crate::actors::server::RemexServer>,
+    framed: actix::io::FramedWrite<ServerResponse, WriteHalf<TcpStream>, ClientCodec>,
   ) -> RemexSession {
     RemexSession {
       id: uuid::Uuid::new_v4().to_string(),
       client_id: None,
       name: None,
       addr: server,
-      db,
       hb: Instant::now(),
       authenticated: false,
       identified: false,
@@ -276,13 +175,16 @@ impl RemexSession {
         info!("Client heartbeat failed, disconnecting!");
 
         // notify Remex server
-        act.addr.do_send(server::msg::Disconnect { id: act.id.clone() });
+        act.addr.do_send(server::msg::ClientDisconnect {
+          id: act.id.clone(),
+          reason: crate::codec::DisconnectReason::HeartbeatFailed,
+        });
 
         // stop actor
         ctx.stop();
       }
 
-      act.framed.write(ClientResponse::Ping);
+      act.framed.write(ServerResponse::ConnectionResponse(ConnectionResponse::Ping));
       // if we can not send message to sink, sink is closed (disconnected)
     });
   }
@@ -290,19 +192,18 @@ impl RemexSession {
 
 /// Define TCP server that will accept incoming TCP connection and create
 /// Client actors.
-pub async fn tcp_server(s: &str, db: Addr<crate::db::Db>, server: Addr<Server>) {
+pub async fn tcp_server(s: &str, server: Addr<RemexServer>) {
   // Create server listener
   let addr = net::SocketAddr::from_str(s).unwrap();
 
   let listener = TcpListener::bind(&addr).await.unwrap();
 
   while let Ok((stream, _)) = listener.accept().await {
-    let db = db.clone();
     let server = server.clone();
     RemexSession::create(|ctx| {
       let (r, w) = split(stream);
       RemexSession::add_stream(FramedRead::new(r, ClientCodec), ctx);
-      RemexSession::new(server, db, actix::io::FramedWrite::new(w, ClientCodec, ctx))
+      RemexSession::new(server, actix::io::FramedWrite::new(w, ClientCodec, ctx))
     });
   }
 }

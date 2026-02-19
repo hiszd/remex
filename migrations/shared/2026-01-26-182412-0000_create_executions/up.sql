@@ -5,7 +5,6 @@ CREATE TABLE executions (
     job_id TEXT,
     FOREIGN KEY (job_id) REFERENCES jobs (id),
     client_id TEXT NOT NULL,
-    FOREIGN KEY (client_id) REFERENCES clients (id) ON DELETE CASCADE,
     executed_at TIMESTAMPTZ,
     execution_result TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,

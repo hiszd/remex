@@ -47,6 +47,8 @@ fn encrypt(plaintext: String) -> Vec<u8> {
 pub enum DisconnectReason {
   AuthFailed,
   InvalidClientId,
+  HeartbeatFailed,
+  Unknown,
 }
 
 impl From<DisconnectReason> for String {
@@ -54,6 +56,10 @@ impl From<DisconnectReason> for String {
     match reason {
       DisconnectReason::AuthFailed => "Authentication failed".to_string(),
       DisconnectReason::InvalidClientId => "Invalid client id".to_string(),
+      DisconnectReason::HeartbeatFailed => {
+        "Heartbeat wasn't updated within the proper window".to_string()
+      }
+      DisconnectReason::Unknown => "Unknown".to_string(),
     }
   }
 }
@@ -67,8 +73,33 @@ impl std::fmt::Display for DisconnectReason {
       DisconnectReason::InvalidClientId => {
         write!(f, "Invalid client id")
       }
+      DisconnectReason::HeartbeatFailed => {
+        write!(f, "Heartbeat wasn't updated within the proper window")
+      }
+      DisconnectReason::Unknown => {
+        write!(f, "Unknown")
+      }
     }
   }
+}
+
+#[derive(Serialize, Deserialize, Debug, Message)]
+#[rtype(result = "()")]
+pub enum IdentifyType {
+  /// Secret (Secret, Client_Name)
+  Secret(String, String),
+  /// ClientSecret (Secret, Client_Name, Client_Id)
+  ClientSecret(String, String, String),
+}
+
+///
+#[derive(Serialize, Deserialize, Debug, Message)]
+#[rtype(result = "()")]
+pub enum ConnectionRequest {
+  /// Identify (Type, Data)
+  Identify(IdentifyType),
+  /// Ping
+  Ping,
 }
 
 /// Client request - come from client
@@ -76,16 +107,22 @@ impl std::fmt::Display for DisconnectReason {
 #[rtype(result = "()")]
 #[serde(tag = "cmd", content = "data")]
 pub enum ClientRequest {
-  /// Command (Command)
-  Command(String),
-  /// IdentifySecret (Secret, Name)
-  IdentifySecret(String, String),
-  /// IdentifyId (Id, Name)
-  IdentifyId(String, String),
+  /// Connection Request
+  ConnectionRequest(ConnectionRequest),
   /// Log (Message)
   Log(String),
-  /// Result (Req, Result)
-  Result(Box<ClientRequest>, Result<String, String>),
+}
+
+///
+#[derive(Serialize, Deserialize, Debug, Message)]
+#[rtype(result = "()")]
+pub enum ConnectionResponse {
+  /// Identify
+  Identify,
+  /// Authenticated (Id, Secret)
+  Authenticated(String, String),
+  /// Disconnect (Reason)
+  Disconnect(DisconnectReason),
   /// Ping
   Ping,
 }
@@ -94,21 +131,11 @@ pub enum ClientRequest {
 #[derive(Serialize, Deserialize, Debug, Message)]
 #[rtype(result = "()")]
 #[serde(tag = "cmd", content = "data")]
-pub enum ClientResponse {
-  /// Command (Command)
-  Command(String),
-  /// Message (Message)
-  Message(String),
-  /// Identify
-  Identify,
-  /// Authenticated (Id, Name)
-  Authenticated(uuid::Uuid, String),
-  /// Result (Req, Result)
-  Result(Box<ClientResponse>, Result<String, String>),
-  /// Disconnect (Reason)
-  Disconnect(DisconnectReason),
-  /// Ping
-  Ping,
+pub enum ServerResponse {
+  /// Connection Response
+  ConnectionResponse(ConnectionResponse),
+  /// Recieve Jobs from the Session manager
+  ReceiveJobs(Vec<crate::db::model::jobs::Job>),
 }
 
 /// Codec for Client -> Server transport
@@ -145,10 +172,10 @@ impl Decoder for ClientCodec {
   }
 }
 
-impl Encoder<ClientResponse> for ClientCodec {
+impl Encoder<ServerResponse> for ClientCodec {
   type Error = io::Error;
 
-  fn encode(&mut self, msg: ClientResponse, dst: &mut BytesMut) -> Result<(), Self::Error> {
+  fn encode(&mut self, msg: ServerResponse, dst: &mut BytesMut) -> Result<(), Self::Error> {
     let msg = json::to_string(&msg).unwrap();
     let m = encrypt(msg);
     let msg_ref: &[u8] = m.as_slice();
@@ -165,7 +192,7 @@ impl Encoder<ClientResponse> for ClientCodec {
 pub struct ServerCodec;
 
 impl Decoder for ServerCodec {
-  type Item = ClientResponse;
+  type Item = ServerResponse;
   type Error = io::Error;
 
   fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -181,7 +208,7 @@ impl Decoder for ServerCodec {
       let buf = src.split_to(size);
       let dcpt = decrypt(buf.to_vec());
       match dcpt {
-        Ok(d) => Ok(Some(json::from_slice::<ClientResponse>(d.as_bytes())?)),
+        Ok(d) => Ok(Some(json::from_slice::<ServerResponse>(d.as_bytes())?)),
         Err(e) => {
           if e == "Failed to decrypt" {
             error!("Failed to decrypt, maybe the key is wrong");
