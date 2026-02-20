@@ -17,6 +17,7 @@ pub struct NewGroup {
   pub group_name: String,
 }
 
+#[allow(dead_code)]
 #[derive(Deserialize, AsChangeset)]
 #[diesel(table_name = crate::db::schema::groups)]
 pub struct UpdateGroup {

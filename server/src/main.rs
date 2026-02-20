@@ -1,6 +1,5 @@
 use actix::Actor;
 use remex_core::actors::server::RemexServer;
-use remex_core::db::migrate;
 pub mod secret;
 //SERVER
 

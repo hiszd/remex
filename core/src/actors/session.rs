@@ -74,7 +74,7 @@ impl actix::io::WriteHandler<io::Error> for RemexSession {
 }
 
 // NOTE: handle client requests
-/// To use `Framed` we have to define Io type and Codec
+// To use `Framed` we have to define Io type and Codec
 impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
   /// This is main event loop for client requests
   fn handle(&mut self, msg: Result<ClientRequest, io::Error>, ctx: &mut Context<Self>) {
@@ -82,8 +82,10 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
       Ok(ClientRequest::ConnectionRequest(c)) => match c {
         ConnectionRequest::Identify(i) => {
           let (name, id, secret): (String, String, String) = match i {
+            // Server secret is used to identify client
             IdentifyType::Secret(sec, name) => {
               if sec == crate::SECRET {
+                // create a new client or pull existing
                 let c: crate::db::model::clients::Client = futures::executor::block_on(async {
                   let mut c = crate::db::establish_connection_postgres();
                   use crate::db::model::clients::NewClient;
@@ -100,6 +102,7 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
                 });
                 (c.client_name, c.id, c.secret)
               } else {
+                // disconnect from server and close the actor
                 self.framed.write(ServerResponse::ConnectionResponse(
                   ConnectionResponse::Disconnect(crate::codec::DisconnectReason::AuthFailed),
                 ));
@@ -107,6 +110,7 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
                 return;
               }
             }
+            // Client secret that was assigned to the client by the server is used to authenticate
             IdentifyType::ClientSecret(sec, name, id) => {
               let c = futures::executor::block_on(async {
                 let mut c = crate::db::establish_connection_postgres();
@@ -117,10 +121,17 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
                   .filter(clients::client_name.eq(&name))
                   .filter(clients::id.eq(&id))
                   .get_result(&mut c)
-                  .unwrap()
               });
-              if c.secret == sec {
-                (c.client_name, c.id, c.secret)
+              if let Ok(clnt) = c {
+                if clnt.secret == sec {
+                  (clnt.client_name, clnt.id, clnt.secret)
+                } else {
+                  self.framed.write(ServerResponse::ConnectionResponse(
+                    ConnectionResponse::Disconnect(crate::codec::DisconnectReason::AuthFailed),
+                  ));
+                  ctx.stop();
+                  return;
+                }
               } else {
                 self.framed.write(ServerResponse::ConnectionResponse(
                   ConnectionResponse::Disconnect(crate::codec::DisconnectReason::AuthFailed),
@@ -130,7 +141,6 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
               }
             }
           };
-
           self.name = Some(name);
           self.authenticated = true;
           self.id = id.clone();
@@ -139,6 +149,7 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
             secret.clone(),
           )));
         }
+        // Ping from client
         ConnectionRequest::Ping => self.hb = Instant::now(),
       },
       _ => ctx.stop(),

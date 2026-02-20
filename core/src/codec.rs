@@ -83,7 +83,7 @@ impl std::fmt::Display for DisconnectReason {
   }
 }
 
-#[derive(Serialize, Deserialize, Debug, Message)]
+#[derive(Serialize, Deserialize, Debug, Message, Clone)]
 #[rtype(result = "()")]
 pub enum IdentifyType {
   /// Secret (Secret, Client_Name)
@@ -113,7 +113,6 @@ pub enum ClientRequest {
   Log(String),
 }
 
-///
 #[derive(Serialize, Deserialize, Debug, Message)]
 #[rtype(result = "()")]
 pub enum ConnectionResponse {

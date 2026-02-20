@@ -1,5 +1,7 @@
 use rand::Rng;
 
+pub mod fs;
+
 pub fn generate_secret(long: bool) -> String {
   let secret: String = rand::rng()
     .sample_iter(&rand::distr::Alphanumeric)

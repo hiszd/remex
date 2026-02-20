@@ -23,6 +23,7 @@ pub struct NewJob {
   pub job_shell: String,
 }
 
+#[allow(dead_code)]
 #[derive(Deserialize, AsChangeset)]
 #[diesel(table_name = crate::db::schema::jobs)]
 pub struct UpdateJob {

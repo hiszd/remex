@@ -21,6 +21,7 @@ pub struct NewLog {
   pub log: String,
 }
 
+#[allow(dead_code)]
 #[derive(Deserialize, AsChangeset)]
 #[diesel(table_name = crate::db::schema::logs)]
 pub struct UpdateLog {
