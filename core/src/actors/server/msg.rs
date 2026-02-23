@@ -51,3 +51,16 @@ impl Handler<ClientConnect> for super::RemexServer {
     }
   }
 }
+
+/// Connect a new client
+#[derive(Message)]
+#[rtype(result = "anyhow::Result<String>")]
+pub struct GetSecret {}
+/// Handler for Connect message.
+impl Handler<GetSecret> for super::RemexServer {
+  type Result = anyhow::Result<String>;
+  fn handle(&mut self, _msg: GetSecret, _: &mut Context<Self>) -> Self::Result {
+    // FIXME: handle empyy value
+    return Ok(self.secret.clone().unwrap());
+  }
+}

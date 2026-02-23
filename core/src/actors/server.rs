@@ -12,6 +12,7 @@ pub mod msg;
 pub struct RemexServer {
   pub sessions: SessionMap<String>,
   pub migrated: bool,
+  pub secret: Option<String>,
 }
 
 /// Make actor from `RemexServer`

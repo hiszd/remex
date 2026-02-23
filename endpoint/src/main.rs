@@ -1,5 +1,4 @@
 //ENDPOINT
-use std::io::{self, Write};
 
 use clap::Parser;
 use futures_util::{SinkExt as _, StreamExt as _};
@@ -29,36 +28,51 @@ struct Context {
   secret: Option<String>,
   name: String,
   authenticated: bool,
+  auth_type: Option<codec::IdentifyType>,
   authentication_used: Option<codec::IdentifyType>,
 }
 
 #[actix_web::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
   tracing_subscriber::fmt::init();
   info!("Running client");
+  let mut ctx: Context = Context {
+    id: None,
+    secret: None,
+    name: gethostname().to_string_lossy().to_string(),
+    authenticated: false,
+    auth_type: None,
+    authentication_used: None,
+  };
 
   let args = Args::parse();
 
   // Validate secret length
-  if args.secret.clone().unwrap_or("".to_string()).len() < 32 {
-    panic!("Secret must be at least 32 characters long");
+  if let Some(sec) = args.secret.clone() {
+    if sec.len() < 32 {
+      panic!("Secret must be at least 32 characters long");
+    }
   }
 
   // Check if both ID and secret are saved
-  let id_result = fs::id::get_id();
-  let secret_result = fs::secret::get_secret();
+  let id_result = fs::id::get_id()?;
+  let secret_result = fs::secret::get_secret()?;
 
-  match (id_result, secret_result) {
-    (Ok(Some(_)), Ok(Some(_))) => {
+  ctx.auth_type = match (id_result, secret_result, args.secret.clone()) {
+    // if using the server secret for auth, ensure that the ID and secret are removed first
+    (_, _, Some(secret)) => {
+      fs::id::remove_id().unwrap();
+      fs::secret::remove_secret().unwrap();
+      Some(codec::IdentifyType::Secret(secret, ctx.name.clone()))
+    }
+    (Some(id), Some(secret), _) => {
       // Both ID and secret are found, continue normally
+      Some(codec::IdentifyType::ClientSecret(secret, ctx.name.clone(), id))
     }
-    _ => {
-      // Either ID or secret (or both) are missing
-      if args.secret.is_none() {
-        panic!("Neither ID nor secret found. Please provide a secret using the --secret flag");
-      }
+    (_, _, None) => {
+      panic!("Neither ID nor secret found. Please provide a secret using the --secret flag");
     }
-  }
+  };
 
   loop {
     // continually try and connect to the server every 5 seconds until we succeed
@@ -70,18 +84,11 @@ async fn main() {
     } else {
       let stream = st.unwrap();
       let mut framed = actix_codec::Framed::new(stream, codec::ServerCodec);
-      let mut ctx: Context = Context {
-        id: None,
-        secret: None,
-        name: gethostname().to_string_lossy().to_string(),
-        authenticated: false,
-        authentication_used: None,
-      };
 
       // NOTE: handle server responses
       loop {
         select! {
-              Some(msg) = framed.next() => {
+              Some(msg) = framed.next(), if ctx.authenticated => {
                 match msg {
                   Ok(codec::ServerResponse::ConnectionResponse(r)) => {
                     match r {
@@ -102,12 +109,11 @@ async fn main() {
                             break;
                           }
                           codec::DisconnectReason::AuthFailed => {
-                          if let Some(iden) = ctx.authentication_used {
+                          if let Some(iden) = ctx.authentication_used.clone() {
                             match iden {
                               codec::IdentifyType::Secret(_, _) => {
-                                // if the secret is invalid, then remove it so you can get a new
-                                // one
                                 fs::id::remove_id().unwrap();
+                                fs::secret::remove_secret().unwrap();
                               ctx.authenticated = false;
                                 break;
                               }

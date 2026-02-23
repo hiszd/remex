@@ -8,8 +8,6 @@ pub mod utils;
 
 pub type RawPacket = [u8; 128];
 
-const SECRET: &str = "tZs3U%hqY^o$&*y%4HcF8&RyAKevUbZnkTsrjCzPGxfare3Yn9c7shVZETfPDPUc8xR%N38a!TL%2$WbkFhZqmH#jvw&d3^mryPD8Y8TqHoJHwyKSTJeQB7vK7QkW#&B";
-
 // [packet number, total packets, ...information]
 #[derive(Debug, Clone)]
 pub struct Packet {

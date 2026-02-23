@@ -35,6 +35,8 @@ pub struct RemexSession {
   client_id: Option<u64>,
   /// machine name
   name: Option<String>,
+  /// server secret
+  server_secret: String,
   /// is client authenticated
   authenticated: bool,
   /// is client identified
@@ -56,8 +58,6 @@ impl Actor for RemexSession {
   fn started(&mut self, ctx: &mut Self::Context) {
     // we'll start heartbeat process on session start.
     self.hb(ctx);
-
-    self.framed.write(ServerResponse::ConnectionResponse(ConnectionResponse::Identify));
   }
 
   fn stopping(&mut self, _: &mut Self::Context) -> Running {
@@ -84,7 +84,7 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
           let (name, id, secret): (String, String, String) = match i {
             // Server secret is used to identify client
             IdentifyType::Secret(sec, name) => {
-              if sec == crate::SECRET {
+              if sec == self.server_secret {
                 // create a new client or pull existing
                 let c: crate::db::model::clients::Client = futures::executor::block_on(async {
                   let mut c = crate::db::establish_connection_postgres();
@@ -160,6 +160,7 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
 /// Helper methods
 impl RemexSession {
   pub fn new(
+    secret: String,
     server: Addr<crate::actors::server::RemexServer>,
     framed: actix::io::FramedWrite<ServerResponse, WriteHalf<TcpStream>, ClientCodec>,
   ) -> RemexSession {
@@ -167,6 +168,7 @@ impl RemexSession {
       id: uuid::Uuid::new_v4().to_string(),
       client_id: None,
       name: None,
+      server_secret: secret,
       addr: server,
       hb: Instant::now(),
       authenticated: false,
@@ -195,15 +197,15 @@ impl RemexSession {
         ctx.stop();
       }
 
-      act.framed.write(ServerResponse::ConnectionResponse(ConnectionResponse::Ping));
       // if we can not send message to sink, sink is closed (disconnected)
+      act.framed.write(ServerResponse::ConnectionResponse(ConnectionResponse::Ping));
     });
   }
 }
 
 /// Define TCP server that will accept incoming TCP connection and create
 /// Client actors.
-pub async fn tcp_server(s: &str, server: Addr<RemexServer>) {
+pub async fn tcp_server(s: &str, secret: &str, server: Addr<RemexServer>) {
   // Create server listener
   let addr = net::SocketAddr::from_str(s).unwrap();
 
@@ -214,7 +216,7 @@ pub async fn tcp_server(s: &str, server: Addr<RemexServer>) {
     RemexSession::create(|ctx| {
       let (r, w) = split(stream);
       RemexSession::add_stream(FramedRead::new(r, ClientCodec), ctx);
-      RemexSession::new(server, actix::io::FramedWrite::new(w, ClientCodec, ctx))
+      RemexSession::new(secret.into(), server, actix::io::FramedWrite::new(w, ClientCodec, ctx))
     });
   }
 }
