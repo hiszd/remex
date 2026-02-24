@@ -47,6 +47,7 @@ fn encrypt(plaintext: String) -> Vec<u8> {
 pub enum DisconnectReason {
   AuthFailed,
   InvalidClientId,
+  DuplicateClient,
   HeartbeatFailed,
   Unknown(String),
 }
@@ -56,6 +57,7 @@ impl From<DisconnectReason> for String {
     match reason {
       DisconnectReason::AuthFailed => "Authentication failed".to_string(),
       DisconnectReason::InvalidClientId => "Invalid client id".to_string(),
+      DisconnectReason::DuplicateClient => "A client with this id is already connected".to_string(),
       DisconnectReason::HeartbeatFailed => {
         "Heartbeat wasn't updated within the proper window".to_string()
       }
@@ -72,6 +74,9 @@ impl std::fmt::Display for DisconnectReason {
       }
       DisconnectReason::InvalidClientId => {
         write!(f, "Invalid client id")
+      }
+      DisconnectReason::DuplicateClient => {
+        write!(f, "A client with this id is already connected")
       }
       DisconnectReason::HeartbeatFailed => {
         write!(f, "Heartbeat wasn't updated within the proper window")
@@ -116,8 +121,6 @@ pub enum ClientRequest {
 #[derive(Serialize, Deserialize, Debug, Message, Clone)]
 #[rtype(result = "()")]
 pub enum ConnectionResponse {
-  /// Identify
-  Identify,
   /// Authenticated (Id, Secret)
   Authenticated(String, String),
   /// Disconnect (Reason)

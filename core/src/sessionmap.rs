@@ -23,7 +23,10 @@ where
     id: T,
     addr: actix::Addr<crate::actors::session::RemexSession>,
   ) -> anyhow::Result<()> {
-    let _ = self.sessions.insert(id, addr);
+    if self.sessions.contains_key(&id) {
+      return Err(anyhow!("Client with id {} is already connected", &id));
+    }
+    self.sessions.insert(id, addr);
     Ok(())
   }
 

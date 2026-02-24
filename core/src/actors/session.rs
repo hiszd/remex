@@ -85,7 +85,7 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
             tracing::info!("Client connection request: {:#?}", &c);
             match c {
               ConnectionRequest::Identify(i) => {
-                let (name, id, secret): (String, String, String) = match i {
+                let client: crate::db::model::clients::Client = match i {
                   // Server secret is used to identify client
                   IdentifyType::Secret(sec, name) => {
                     info!("Client attempting to connect with server secret: {}", &sec);
@@ -109,7 +109,7 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
                             .unwrap()
                         });
                       info!("Client: {}, ID: {}, Secret: {}", &c.client_name, &c.id, &c.secret);
-                      (c.client_name, c.id, c.secret)
+                      c
                     } else {
                       info!("Secret mismatch");
                       // disconnect from server and close the actor
@@ -138,7 +138,7 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
                     });
                     if let Ok(clnt) = c {
                       if clnt.secret == sec {
-                        (clnt.client_name, clnt.id, clnt.secret)
+                        clnt
                       } else {
                         self.framed.write(ServerResponse::ConnectionResponse(
                           ConnectionResponse::Disconnect(
@@ -157,13 +157,52 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
                     }
                   }
                 };
-                self.name = Some(name.clone());
-                self.authenticated = true;
-                self.id = id.clone();
-                tracing::info!("Sending auth to client: {}", &name);
-                self.framed.write(ServerResponse::ConnectionResponse(
-                  ConnectionResponse::Authenticated(id, secret.clone()),
+
+                // Extract values before moving client into the message
+                let client_name = client.client_name.clone();
+                let client_id = client.id.clone();
+                let client_secret = client.secret.clone();
+
+                // Register with the server actor — this checks for duplicate connections
+                let server_addr = self.addr.clone();
+                let fut = actix::fut::wrap_future::<_, Self>(server_addr.send(
+                  server::msg::ClientConnect {
+                    client,
+                    addr: ctx.address(),
+                  },
                 ));
+
+                ctx.wait(fut.map(move |result, act, ctx| match result {
+                  Ok(Ok(())) => {
+                    act.name = Some(client_name.clone());
+                    act.authenticated = true;
+                    act.id = client_id.clone();
+                    tracing::info!("Sending auth to client: {}", &client_name);
+                    act.framed.write(ServerResponse::ConnectionResponse(
+                      ConnectionResponse::Authenticated(client_id, client_secret),
+                    ));
+                  }
+                  Ok(Err(reason)) => {
+                    tracing::info!(
+                      "Sending disconnect to client: {} with reason: {}",
+                      &client_name,
+                      &reason
+                    );
+                    act.framed.write(ServerResponse::ConnectionResponse(
+                      ConnectionResponse::Disconnect(reason),
+                    ));
+                    ctx.stop();
+                  }
+                  Err(e) => {
+                    tracing::error!("Failed to communicate with server actor: {}", e);
+                    act.framed.write(ServerResponse::ConnectionResponse(
+                      ConnectionResponse::Disconnect(crate::codec::DisconnectReason::Unknown(
+                        "Internal server error".to_string(),
+                      )),
+                    ));
+                    ctx.stop();
+                  }
+                }));
               }
             }
           }
