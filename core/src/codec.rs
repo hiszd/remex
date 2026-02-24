@@ -43,12 +43,12 @@ fn encrypt(plaintext: String) -> Vec<u8> {
   encrypted_data
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum DisconnectReason {
   AuthFailed,
   InvalidClientId,
   HeartbeatFailed,
-  Unknown,
+  Unknown(String),
 }
 
 impl From<DisconnectReason> for String {
@@ -59,7 +59,7 @@ impl From<DisconnectReason> for String {
       DisconnectReason::HeartbeatFailed => {
         "Heartbeat wasn't updated within the proper window".to_string()
       }
-      DisconnectReason::Unknown => "Unknown".to_string(),
+      DisconnectReason::Unknown(s) => format!("Unknown: {}", s),
     }
   }
 }
@@ -76,8 +76,8 @@ impl std::fmt::Display for DisconnectReason {
       DisconnectReason::HeartbeatFailed => {
         write!(f, "Heartbeat wasn't updated within the proper window")
       }
-      DisconnectReason::Unknown => {
-        write!(f, "Unknown")
+      DisconnectReason::Unknown(s) => {
+        write!(f, "Unknown: {}", s)
       }
     }
   }
@@ -93,17 +93,15 @@ pub enum IdentifyType {
 }
 
 ///
-#[derive(Serialize, Deserialize, Debug, Message)]
+#[derive(Serialize, Deserialize, Debug, Message, Clone)]
 #[rtype(result = "()")]
 pub enum ConnectionRequest {
   /// Identify (Type, Data)
   Identify(IdentifyType),
-  /// Ping
-  Ping,
 }
 
 /// Client request - come from client
-#[derive(Serialize, Deserialize, Debug, Message)]
+#[derive(Serialize, Deserialize, Debug, Message, Clone)]
 #[rtype(result = "()")]
 #[serde(tag = "cmd", content = "data")]
 pub enum ClientRequest {
@@ -111,9 +109,11 @@ pub enum ClientRequest {
   ConnectionRequest(ConnectionRequest),
   /// Log (Message)
   Log(String),
+  /// Ping
+  Ping,
 }
 
-#[derive(Serialize, Deserialize, Debug, Message)]
+#[derive(Serialize, Deserialize, Debug, Message, Clone)]
 #[rtype(result = "()")]
 pub enum ConnectionResponse {
   /// Identify
@@ -122,12 +122,10 @@ pub enum ConnectionResponse {
   Authenticated(String, String),
   /// Disconnect (Reason)
   Disconnect(DisconnectReason),
-  /// Ping
-  Ping,
 }
 
 /// Server response - respond to client requests
-#[derive(Serialize, Deserialize, Debug, Message)]
+#[derive(Serialize, Deserialize, Debug, Message, Clone)]
 #[rtype(result = "()")]
 #[serde(tag = "cmd", content = "data")]
 pub enum ServerResponse {
@@ -135,6 +133,8 @@ pub enum ServerResponse {
   ConnectionResponse(ConnectionResponse),
   /// Recieve Jobs from the Session manager
   ReceiveJobs(Vec<crate::db::model::jobs::Job>),
+  /// Ping
+  Ping,
 }
 
 /// Codec for Client -> Server transport

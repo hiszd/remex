@@ -46,16 +46,14 @@ impl FileInterface {
       Err(e) => return Err(e),
     };
 
-    let file_info = FileInformation {
-      filename,
-      size,
-      last_modified,
-    };
-
     Ok(FileInterface {
       file_path: file_path.to_string(),
       content,
-      file_info,
+      file_info: FileInformation {
+        filename,
+        size,
+        last_modified,
+      },
     })
   }
 

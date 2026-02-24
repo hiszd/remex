@@ -13,6 +13,12 @@ fn get_or_generate_secret() -> String {
       println!("Using existing secret from file");
       secret_val
     }
+    Err(e) => {
+      tracing::error!("Failed to get secret: {}", e);
+      let secret_val = generate_secret();
+      secret::save_secret(secret_val.clone()).expect("Failed to save secret");
+      secret_val
+    }
     _ => {
       // Generate a new secret
       println!("No secret found, generating new secret");
@@ -30,10 +36,10 @@ fn generate_secret() -> String {
                             0123456789!@#$%^&*()_+-=[]{}|;:,.<>?";
   const SECRET_LENGTH: usize = 64;
 
-  let mut rng = rand::thread_rng();
+  let mut rng = rand::rng();
   let secret_val: String = (0..SECRET_LENGTH)
     .map(|_| {
-      let idx = rng.gen_range(0..CHARSET.len());
+      let idx = rng.random_range(0..CHARSET.len());
       CHARSET[idx] as char
     })
     .collect();

@@ -5,47 +5,19 @@ pub fn save_secret(secret: String) -> anyhow::Result<()> {
   let usr = env::var("USER").expect("No $USER env var found");
   let cdir = "/home/".to_owned() + &usr + "/.config/remex/";
   let flnm = cdir.clone() + "secret";
-  match std::fs::exists(flnm.clone()) {
-    Ok(true) => {
-      if let Err(e) = std::fs::remove_file(flnm.clone()) {
-        anyhow::bail!("could not remove secret file: {}", e);
+  match std::fs::write(flnm.clone(), secret.clone()) {
+    Ok(_) => Ok(()),
+    Err(e) => match e.kind() {
+      std::io::ErrorKind::NotFound => {
+        std::fs::create_dir_all(cdir.clone()).unwrap();
+        std::fs::write(flnm.clone(), secret.clone()).unwrap();
+        Err(e.into())
       }
-      if let Err(e) = std::fs::write(flnm.clone(), secret.clone()) {
-        anyhow::bail!("could not write secret file: {}", e);
+      _ => {
+        tracing::error!("could not write secret file: {}", e);
+        Err(e.into())
       }
-      Ok(())
-    }
-    Ok(false) => {
-      if std::fs::exists(cdir.clone()).unwrap() {
-        let mut fle = match std::fs::File::create(flnm.clone()) {
-          Err(e) => {
-            anyhow::bail!("Could not create secret file: {}", e);
-          }
-          Ok(f) => f,
-        };
-        match fle.write(secret.clone().as_bytes()) {
-          Err(e) => {
-            anyhow::bail!("could not write secret file: {}", e);
-          }
-          _ => Ok(()),
-        }
-      } else {
-        if let Err(e) = std::fs::create_dir_all(cdir.clone()) {
-          anyhow::bail!("could not create secret dir: {}", e);
-        }
-        let mut fle = match std::fs::File::create(flnm.clone()) {
-          Err(e) => {
-            anyhow::bail!("Could not create secret file: {}", e);
-          }
-          Ok(f) => f,
-        };
-        if let Err(e) = fle.write(secret.clone().as_bytes()) {
-          anyhow::bail!("could not write secret file: {}", e);
-        }
-        Ok(())
-      }
-    }
-    Err(e) => Err(anyhow::anyhow!("{}", e)),
+    },
   }
 }
 

@@ -80,10 +80,10 @@ pub fn remove_secret() -> anyhow::Result<(), std::io::Error> {
     }
     Err(e) => {
       if e.kind() == std::io::ErrorKind::NotFound {
-        tracing::error!("secret file not found");
+        tracing::error!("secret file not found, so not removed");
         return Ok(());
       }
-      tracing::error!("could not get secret: {}", e);
+      tracing::error!("could not remove secret at: {}", e);
       Err(e)
     }
   }

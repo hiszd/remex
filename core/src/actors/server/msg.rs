@@ -43,9 +43,10 @@ impl Handler<ClientConnect> for super::RemexServer {
     match self.sessions.insert(msg.client.id, msg.addr.clone()) {
       Ok(_) => {}
       Err(e) => {
-        tracing::error!("Session insert error: {}", e);
+        let err = format!("Session insert error: {}", e);
+        tracing::error!(err);
         msg.addr.do_send(session::msg::Disconnect {
-          reason: crate::codec::DisconnectReason::Unknown,
+          reason: crate::codec::DisconnectReason::Unknown(err),
         });
       }
     }
