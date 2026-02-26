@@ -7,6 +7,7 @@ pub struct Client {
   pub id: String,
   pub secret: String,
   pub client_name: String,
+  pub hardware_hash: String,
   pub created_at: chrono::DateTime<chrono::Utc>,
   pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -17,6 +18,7 @@ pub struct NewClient {
   pub id: String,
   pub secret: String,
   pub client_name: String,
+  pub hardware_hash: String,
 }
 
 #[derive(Deserialize, AsChangeset)]
@@ -24,4 +26,5 @@ pub struct NewClient {
 pub struct UpdateClient {
   secret: String,
   client_name: String,
+  hardware_hash: String,
 }

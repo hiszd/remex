@@ -1,10 +1,10 @@
 use std::env;
 use std::io::Write;
 
-pub fn save_secret(secret: String) -> anyhow::Result<()> {
+pub fn save_secret(name: &str, secret: String) -> anyhow::Result<()> {
   let usr = env::var("USER").expect("No $USER env var found");
   let cdir = "/home/".to_owned() + &usr + "/.config/remex/";
-  let flnm = cdir.clone() + "secret";
+  let flnm = cdir.clone() + format!("{}secret", name).as_str();
   match std::fs::write(flnm.clone(), secret.clone()) {
     Ok(_) => Ok(()),
     Err(e) => match e.kind() {
@@ -21,11 +21,11 @@ pub fn save_secret(secret: String) -> anyhow::Result<()> {
   }
 }
 
-pub fn get_secret() -> anyhow::Result<Option<String>, std::io::Error> {
+pub fn get_secret(name: &str) -> anyhow::Result<Option<String>, std::io::Error> {
   let usr = env::var("USER").expect("No $USER env var found");
   let cdir = "/home/".to_owned() + &usr + "/.config/remex/";
   tracing::info!("Reading secret from: {}secret", &cdir);
-  match std::fs::read_to_string(cdir + "secret") {
+  match std::fs::read_to_string(cdir + format!("{}secret", name).as_str()) {
     Ok(s) => {
       tracing::info!("Read secret: {}", &s);
       Ok(Some(s))

@@ -8,7 +8,7 @@ const ADDRESS: &str = "127.0.0.1:4269";
 
 fn get_or_generate_secret() -> String {
   // Try to get existing secret
-  match secret::get_secret() {
+  match secret::get_secret("server") {
     Ok(Some(secret_val)) => {
       println!("Using existing secret from file");
       secret_val
@@ -16,14 +16,14 @@ fn get_or_generate_secret() -> String {
     Err(e) => {
       tracing::error!("Failed to get secret: {}", e);
       let secret_val = generate_secret();
-      secret::save_secret(secret_val.clone()).expect("Failed to save secret");
+      secret::save_secret("server", secret_val.clone()).expect("Failed to save secret");
       secret_val
     }
     _ => {
       // Generate a new secret
       println!("No secret found, generating new secret");
       let secret_val = generate_secret();
-      secret::save_secret(secret_val.clone()).expect("Failed to save secret");
+      secret::save_secret("server", secret_val.clone()).expect("Failed to save secret");
       secret_val
     }
   }

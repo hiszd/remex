@@ -91,10 +91,10 @@ impl std::fmt::Display for DisconnectReason {
 #[derive(Serialize, Deserialize, Debug, Message, Clone)]
 #[rtype(result = "()")]
 pub enum IdentifyType {
-  /// Secret (Secret, Client_Name)
-  Secret(String, String),
-  /// ClientSecret (Secret, Client_Name, Client_Id)
-  ClientSecret(String, String, String),
+  /// Secret (Secret, Client_Name, Hardware_Hash)
+  Secret(String, String, String),
+  /// ClientSecret (Secret, Client_Name, Client_Id, Hardware_Hash)
+  ClientSecret(String, String, String, String),
 }
 
 ///
@@ -121,6 +121,7 @@ pub enum ClientRequest {
 #[derive(Serialize, Deserialize, Debug, Message, Clone)]
 #[rtype(result = "()")]
 pub enum ConnectionResponse {
+  // TODO: send server name with authenticated response
   /// Authenticated (Id, Secret)
   Authenticated(String, String),
   /// Disconnect (Reason)

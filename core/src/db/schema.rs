@@ -5,6 +5,7 @@ diesel::table! {
         id -> Text,
         secret -> Text,
         client_name -> Text,
+        hardware_hash -> Text,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
     }

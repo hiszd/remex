@@ -32,7 +32,7 @@ pub struct RemexSession {
   /// unique session id
   id: String,
   /// unique client id
-  client_id: Option<u64>,
+  client_id: Option<String>,
   /// machine name
   name: Option<String>,
   /// server secret
@@ -73,148 +73,251 @@ impl Actor for RemexSession {
 impl actix::io::WriteHandler<io::Error> for RemexSession {
 }
 
-// NOTE: handle client requests
-// To use `Framed` we have to define Io type and Codec
 impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
-  /// This is main event loop for client requests
   fn handle(&mut self, msg: Result<ClientRequest, io::Error>, ctx: &mut Context<Self>) {
     match msg {
-      Ok(m) => {
-        match m.clone() {
-          ClientRequest::ConnectionRequest(c) => {
-            tracing::info!("Client connection request: {:#?}", &c);
-            match c {
-              ConnectionRequest::Identify(i) => {
-                let client: crate::db::model::clients::Client = match i {
-                  // Server secret is used to identify client
-                  IdentifyType::Secret(sec, name) => {
-                    info!("Client attempting to connect with server secret: {}", &sec);
-                    if sec == self.server_secret {
-                      info!("Secret match");
-                      let secret = crate::utils::generate_secret(false);
-                      // create a new client or pull existing
-                      let c: crate::db::model::clients::Client =
-                        futures::executor::block_on(async {
-                          let mut c = crate::db::establish_connection_postgres();
-                          use crate::db::model::clients::NewClient;
-                          use crate::db::schema::clients;
-                          diesel::insert_into(clients::table)
-                            .values(&NewClient {
-                              id: uuid::Uuid::new_v4().to_string(),
-                              client_name: name.clone(),
-                              secret,
-                            })
-                            .on_conflict_do_nothing()
-                            .get_result(&mut c)
-                            .unwrap()
-                        });
-                      info!("Client: {}, ID: {}, Secret: {}", &c.client_name, &c.id, &c.secret);
-                      c
-                    } else {
-                      info!("Secret mismatch");
-                      // disconnect from server and close the actor
-                      self.framed.write(ServerResponse::ConnectionResponse(
-                        ConnectionResponse::Disconnect(crate::codec::DisconnectReason::AuthFailed),
-                      ));
-                      ctx.stop();
-                      return;
+      Ok(m) => match (m, self.authenticated) {
+        (ClientRequest::ConnectionRequest(ConnectionRequest::Identify(iden)), _) => {
+          let client: anyhow::Result<crate::db::model::clients::Client> = match iden {
+            IdentifyType::Secret(sec, name, hw_hash) => {
+              info!("Client attempting to connect with server secret: {}", &sec);
+              if sec == self.server_secret {
+                info!("Secret match for client: {}, {}", &name, &hw_hash);
+                let secret = crate::utils::generate_secret(false);
+                // create a new client or pull existing
+                futures::executor::block_on(async {
+                  let mut c = crate::db::establish_connection_postgres();
+                  use crate::db::model::clients::{Client, NewClient};
+                  use crate::db::schema::clients;
+                  match clients::table
+                    .select(Client::as_select())
+                    .filter(clients::client_name.eq(&name))
+                    .filter(clients::hardware_hash.eq(&hw_hash))
+                    .get_result(&mut c)
+                  {
+                    Ok(c) => Ok(c),
+                    Err(_) => {
+                      info!("Existing Client not found");
+                      Ok(
+                        diesel::insert_into(clients::table)
+                          .values(&NewClient {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            client_name: name.clone(),
+                            secret,
+                            hardware_hash: hw_hash,
+                          })
+                          .on_conflict_do_nothing()
+                          .get_result(&mut c)
+                          .unwrap(),
+                      )
                     }
                   }
-                  // Client secret that was assigned to the client by the server is used to authenticate
-                  IdentifyType::ClientSecret(sec, name, id) => {
-                    info!(
-                      "Client attempting to connect with client secret: {}, name: {}, id: {}",
-                      &sec, &name, &id
-                    );
-                    let c = futures::executor::block_on(async {
-                      let mut c = crate::db::establish_connection_postgres();
-                      use crate::db::model::clients::Client;
-                      use crate::db::schema::clients;
-                      clients::table
-                        .select(Client::as_select())
-                        .filter(clients::client_name.eq(&name))
-                        .filter(clients::id.eq(&id))
-                        .get_result(&mut c)
-                    });
-                    if let Ok(clnt) = c {
-                      if clnt.secret == sec {
-                        clnt
-                      } else {
-                        self.framed.write(ServerResponse::ConnectionResponse(
-                          ConnectionResponse::Disconnect(
-                            crate::codec::DisconnectReason::AuthFailed,
-                          ),
-                        ));
-                        ctx.stop();
-                        return;
-                      }
-                    } else {
-                      self.framed.write(ServerResponse::ConnectionResponse(
-                        ConnectionResponse::Disconnect(crate::codec::DisconnectReason::AuthFailed),
-                      ));
-                      ctx.stop();
-                      return;
-                    }
-                  }
-                };
-
-                // Extract values before moving client into the message
-                let client_name = client.client_name.clone();
-                let client_id = client.id.clone();
-                let client_secret = client.secret.clone();
-
-                // Register with the server actor — this checks for duplicate connections
-                let server_addr = self.addr.clone();
-                let fut = actix::fut::wrap_future::<_, Self>(server_addr.send(
-                  server::msg::ClientConnect {
-                    client,
-                    addr: ctx.address(),
-                  },
-                ));
-
-                ctx.wait(fut.map(move |result, act, ctx| match result {
-                  Ok(Ok(())) => {
-                    act.name = Some(client_name.clone());
-                    act.authenticated = true;
-                    act.id = client_id.clone();
-                    tracing::info!("Sending auth to client: {}", &client_name);
-                    act.framed.write(ServerResponse::ConnectionResponse(
-                      ConnectionResponse::Authenticated(client_id, client_secret),
-                    ));
-                  }
-                  Ok(Err(reason)) => {
-                    tracing::info!(
-                      "Sending disconnect to client: {} with reason: {}",
-                      &client_name,
-                      &reason
-                    );
-                    act.framed.write(ServerResponse::ConnectionResponse(
-                      ConnectionResponse::Disconnect(reason),
-                    ));
-                    ctx.stop();
-                  }
-                  Err(e) => {
-                    tracing::error!("Failed to communicate with server actor: {}", e);
-                    act.framed.write(ServerResponse::ConnectionResponse(
-                      ConnectionResponse::Disconnect(crate::codec::DisconnectReason::Unknown(
-                        "Internal server error".to_string(),
-                      )),
-                    ));
-                    ctx.stop();
-                  }
-                }));
+                })
+              } else {
+                info!("Secret mismatch");
+                Err(anyhow::anyhow!("Secret mismatch"))
               }
             }
+            IdentifyType::ClientSecret(sec, name, id, hw_hash) => {
+              info!(
+                "Client attempting to connect with client secret: {}, name: {}, id: {}",
+                &sec, &name, &id
+              );
+              // TODO: At some point it makes sense to have this be an in-memory cache of the 4 most
+              // recent client queries
+              // TESTING: need to decide wither or not I want to check the database for the client
+              // that matches the name, hw hash, secret, and ID, or if I just want to pull the
+              // match for the hw hash(or id maybe) and then compare the others after the fact.
+              let c = futures::executor::block_on(async {
+                let mut c = crate::db::establish_connection_postgres();
+                use crate::db::model::clients::Client;
+                use crate::db::schema::clients;
+                clients::table
+                  .select(Client::as_select())
+                  .filter(clients::client_name.eq(&name))
+                  .filter(clients::hardware_hash.eq(&hw_hash))
+                  .filter(clients::id.eq(&id))
+                  .get_result(&mut c)
+              });
+              if let Ok(clnt) = c {
+                Ok(clnt)
+              } else {
+                Err(anyhow::anyhow!("Client not found"))
+              }
+            }
+          };
+          match client {
+            Ok(clnt) => {
+              self.client_id = Some(clnt.id.clone());
+              self.name = Some(clnt.client_name.clone());
+              self.authenticated = true;
+              tracing::info!("Client {} authenticated.", &clnt.client_name);
+              self.framed.write(ServerResponse::ConnectionResponse(
+                ConnectionResponse::Authenticated(clnt.id, clnt.secret),
+              ));
+            }
+            Err(e) => {
+              tracing::error!("Client creation error: {}", e);
+              self.framed.write(ServerResponse::ConnectionResponse(
+                ConnectionResponse::Disconnect(crate::codec::DisconnectReason::AuthFailed),
+              ));
+              ctx.stop();
+            }
           }
-          // Ping from client
-          ClientRequest::Ping => self.hb = Instant::now(),
-          s => info!("Client request: {:?}", s),
         }
-      }
+        (ClientRequest::Ping, _) => {
+          self.hb = Instant::now();
+        }
+        (ClientRequest::Log(_), true) => {}
+        s => {
+          tracing::info!("Ignored Client request: {:#?}", &s);
+        }
+      },
       Err(e) => info!("Client error: {}", e),
     }
   }
 }
+
+// // NOTE: handle client requests
+// // To use `Framed` we have to define Io type and Codec
+// impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
+//   /// This is main event loop for client requests
+//   fn handle(&mut self, msg: Result<ClientRequest, io::Error>, ctx: &mut Context<Self>) {
+//     match msg {
+//       Ok(m) => {
+//         match m.clone() {
+//           ClientRequest::ConnectionRequest(c) => {
+//             tracing::info!("Client connection request: {:#?}", &c);
+//             match c {
+//               ConnectionRequest::Identify(i) => {
+//                 let client: crate::db::model::clients::Client = match i {
+//                   // Server secret is used to identify client
+//                   IdentifyType::Secret(sec, name, hw_hash) => {
+//                     info!("Client attempting to connect with server secret: {}", &sec);
+//                     if sec == self.server_secret {
+//                       info!("Secret match");
+//                       let secret = crate::utils::generate_secret(false);
+//                       // create a new client or pull existing
+//                       let c: crate::db::model::clients::Client =
+//                         futures::executor::block_on(async {
+//                           let mut c = crate::db::establish_connection_postgres();
+//                           use crate::db::model::clients::NewClient;
+//                           use crate::db::schema::clients;
+//                           diesel::insert_into(clients::table)
+//                             .values(&NewClient {
+//                               id: uuid::Uuid::new_v4().to_string(),
+//                               client_name: name.clone(),
+//                               secret,
+//                               hardware_hash: hw_hash,
+//                             })
+//                             .on_conflict_do_nothing()
+//                             .get_result(&mut c)
+//                             .unwrap()
+//                         });
+//                       info!("Client: {}, ID: {}, Secret: {}", &c.client_name, &c.id, &c.secret);
+//                       c
+//                     } else {
+//                       info!("Secret mismatch");
+//                       // disconnect from server and close the actor
+//                       self.framed.write(ServerResponse::ConnectionResponse(
+//                         ConnectionResponse::Disconnect(crate::codec::DisconnectReason::AuthFailed),
+//                       ));
+//                       ctx.stop();
+//                       return;
+//                     }
+//                   }
+//                   // Client secret that was assigned to the client by the server is used to authenticate
+//                   IdentifyType::ClientSecret(sec, name, id, hw_hash) => {
+//                     info!(
+//                       "Client attempting to connect with client secret: {}, name: {}, id: {}",
+//                       &sec, &name, &id
+//                     );
+//                     let c = futures::executor::block_on(async {
+//                       let mut c = crate::db::establish_connection_postgres();
+//                       use crate::db::model::clients::Client;
+//                       use crate::db::schema::clients;
+//                       clients::table
+//                         .select(Client::as_select())
+//                         .filter(clients::client_name.eq(&name))
+//                         .filter(clients::id.eq(&id))
+//                         .get_result(&mut c)
+//                     });
+//                     if let Ok(clnt) = c {
+//                       if clnt.secret == sec && clnt.hardware_hash == hw_hash {
+//                         clnt
+//                       } else {
+//                         self.framed.write(ServerResponse::ConnectionResponse(
+//                           ConnectionResponse::Disconnect(
+//                             crate::codec::DisconnectReason::AuthFailed,
+//                           ),
+//                         ));
+//                         ctx.stop();
+//                         return;
+//                       }
+//                     } else {
+//                       self.framed.write(ServerResponse::ConnectionResponse(
+//                         ConnectionResponse::Disconnect(crate::codec::DisconnectReason::AuthFailed),
+//                       ));
+//                       ctx.stop();
+//                       return;
+//                     }
+//                   }
+//                 };
+//                 // Extract values before moving client into the message
+//                 let client_name = client.client_name.clone();
+//                 let client_id = client.id.clone();
+//                 let client_secret = client.secret.clone();
+//                 // Register with the server actor — this checks for duplicate connections
+//                 let server_addr = self.addr.clone();
+//                 let fut = actix::fut::wrap_future::<_, Self>(server_addr.send(
+//                   server::msg::ClientConnect {
+//                     client,
+//                     addr: ctx.address(),
+//                   },
+//                 ));
+//                 ctx.wait(fut.map(move |result, act, ctx| match result {
+//                   Ok(Ok(())) => {
+//                     act.name = Some(client_name.clone());
+//                     act.authenticated = true;
+//                     act.id = client_id.clone();
+//                     tracing::info!("Sending auth to client: {}", &client_name);
+//                     act.framed.write(ServerResponse::ConnectionResponse(
+//                       ConnectionResponse::Authenticated(client_id, client_secret),
+//                     ));
+//                   }
+//                   Ok(Err(reason)) => {
+//                     tracing::info!(
+//                       "Sending disconnect to client: {} with reason: {}",
+//                       &client_name,
+//                       &reason
+//                     );
+//                     act.framed.write(ServerResponse::ConnectionResponse(
+//                       ConnectionResponse::Disconnect(reason),
+//                     ));
+//                     ctx.stop();
+//                   }
+//                   Err(e) => {
+//                     tracing::error!("Failed to communicate with server actor: {}", e);
+//                     act.framed.write(ServerResponse::ConnectionResponse(
+//                       ConnectionResponse::Disconnect(crate::codec::DisconnectReason::Unknown(
+//                         "Internal server error".to_string(),
+//                       )),
+//                     ));
+//                     ctx.stop();
+//                   }
+//                 }));
+//               }
+//             }
+//           }
+//           // Ping from client
+//           ClientRequest::Ping => self.hb = Instant::now(),
+//           s => info!("Client request: {:?}", s),
+//         }
+//       }
+//       Err(e) => info!("Client error: {}", e),
+//     }
+//   }
+// }
 
 /// Helper methods
 impl RemexSession {
