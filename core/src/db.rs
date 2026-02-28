@@ -4,8 +4,8 @@ pub mod schema;
 // FIXME: I shouldn't have to seperate these migrations. Look into this.
 pub const SERVER_MIGRATIONS: diesel_migrations::EmbeddedMigrations =
   diesel_migrations::embed_migrations!("../migrations/server");
-pub const SHARED_MIGRATIONS: diesel_migrations::EmbeddedMigrations =
-  diesel_migrations::embed_migrations!("../migrations/shared");
+pub const ENDPOINT_MIGRATIONS: diesel_migrations::EmbeddedMigrations =
+  diesel_migrations::embed_migrations!("../migrations/endpoint");
 
 #[derive(Debug, Clone, Copy)]
 pub enum ConnectionType {
@@ -45,9 +45,6 @@ pub async fn migrate(dbtype: ConnectionType) -> anyhow::Result<()> {
   match dbtype {
     ConnectionType::Postgres => {
       let mut c = establish_connection_postgres();
-      if let Err(e) = c.run_pending_migrations(SHARED_MIGRATIONS) {
-        anyhow::bail!("{}", e)
-      };
       if let Err(e) = c.run_pending_migrations(SERVER_MIGRATIONS) {
         anyhow::bail!("{}", e)
       };
@@ -55,7 +52,7 @@ pub async fn migrate(dbtype: ConnectionType) -> anyhow::Result<()> {
     }
     ConnectionType::Sqlite => {
       let mut c = establish_connection_sqlite();
-      match c.run_pending_migrations(SHARED_MIGRATIONS) {
+      match c.run_pending_migrations(ENDPOINT_MIGRATIONS) {
         Err(e) => anyhow::bail!("{}", e),
         _ => Ok(()),
       }

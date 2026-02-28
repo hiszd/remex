@@ -1,11 +1,11 @@
 -- Your SQL goes here
 
 CREATE TABLE jobs_groups (
+    id SERIAL PRIMARY KEY,
     job_id TEXT REFERENCES jobs (id) ON DELETE CASCADE,
     group_id TEXT REFERENCES groups (id) ON DELETE CASCADE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (job_id, group_id)
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TRIGGER update_jobs_groups_updated_at

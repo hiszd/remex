@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use serde_json as json;
 use tracing::error;
 
+use crate::db::model;
+
 // const KEY: &str = "tZs3U%hqY^o$&*y%4HcF8&RyAKevUbZnkTsrjCzPGxfare3Yn9c7shVZETfPDPUc8xR%N38a!TL%2$WbkFhZqmH#jvw&d3^mryPD8Y8TqHoJHwyKSTJeQB7vK7QkW#&B";
 const KEY: &str = "tZs3U%hqY^o$&*y%4HcF8&RyAKevUbZn";
 
@@ -97,12 +99,27 @@ pub enum IdentifyType {
   ClientSecret(String, String, String, String),
 }
 
-///
+/// Requests related to the connection
 #[derive(Serialize, Deserialize, Debug, Message, Clone)]
 #[rtype(result = "()")]
 pub enum ConnectionRequest {
   /// Identify (Type, Data)
   Identify(IdentifyType),
+}
+
+/// Requests related to the connection
+#[derive(Serialize, Deserialize, Debug, Message, Clone)]
+#[rtype(result = "()")]
+#[serde(tag = "jobs", content = "data")]
+pub enum JobsRequest {
+  /// Request all jobs
+  All,
+  /// Send executions to the server (Job_Id, Executions, Logs)
+  SendExecutions(
+    String,
+    Vec<model::endpoint::executions::Execution>,
+    Vec<model::endpoint::logs::Log>,
+  ),
 }
 
 /// Client request - come from client
@@ -112,8 +129,8 @@ pub enum ConnectionRequest {
 pub enum ClientRequest {
   /// Connection Request
   ConnectionRequest(ConnectionRequest),
-  /// Log (Message)
-  Log(String),
+  /// Requesting jobs from the server
+  JobsRequest(JobsRequest),
   /// Ping
   Ping,
 }
@@ -128,6 +145,13 @@ pub enum ConnectionResponse {
   Disconnect(DisconnectReason),
 }
 
+#[derive(Serialize, Deserialize, Debug, Message, Clone)]
+#[rtype(result = "()")]
+#[serde(tag = "jobs", content = "data")]
+pub enum JobsResponse {
+  All(Vec<model::endpoint::jobs::JobComplete>),
+}
+
 /// Server response - respond to client requests
 #[derive(Serialize, Deserialize, Debug, Message, Clone)]
 #[rtype(result = "()")]
@@ -136,7 +160,7 @@ pub enum ServerResponse {
   /// Connection Response
   ConnectionResponse(ConnectionResponse),
   /// Recieve Jobs from the Session manager
-  ReceiveJobs(Vec<crate::db::model::jobs::Job>),
+  JobsResponse(JobsResponse),
   /// Ping
   Ping,
 }

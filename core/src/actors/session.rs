@@ -16,12 +16,14 @@ use tokio::{
 use tokio_util::codec::FramedRead;
 use tracing::info;
 
-use crate::codec::{
-  ClientCodec, ClientRequest, ConnectionRequest, ConnectionResponse, ServerResponse,
-};
 use crate::{
-  actors::server::{self, RemexServer},
-  codec::IdentifyType,
+  actors::{
+    self,
+    server::{self, RemexServer},
+  },
+  codec::{self, ClientRequest},
+  db::{self, model, schema},
+  utils,
 };
 
 pub mod msg;
@@ -47,7 +49,7 @@ pub struct RemexSession {
   /// connection.
   hb: Instant,
   /// Framed wrapper
-  framed: actix::io::FramedWrite<ServerResponse, WriteHalf<TcpStream>, ClientCodec>,
+  framed: actix::io::FramedWrite<codec::ServerResponse, WriteHalf<TcpStream>, codec::ClientCodec>,
 }
 
 impl Actor for RemexSession {
@@ -64,7 +66,7 @@ impl Actor for RemexSession {
     // notify Remex server
     self.addr.do_send(server::msg::ClientDisconnect {
       id: self.id.clone(),
-      reason: crate::codec::DisconnectReason::Unknown("Session stopping".to_string()),
+      reason: codec::DisconnectReason::Unknown("Session stopping".to_string()),
     });
     Running::Stop
   }
@@ -77,18 +79,19 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
   fn handle(&mut self, msg: Result<ClientRequest, io::Error>, ctx: &mut Context<Self>) {
     match msg {
       Ok(m) => match (m, self.authenticated) {
-        (ClientRequest::ConnectionRequest(ConnectionRequest::Identify(iden)), _) => {
-          let client: anyhow::Result<crate::db::model::clients::Client> = match iden {
+        (ClientRequest::ConnectionRequest(codec::ConnectionRequest::Identify(iden)), _) => {
+          use codec::IdentifyType;
+          let client: anyhow::Result<model::server::clients::Client> = match iden {
             IdentifyType::Secret(sec, name, hw_hash) => {
               info!("Client attempting to connect with server secret: {}", &sec);
               if sec == self.server_secret {
                 info!("Secret match for client: {}, {}", &name, &hw_hash);
-                let secret = crate::utils::generate_secret(false);
+                let secret = utils::generate_secret(false);
                 // create a new client or pull existing
                 futures::executor::block_on(async {
-                  let mut c = crate::db::establish_connection_postgres();
-                  use crate::db::model::clients::{Client, NewClient};
-                  use crate::db::schema::clients;
+                  let mut c = db::establish_connection_postgres();
+                  use model::server::clients::{Client, NewClient};
+                  use schema::server::clients;
                   match clients::table
                     .select(Client::as_select())
                     .filter(clients::client_name.eq(&name))
@@ -129,9 +132,9 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
               // that matches the name, hw hash, secret, and ID, or if I just want to pull the
               // match for the hw hash(or id maybe) and then compare the others after the fact.
               let c = futures::executor::block_on(async {
-                let mut c = crate::db::establish_connection_postgres();
-                use crate::db::model::clients::Client;
-                use crate::db::schema::clients;
+                let mut c = db::establish_connection_postgres();
+                use model::server::clients::Client;
+                use schema::server::clients;
                 clients::table
                   .select(Client::as_select())
                   .filter(clients::client_name.eq(&name))
@@ -152,14 +155,14 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
               self.name = Some(clnt.client_name.clone());
               self.authenticated = true;
               tracing::info!("Client {} authenticated.", &clnt.client_name);
-              self.framed.write(ServerResponse::ConnectionResponse(
-                ConnectionResponse::Authenticated(clnt.id, clnt.secret),
+              self.framed.write(codec::ServerResponse::ConnectionResponse(
+                codec::ConnectionResponse::Authenticated(clnt.id, clnt.secret),
               ));
             }
             Err(e) => {
               tracing::error!("Client creation error: {}", e);
-              self.framed.write(ServerResponse::ConnectionResponse(
-                ConnectionResponse::Disconnect(crate::codec::DisconnectReason::AuthFailed),
+              self.framed.write(codec::ServerResponse::ConnectionResponse(
+                codec::ConnectionResponse::Disconnect(codec::DisconnectReason::AuthFailed),
               ));
               ctx.stop();
             }
@@ -168,7 +171,28 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
         (ClientRequest::Ping, _) => {
           self.hb = Instant::now();
         }
-        (ClientRequest::Log(_), true) => {}
+        (ClientRequest::JobsRequest(j), true) => {
+          use codec::JobsRequest;
+          match j {
+            JobsRequest::All => {
+              tracing::info!("Received request to send along all related jobs");
+              let jobs = futures::executor::block_on(async {
+                use crate::db::schema::server::{clients, jobs, jobs_groups};
+                let mut c = db::establish_connection_postgres();
+                let client = clients::table.find(specific_author_id).first::<Author>(conn)?;
+              });
+              self.framed.write(codec::ServerResponse::ReceiveJobs(jobs.unwrap()));
+            }
+            JobsRequest::SendExecutions(job_id, executions, logs) => {
+              tracing::info!(
+                "Received executions for job: {}, executions: {:?}, logs: {:?}",
+                &job_id,
+                &executions,
+                &logs
+              )
+            }
+          }
+        }
         s => {
           tracing::info!("Ignored Client request: {:#?}", &s);
         }
@@ -177,154 +201,12 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
     }
   }
 }
-
-// // NOTE: handle client requests
-// // To use `Framed` we have to define Io type and Codec
-// impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
-//   /// This is main event loop for client requests
-//   fn handle(&mut self, msg: Result<ClientRequest, io::Error>, ctx: &mut Context<Self>) {
-//     match msg {
-//       Ok(m) => {
-//         match m.clone() {
-//           ClientRequest::ConnectionRequest(c) => {
-//             tracing::info!("Client connection request: {:#?}", &c);
-//             match c {
-//               ConnectionRequest::Identify(i) => {
-//                 let client: crate::db::model::clients::Client = match i {
-//                   // Server secret is used to identify client
-//                   IdentifyType::Secret(sec, name, hw_hash) => {
-//                     info!("Client attempting to connect with server secret: {}", &sec);
-//                     if sec == self.server_secret {
-//                       info!("Secret match");
-//                       let secret = crate::utils::generate_secret(false);
-//                       // create a new client or pull existing
-//                       let c: crate::db::model::clients::Client =
-//                         futures::executor::block_on(async {
-//                           let mut c = crate::db::establish_connection_postgres();
-//                           use crate::db::model::clients::NewClient;
-//                           use crate::db::schema::clients;
-//                           diesel::insert_into(clients::table)
-//                             .values(&NewClient {
-//                               id: uuid::Uuid::new_v4().to_string(),
-//                               client_name: name.clone(),
-//                               secret,
-//                               hardware_hash: hw_hash,
-//                             })
-//                             .on_conflict_do_nothing()
-//                             .get_result(&mut c)
-//                             .unwrap()
-//                         });
-//                       info!("Client: {}, ID: {}, Secret: {}", &c.client_name, &c.id, &c.secret);
-//                       c
-//                     } else {
-//                       info!("Secret mismatch");
-//                       // disconnect from server and close the actor
-//                       self.framed.write(ServerResponse::ConnectionResponse(
-//                         ConnectionResponse::Disconnect(crate::codec::DisconnectReason::AuthFailed),
-//                       ));
-//                       ctx.stop();
-//                       return;
-//                     }
-//                   }
-//                   // Client secret that was assigned to the client by the server is used to authenticate
-//                   IdentifyType::ClientSecret(sec, name, id, hw_hash) => {
-//                     info!(
-//                       "Client attempting to connect with client secret: {}, name: {}, id: {}",
-//                       &sec, &name, &id
-//                     );
-//                     let c = futures::executor::block_on(async {
-//                       let mut c = crate::db::establish_connection_postgres();
-//                       use crate::db::model::clients::Client;
-//                       use crate::db::schema::clients;
-//                       clients::table
-//                         .select(Client::as_select())
-//                         .filter(clients::client_name.eq(&name))
-//                         .filter(clients::id.eq(&id))
-//                         .get_result(&mut c)
-//                     });
-//                     if let Ok(clnt) = c {
-//                       if clnt.secret == sec && clnt.hardware_hash == hw_hash {
-//                         clnt
-//                       } else {
-//                         self.framed.write(ServerResponse::ConnectionResponse(
-//                           ConnectionResponse::Disconnect(
-//                             crate::codec::DisconnectReason::AuthFailed,
-//                           ),
-//                         ));
-//                         ctx.stop();
-//                         return;
-//                       }
-//                     } else {
-//                       self.framed.write(ServerResponse::ConnectionResponse(
-//                         ConnectionResponse::Disconnect(crate::codec::DisconnectReason::AuthFailed),
-//                       ));
-//                       ctx.stop();
-//                       return;
-//                     }
-//                   }
-//                 };
-//                 // Extract values before moving client into the message
-//                 let client_name = client.client_name.clone();
-//                 let client_id = client.id.clone();
-//                 let client_secret = client.secret.clone();
-//                 // Register with the server actor — this checks for duplicate connections
-//                 let server_addr = self.addr.clone();
-//                 let fut = actix::fut::wrap_future::<_, Self>(server_addr.send(
-//                   server::msg::ClientConnect {
-//                     client,
-//                     addr: ctx.address(),
-//                   },
-//                 ));
-//                 ctx.wait(fut.map(move |result, act, ctx| match result {
-//                   Ok(Ok(())) => {
-//                     act.name = Some(client_name.clone());
-//                     act.authenticated = true;
-//                     act.id = client_id.clone();
-//                     tracing::info!("Sending auth to client: {}", &client_name);
-//                     act.framed.write(ServerResponse::ConnectionResponse(
-//                       ConnectionResponse::Authenticated(client_id, client_secret),
-//                     ));
-//                   }
-//                   Ok(Err(reason)) => {
-//                     tracing::info!(
-//                       "Sending disconnect to client: {} with reason: {}",
-//                       &client_name,
-//                       &reason
-//                     );
-//                     act.framed.write(ServerResponse::ConnectionResponse(
-//                       ConnectionResponse::Disconnect(reason),
-//                     ));
-//                     ctx.stop();
-//                   }
-//                   Err(e) => {
-//                     tracing::error!("Failed to communicate with server actor: {}", e);
-//                     act.framed.write(ServerResponse::ConnectionResponse(
-//                       ConnectionResponse::Disconnect(crate::codec::DisconnectReason::Unknown(
-//                         "Internal server error".to_string(),
-//                       )),
-//                     ));
-//                     ctx.stop();
-//                   }
-//                 }));
-//               }
-//             }
-//           }
-//           // Ping from client
-//           ClientRequest::Ping => self.hb = Instant::now(),
-//           s => info!("Client request: {:?}", s),
-//         }
-//       }
-//       Err(e) => info!("Client error: {}", e),
-//     }
-//   }
-// }
-
 /// Helper methods
 impl RemexSession {
   pub fn new(
     secret: String,
-    server: Addr<crate::actors::server::RemexServer>,
-    framed: actix::io::FramedWrite<ServerResponse, WriteHalf<TcpStream>, ClientCodec>,
+    server: Addr<actors::server::RemexServer>,
+    framed: actix::io::FramedWrite<codec::ServerResponse, WriteHalf<TcpStream>, codec::ClientCodec>,
   ) -> RemexSession {
     RemexSession {
       id: uuid::Uuid::new_v4().to_string(),
@@ -352,7 +234,7 @@ impl RemexSession {
         // notify Remex server
         act.addr.do_send(server::msg::ClientDisconnect {
           id: act.id.clone(),
-          reason: crate::codec::DisconnectReason::HeartbeatFailed,
+          reason: codec::DisconnectReason::HeartbeatFailed,
         });
 
         // stop actor
@@ -360,7 +242,7 @@ impl RemexSession {
       }
 
       // if we can not send message to sink, sink is closed (disconnected)
-      act.framed.write(ServerResponse::Ping);
+      act.framed.write(codec::ServerResponse::Ping);
     });
   }
 }
@@ -377,8 +259,12 @@ pub async fn tcp_server(s: &str, secret: &str, server: Addr<RemexServer>) {
     let server = server.clone();
     RemexSession::create(|ctx| {
       let (r, w) = split(stream);
-      RemexSession::add_stream(FramedRead::new(r, ClientCodec), ctx);
-      RemexSession::new(secret.into(), server, actix::io::FramedWrite::new(w, ClientCodec, ctx))
+      RemexSession::add_stream(FramedRead::new(r, codec::ClientCodec), ctx);
+      RemexSession::new(
+        secret.into(),
+        server,
+        actix::io::FramedWrite::new(w, codec::ClientCodec, ctx),
+      )
     });
   }
 }

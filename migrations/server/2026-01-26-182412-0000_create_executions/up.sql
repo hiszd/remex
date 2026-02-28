@@ -5,10 +5,10 @@ CREATE TABLE executions (
     job_id TEXT,
     FOREIGN KEY (job_id) REFERENCES jobs (id),
     client_id TEXT NOT NULL,
-    executed_at TIMESTAMPTZ,
+    executed_at TIMESTAMP,
     execution_result TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TRIGGER update_executions_updated_at

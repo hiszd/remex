@@ -32,7 +32,7 @@ impl Handler<ClientDisconnect> for super::RemexServer {
 #[derive(Message)]
 #[rtype(result = "Result<(), crate::codec::DisconnectReason>")]
 pub struct ClientConnect {
-  pub client: crate::db::model::clients::Client,
+  pub client: crate::db::model::server::clients::Client,
   pub addr: actix::Addr<session::RemexSession>,
 }
 /// Handler for Connect message.

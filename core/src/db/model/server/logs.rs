@@ -1,8 +1,12 @@
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
+
+#[allow(unused_imports)]
+use crate::db::model::server as model;
+use crate::db::schema::server as schema;
+
 #[derive(Queryable, Selectable)]
-#[diesel(table_name = crate::db::schema::logs)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(table_name = schema::logs)]
 pub struct Log {
   pub id: String,
   pub client_id: String,
@@ -13,7 +17,7 @@ pub struct Log {
 }
 
 #[derive(Queryable, Insertable, Serialize, Deserialize)]
-#[diesel(table_name = crate::db::schema::logs)]
+#[diesel(table_name = schema::logs)]
 pub struct NewLog {
   pub id: String,
   pub client_id: String,
@@ -23,7 +27,7 @@ pub struct NewLog {
 
 #[allow(dead_code)]
 #[derive(Deserialize, AsChangeset)]
-#[diesel(table_name = crate::db::schema::logs)]
+#[diesel(table_name = schema::logs)]
 pub struct UpdateLog {
   id: String,
   client_id: String,

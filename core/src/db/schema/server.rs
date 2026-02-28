@@ -55,16 +55,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    jobs_clients (id) {
-        id -> Int4,
-        job_id -> Nullable<Text>,
-        client_id -> Nullable<Text>,
-        created_at -> Timestamp,
-        updated_at -> Timestamp,
-    }
-}
-
-diesel::table! {
     jobs_groups (id) {
         id -> Int4,
         job_id -> Nullable<Text>,
@@ -88,8 +78,6 @@ diesel::table! {
 diesel::joinable!(executions -> jobs (job_id));
 diesel::joinable!(groups_clients -> clients (client_id));
 diesel::joinable!(groups_clients -> groups (group_id));
-diesel::joinable!(jobs_clients -> clients (client_id));
-diesel::joinable!(jobs_clients -> jobs (job_id));
 diesel::joinable!(jobs_groups -> groups (group_id));
 diesel::joinable!(jobs_groups -> jobs (job_id));
 diesel::joinable!(logs -> executions (execution_id));
@@ -100,7 +88,6 @@ diesel::allow_tables_to_appear_in_same_query!(
   groups,
   groups_clients,
   jobs,
-  jobs_clients,
   jobs_groups,
   logs,
 );

@@ -1,11 +1,11 @@
 -- Your SQL goes here
 
 CREATE TABLE groups_clients (
+    id SERIAL PRIMARY KEY,
     group_id TEXT REFERENCES groups (id) ON DELETE CASCADE,
     client_id TEXT REFERENCES clients (id) ON DELETE CASCADE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (group_id, client_id)
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TRIGGER update_groups_clients_updated_at

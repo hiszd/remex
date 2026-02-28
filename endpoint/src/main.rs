@@ -94,6 +94,7 @@ async fn main() -> anyhow::Result<()> {
 
       // initialize Sqlite Db
       remex_core::db::migrate(remex_core::db::ConnectionType::Sqlite).await.unwrap();
+      let mut dbconn = remex_core::db::establish_connection_sqlite();
 
       /* ********** SERVER MESSAGE LOOP ********** */
 
@@ -163,6 +164,12 @@ async fn main() -> anyhow::Result<()> {
                 ctx.authenticated = true;
                 fs::id::save_id(id).unwrap();
                 fs::secret::save_secret(secret).unwrap();
+              }
+              (ServerResponse::ReceiveJobs(jobs), true) => {
+                tracing::info!("Received {} jobs", jobs.len());
+                for job in jobs {
+                  tracing::info!("Job: {}", job.job_name);
+                }
               }
               s => {
                 tracing::info!("Ignored server response: {:#?}", &s);
