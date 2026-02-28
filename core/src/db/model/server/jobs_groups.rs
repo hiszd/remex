@@ -8,7 +8,7 @@ use crate::db::schema::server as schema;
 #[diesel(belongs_to(model::jobs::Job))]
 #[diesel(belongs_to(model::groups::Group))]
 #[diesel(table_name = schema::jobs_groups)]
-pub struct JobGroups {
+pub struct JobGroup {
   pub id: usize,
   pub job_id: String,
   pub group_id: String,
@@ -18,14 +18,14 @@ pub struct JobGroups {
 
 #[derive(Queryable, Insertable, Serialize, Deserialize)]
 #[diesel(table_name = schema::jobs_groups)]
-pub struct NewJobGroups {
+pub struct NewJobGroup {
   pub job_id: String,
   pub group_id: String,
 }
 
 #[derive(Deserialize, AsChangeset)]
 #[diesel(table_name = schema::jobs_groups)]
-pub struct UpdateJobGroups {
+pub struct UpdateJobGroup {
   job_id: String,
   group_id: String,
 }

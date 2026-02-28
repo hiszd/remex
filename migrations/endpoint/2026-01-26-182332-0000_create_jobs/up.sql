@@ -1,7 +1,7 @@
 -- Your SQL goes here
 
 CREATE TABLE jobs (
-    id TEXT PRIMARY KEY NOT NULL,
+    id INT PRIMARY KEY NOT NULL,
     job_name TEXT NOT NULL,
     job_type TEXT NOT NULL,
     job_status TEXT NOT NULL,

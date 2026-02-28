@@ -8,7 +8,7 @@ use std::{
 };
 
 use actix::prelude::*;
-use diesel::{ExpressionMethods, QueryDsl, RunQueryDsl, SelectableHelper};
+use diesel::{ExpressionMethods, JoinOnDsl, QueryDsl, RunQueryDsl, SelectableHelper};
 use tokio::{
   io::{split, WriteHalf},
   net::{TcpListener, TcpStream},
@@ -176,12 +176,28 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
           match j {
             JobsRequest::All => {
               tracing::info!("Received request to send along all related jobs");
-              let jobs = futures::executor::block_on(async {
-                use crate::db::schema::server::{clients, jobs, jobs_groups};
-                let mut c = db::establish_connection_postgres();
-                let client = clients::table.find(specific_author_id).first::<Author>(conn)?;
-              });
-              self.framed.write(codec::ServerResponse::ReceiveJobs(jobs.unwrap()));
+              let mut conn = db::establish_connection_postgres();
+              use crate::db::model::server::jobs::Job;
+              use crate::db::schema::server::{groups_clients, jobs, jobs_groups};
+              let assigned_jobs: Vec<Job> = jobs::table
+                // Implicitly joins `jobs` and `jobs_groups` utilizing `diesel::joinable!`
+                .inner_join(jobs_groups::table)
+                // Explicitly joins `groups_clients` utilizing the shared `group_id`
+                .inner_join(
+                  groups_clients::table.on(jobs_groups::group_id.eq(groups_clients::group_id)),
+                )
+                .filter(groups_clients::client_id.eq(&self.client_id.clone().unwrap()))
+                .select(Job::as_select())
+                .get_results(&mut conn)
+                .unwrap();
+              self.framed.write(codec::ServerResponse::JobsResponse(
+                codec::JobsResponse::ReceiveJobs(
+                  assigned_jobs
+                    .iter()
+                    .map(|j| crate::db::model::endpoint::jobs::Job::from(j.clone()))
+                    .collect(),
+                ),
+              ));
             }
             JobsRequest::SendExecutions(job_id, executions, logs) => {
               tracing::info!(

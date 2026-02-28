@@ -149,7 +149,8 @@ pub enum ConnectionResponse {
 #[rtype(result = "()")]
 #[serde(tag = "jobs", content = "data")]
 pub enum JobsResponse {
-  All(Vec<model::endpoint::jobs::JobComplete>),
+  All(Vec<model::endpoint::jobs::Job>),
+  ReceiveJobs(Vec<model::endpoint::jobs::Job>),
 }
 
 /// Server response - respond to client requests
