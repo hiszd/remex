@@ -5,7 +5,7 @@
   },
   "windows": [
     {
-      "name": "nvim",
+      "name": "backend",
       "starting_dir": null,
       "set_active": true,
       "panes": [
@@ -18,6 +18,16 @@
     {
       "name": "server",
       "starting_dir": "%selected_directory%/server"
+    },
+    {
+      "name": "frontend",
+      "starting_dir": "%selected_directory%/server/frontend",
+      "panes": [
+        {
+          "command": "nvim",
+          "is_vertical_split": null
+        }
+      ]
     },
     {
       "name": "endpoint",

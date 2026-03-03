@@ -1,11 +1,12 @@
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 #[allow(unused_imports)]
 use crate::db::model::server as model;
 use crate::db::schema::server as schema;
 
-#[derive(Queryable, Selectable, Serialize)]
+#[derive(Queryable, Selectable, Serialize, ToSchema)]
 #[diesel(table_name = schema::clients)]
 pub struct Client {
   pub id: String,
@@ -16,7 +17,7 @@ pub struct Client {
   pub updated_at: chrono::NaiveDateTime,
 }
 
-#[derive(Queryable, Insertable, Serialize, Deserialize)]
+#[derive(Queryable, Insertable, Serialize, Deserialize, ToSchema)]
 #[diesel(table_name = schema::clients)]
 pub struct NewClient {
   pub id: String,

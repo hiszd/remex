@@ -1,12 +1,10 @@
-use rand::Rng;
+use rand::{distr::Alphanumeric, RngExt};
 
 pub mod fs;
 
+/// Generate a secret as 32 or 64 characters long
 pub fn generate_secret(long: bool) -> String {
-  let secret: String = rand::rng()
-    .sample_iter(&rand::distr::Alphanumeric)
-    .take(if long { 64 } else { 32 })
-    .map(char::from)
-    .collect();
-  secret
+  let len = if long { 64 } else { 32 };
+
+  rand::rng().sample_iter(&Alphanumeric).take(len).map(char::from).collect()
 }

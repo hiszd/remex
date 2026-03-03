@@ -1,6 +1,10 @@
 use actix::Actor;
 use remex_core::actors::server::RemexServer;
-pub mod secret;
+use remex_core::utils::generate_secret;
+
+mod pnpm;
+mod secret;
+mod web;
 
 //SERVER
 
@@ -15,36 +19,18 @@ fn get_or_generate_secret() -> String {
     }
     Err(e) => {
       tracing::error!("Failed to get secret: {}", e);
-      let secret_val = generate_secret();
+      let secret_val = generate_secret(true);
       secret::save_secret("server", secret_val.clone()).expect("Failed to save secret");
       secret_val
     }
     _ => {
       // Generate a new secret
       println!("No secret found, generating new secret");
-      let secret_val = generate_secret();
+      let secret_val = generate_secret(true);
       secret::save_secret("server", secret_val.clone()).expect("Failed to save secret");
       secret_val
     }
   }
-}
-
-fn generate_secret() -> String {
-  use rand::Rng;
-  const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ\
-                            abcdefghijklmnopqrstuvwxyz\
-                            0123456789!@#$%^&*()_+-=[]{}|;:,.<>?";
-  const SECRET_LENGTH: usize = 64;
-
-  let mut rng = rand::rng();
-  let secret_val: String = (0..SECRET_LENGTH)
-    .map(|_| {
-      let idx = rng.random_range(0..CHARSET.len());
-      CHARSET[idx] as char
-    })
-    .collect();
-
-  secret_val
 }
 
 #[actix_web::main]
@@ -61,5 +47,23 @@ async fn main() {
     secret: Some(secret_string.clone()),
   }
   .start();
-  remex_core::actors::session::tcp_server(ADDRESS, &secret_string, server).await;
+  let web_server = web::start_web_server();
+  let web_handle = web_server.handle();
+  tokio::spawn(web_server);
+
+  tokio::spawn(pnpm::start_server());
+
+  let tcp_fut = remex_core::actors::session::tcp_server(ADDRESS, &secret_string, server);
+
+  tokio::select! {
+    _ = tokio::signal::ctrl_c() => {
+      println!("Ctrl-C received, shutting down gracefully...");
+    }
+    _ = tcp_fut => {
+      println!("TCP server exited unexpectedly.");
+    }
+  }
+
+  // Stop the web server properly
+  web_handle.stop(true).await;
 }

@@ -1,0 +1,77 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "remex-server",
+    "description": "",
+    "contact": {
+      "name": "Zion Koyl",
+      "email": "hiszd1@gmail.com"
+    },
+    "license": {
+      "name": ""
+    },
+    "version": "0.1.0"
+  },
+  "paths": {
+    "clients": {
+      "get": {
+        "tags": [
+          "handlers::clients"
+        ],
+        "operationId": "get_clients",
+        "responses": {
+          "200": {
+            "description": "Clients found successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Client"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Client": {
+        "type": "object",
+        "required": [
+          "id",
+          "secret",
+          "client_name",
+          "hardware_hash",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "client_name": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "hardware_hash": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "secret": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    }
+  }
+}

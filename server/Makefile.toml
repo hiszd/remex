@@ -1,0 +1,32 @@
+[tasks.setup]
+command = "diesel"
+args = [
+  "database",
+  "setup",
+  "--database-url",
+  "postgresql://postgres:H%40ck3r345@192.168.10.132:5432/remex",
+  "--migration-dir",
+  "../migrations/server",
+]
+
+[tasks.reset]
+command = "diesel"
+args = [
+  "database",
+  "reset",
+  "--database-url",
+  "postgresql://postgres:H%40ck3r345@192.168.10.132:5432/remex",
+  "--migration-dir",
+  "../migrations/server",
+]
+
+[tasks.schema]
+script = "diesel print-schema --database-url postgresql://postgres:H%40ck3r345@192.168.10.132:5432/remex &> ../core/src/db/schema/server.rs"
+
+[tasks.openapigen]
+script = "cargo run --bin api"
+
+[tasks.apigen]
+dependencies = ["openapigen"]
+cwd = "frontend"
+script = "pnpm run api:sync"

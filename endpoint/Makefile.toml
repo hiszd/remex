@@ -1,0 +1,24 @@
+[tasks.setup]
+command = "diesel"
+args = [
+  "database",
+  "setup",
+  "--database-url",
+  "sqlite://endpoint.db",
+  "--migration-dir",
+  "../migrations/endpoint",
+]
+
+[tasks.reset]
+command = "diesel"
+args = [
+  "database",
+  "reset",
+  "--database-url",
+  "sqlite://endpoint.db",
+  "--migration-dir",
+  "../migrations/endpoint",
+]
+
+[tasks.schema]
+script = "diesel print-schema --database-url sqlite://endpoint.db &> ../core/src/db/schema/endpoint.rs"
