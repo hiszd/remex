@@ -4,13 +4,13 @@ use remex_core::db::model::server::clients::Client;
 
 #[utoipa::path(
   get,
-  path = "clients",
+  path = "/clients",
   responses(
     (status = 200, description = "Clients found successfully", body = [Client]),
   ),
 )]
 #[get("/clients")]
-async fn get_clients() -> impl actix_web::Responder {
+pub async fn get_clients() -> impl actix_web::Responder {
   use remex_core::db::model::server::clients::Client;
   use remex_core::db::schema::server::clients;
   let mut pool = remex_core::db::establish_connection_postgres();

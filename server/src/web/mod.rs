@@ -14,6 +14,10 @@ struct ApiDoc;
 #[allow(unused)]
 pub fn generate_api() {
   tracing::info!("Generating openapi json");
+  // ensure frontend directory exists
+  if let Err(e) = std::fs::create_dir_all("./frontend") {
+    tracing::error!("Failed to create frontend directory: {}", e);
+  }
   // export openapi json
   std::fs::write(
     "./frontend/openapi.json",
@@ -24,7 +28,9 @@ pub fn generate_api() {
 }
 
 pub fn start_web_server() -> actix_web::dev::Server {
-  tracing::info!("Starting web server");
+  tracing::info!("Starting web server on 0.0.0.0:8989");
+
+  generate_api(); // Generate the openapi.json file on startup
 
   HttpServer::new(move || {
     App::new()
@@ -32,6 +38,7 @@ pub fn start_web_server() -> actix_web::dev::Server {
         utoipa_swagger_ui::SwaggerUi::new("/swagger-ui/{_:.*}")
           .url("/api-docs/openapi.json", ApiDoc::openapi()),
       )
+      .service(handlers::clients::get_clients) // Register the API endpoint
       .wrap(
         Cors::default()
           .allowed_origin("http://localhost:5173") // Your Vue dev URL
@@ -46,7 +53,7 @@ pub fn start_web_server() -> actix_web::dev::Server {
   })
   .disable_signals()
   .shutdown_timeout(5)
-  .bind((std::net::Ipv4Addr::UNSPECIFIED, 8989))
+  .bind(("0.0.0.0", 8989))
   .unwrap()
   .run()
 }

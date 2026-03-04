@@ -4,7 +4,8 @@ use remex_core::utils::generate_secret;
 
 mod pnpm;
 mod secret;
-mod web;
+
+use remex_server::web;
 
 //SERVER
 

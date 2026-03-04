@@ -7,7 +7,7 @@ import { VueQueryPlugin } from '@tanstack/vue-query'
 import { client } from '@/client/client.gen';
 
 client.setConfig({
-  baseUrl: 'http://192.168.1.111:8989',
+  baseUrl: '/api',
 })
 
 const app = createApp(App)

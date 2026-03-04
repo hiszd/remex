@@ -32,6 +32,6 @@ futures = "0.3.31"
 diesel = { version = "2.3.6", features = ["chrono", "postgres", "r2d2"] }
 diesel_migrations = { version = "2.3.1", features = ["postgres", "sqlite"] }
 # Utoipa core and Actix integration
-utoipa = { version = "5", features = ["chrono"] }
+utoipa = { version = "5", features = ["chrono", "actix_extras"] }
 utoipa-swagger-ui = { version = "9", features = ["actix-web"] }
 actix-cors = "0.7.1"
