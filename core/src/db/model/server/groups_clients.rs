@@ -5,10 +5,10 @@ use crate::db::model::server as model;
 use crate::db::schema::server as schema;
 
 #[derive(Identifiable, Queryable, Selectable, Associations)]
-#[diesel(belongs_to(model::groups::Group))]
-#[diesel(belongs_to(model::clients::Client))]
+#[diesel(belongs_to(model::groups::GroupSRV, foreign_key = group_id))]
+#[diesel(belongs_to(model::clients::ClientSRV, foreign_key = client_id))]
 #[diesel(table_name = schema::groups_clients)]
-pub struct GroupClients {
+pub struct GroupClientsSRV {
   pub id: usize,
   pub group_id: String,
   pub client_id: String,
@@ -18,7 +18,7 @@ pub struct GroupClients {
 
 #[derive(Queryable, Insertable, Serialize, Deserialize)]
 #[diesel(table_name = schema::groups_clients)]
-pub struct NewGroupClients {
+pub struct NewGroupClientsSRV {
   pub group_id: String,
   pub client_id: String,
   #[serde(rename = "createdAt")]
@@ -29,7 +29,7 @@ pub struct NewGroupClients {
 
 #[derive(Deserialize, AsChangeset)]
 #[diesel(table_name = schema::groups_clients)]
-pub struct UpdateGroupClients {
+pub struct UpdateGroupClientsSRV {
   group_id: String,
   client_id: String,
 }

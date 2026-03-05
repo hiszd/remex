@@ -81,7 +81,7 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
       Ok(m) => match (m, self.authenticated) {
         (ClientRequest::ConnectionRequest(codec::ConnectionRequest::Identify(iden)), _) => {
           use codec::IdentifyType;
-          let client: anyhow::Result<model::server::clients::Client> = match iden {
+          let client: anyhow::Result<model::server::clients::ClientSRV> = match iden {
             IdentifyType::Secret(sec, name, hw_hash) => {
               info!("Client attempting to connect with server secret: {}", &sec);
               if sec == self.server_secret {
@@ -90,10 +90,10 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
                 // create a new client or pull existing
                 futures::executor::block_on(async {
                   let mut c = db::establish_connection_postgres();
-                  use model::server::clients::{Client, NewClient};
+                  use model::server::clients::{ClientSRV, NewClientSRV};
                   use schema::server::clients;
                   match clients::table
-                    .select(Client::as_select())
+                    .select(ClientSRV::as_select())
                     .filter(clients::client_name.eq(&name))
                     .filter(clients::hardware_hash.eq(&hw_hash))
                     .get_result(&mut c)
@@ -103,7 +103,7 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
                       info!("Existing Client not found");
                       Ok(
                         diesel::insert_into(clients::table)
-                          .values(&NewClient {
+                          .values(&NewClientSRV {
                             id: uuid::Uuid::new_v4().to_string(),
                             client_name: name.clone(),
                             secret,
@@ -133,10 +133,10 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
               // match for the hw hash(or id maybe) and then compare the others after the fact.
               let c = futures::executor::block_on(async {
                 let mut c = db::establish_connection_postgres();
-                use model::server::clients::Client;
+                use model::server::clients::ClientSRV;
                 use schema::server::clients;
                 clients::table
-                  .select(Client::as_select())
+                  .select(ClientSRV::as_select())
                   .filter(clients::client_name.eq(&name))
                   .filter(clients::hardware_hash.eq(&hw_hash))
                   .filter(clients::id.eq(&id))
@@ -177,9 +177,9 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
             JobsRequest::All => {
               tracing::info!("Received request to send along all related jobs");
               let mut conn = db::establish_connection_postgres();
-              use crate::db::model::server::jobs::Job;
+              use crate::db::model::server::jobs::JobSRV;
               use crate::db::schema::server::{groups_clients, jobs, jobs_groups};
-              let assigned_jobs: Vec<Job> = jobs::table
+              let assigned_jobs: Vec<JobSRV> = jobs::table
                 // Implicitly joins `jobs` and `jobs_groups` utilizing `diesel::joinable!`
                 .inner_join(jobs_groups::table)
                 // Explicitly joins `groups_clients` utilizing the shared `group_id`
@@ -187,14 +187,14 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
                   groups_clients::table.on(jobs_groups::group_id.eq(groups_clients::group_id)),
                 )
                 .filter(groups_clients::client_id.eq(&self.client_id.clone().unwrap()))
-                .select(Job::as_select())
+                .select(JobSRV::as_select())
                 .get_results(&mut conn)
                 .unwrap();
               self.framed.write(codec::ServerResponse::JobsResponse(
                 codec::JobsResponse::ReceiveJobs(
                   assigned_jobs
                     .iter()
-                    .map(|j| crate::db::model::endpoint::jobs::Job::from(j.clone()))
+                    .map(|j| crate::db::dal::jobs::Job::from(j.clone()))
                     .collect(),
                 ),
               ));

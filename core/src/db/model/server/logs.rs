@@ -7,7 +7,8 @@ use crate::db::schema::server as schema;
 
 #[derive(Queryable, Selectable)]
 #[diesel(table_name = schema::logs)]
-pub struct Log {
+#[diesel(belongs_to(model::executions::ExecutionSRV, foreign_key = execution_id))]
+pub struct LogSRV {
   pub id: String,
   pub client_id: String,
   pub execution_id: String,
@@ -18,7 +19,7 @@ pub struct Log {
 
 #[derive(Queryable, Insertable, Serialize, Deserialize)]
 #[diesel(table_name = schema::logs)]
-pub struct NewLog {
+pub struct NewLogSRV {
   pub id: String,
   pub client_id: String,
   pub execution_id: String,
@@ -28,7 +29,7 @@ pub struct NewLog {
 #[allow(dead_code)]
 #[derive(Deserialize, AsChangeset)]
 #[diesel(table_name = schema::logs)]
-pub struct UpdateLog {
+pub struct UpdateLogSRV {
   id: String,
   client_id: String,
   execution_id: String,

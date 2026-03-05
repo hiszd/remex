@@ -8,7 +8,7 @@ use crate::db::schema::server as schema;
 
 #[derive(Queryable, Selectable, Serialize, ToSchema)]
 #[diesel(table_name = schema::clients)]
-pub struct Client {
+pub struct ClientSRV {
   pub id: String,
   pub secret: String,
   pub client_name: String,
@@ -19,7 +19,7 @@ pub struct Client {
 
 #[derive(Queryable, Insertable, Serialize, Deserialize, ToSchema)]
 #[diesel(table_name = schema::clients)]
-pub struct NewClient {
+pub struct NewClientSRV {
   pub id: String,
   pub secret: String,
   pub client_name: String,
@@ -28,7 +28,7 @@ pub struct NewClient {
 
 #[derive(Deserialize, AsChangeset)]
 #[diesel(table_name = schema::clients)]
-pub struct UpdateClient {
+pub struct UpdateClientSRV {
   secret: String,
   client_name: String,
   hardware_hash: String,

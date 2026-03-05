@@ -137,7 +137,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Job"
+                  "$ref": "#/components/schemas/JobSRV"
                 }
               }
             }
@@ -181,7 +181,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UpdateJob"
+                "$ref": "#/components/schemas/UpdateJobSRV"
               }
             }
           },
@@ -193,7 +193,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Job"
+                  "$ref": "#/components/schemas/JobSRV"
                 }
               }
             }
@@ -274,6 +274,39 @@
           }
         }
       },
+      "ClientSRV": {
+        "type": "object",
+        "required": [
+          "id",
+          "secret",
+          "client_name",
+          "hardware_hash",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "client_name": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "hardware_hash": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "secret": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "CreateClientForm": {
         "type": "object",
         "required": [
@@ -321,7 +354,22 @@
           }
         }
       },
-      "Job": {
+      "JobClientAction": {
+        "type": "object",
+        "required": [
+          "job_id",
+          "client_id"
+        ],
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "job_id": {
+            "type": "string"
+          }
+        }
+      },
+      "JobSRV": {
         "type": "object",
         "required": [
           "id",
@@ -358,25 +406,10 @@
           }
         }
       },
-      "JobClientAction": {
-        "type": "object",
-        "required": [
-          "job_id",
-          "client_id"
-        ],
-        "properties": {
-          "client_id": {
-            "type": "string"
-          },
-          "job_id": {
-            "type": "string"
-          }
-        }
-      },
       "JobWithClients": {
         "allOf": [
           {
-            "$ref": "#/components/schemas/Job"
+            "$ref": "#/components/schemas/JobSRV"
           },
           {
             "type": "object",
@@ -387,14 +420,14 @@
               "clients": {
                 "type": "array",
                 "items": {
-                  "$ref": "#/components/schemas/Client"
+                  "$ref": "#/components/schemas/ClientSRV"
                 }
               }
             }
           }
         ]
       },
-      "UpdateJob": {
+      "UpdateJobSRV": {
         "type": "object",
         "required": [
           "id",

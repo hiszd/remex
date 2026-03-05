@@ -6,25 +6,25 @@ mod handlers;
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(
-      handlers::clients::get_clients,
-      handlers::clients::create_client,
-      handlers::jobs::get_jobs,
-      handlers::jobs::get_job_by_id,
-      handlers::jobs::create_job,
-      handlers::jobs::update_job,
-      handlers::jobs::add_clients_to_jobs,
-      handlers::jobs::remove_clients_from_jobs
-    ),
-    components(schemas(
-      remex_core::db::model::server::clients::Client,
-      handlers::clients::CreateClientForm,
-      remex_core::db::model::server::jobs::Job,
-      remex_core::db::model::server::jobs::UpdateJob,
-      handlers::jobs::JobWithClients,
-      handlers::jobs::CreateJobForm,
-      handlers::jobs::JobClientAction
-    ))
+  paths(
+    handlers::clients::get_clients,
+    handlers::clients::create_client,
+    handlers::jobs::get_jobs,
+    handlers::jobs::get_job_by_id,
+    handlers::jobs::create_job,
+    handlers::jobs::update_job,
+    handlers::jobs::add_clients_to_jobs,
+    handlers::jobs::remove_clients_from_jobs
+  ),
+  components(schemas(
+    remex_core::db::model::server::clients::ClientSRV,
+    handlers::clients::CreateClientForm,
+    remex_core::db::model::server::jobs::JobSRV,
+    remex_core::db::model::server::jobs::UpdateJobSRV,
+    handlers::jobs::JobWithClients,
+    handlers::jobs::CreateJobForm,
+    handlers::jobs::JobClientAction
+  ))
 )]
 struct ApiDoc;
 

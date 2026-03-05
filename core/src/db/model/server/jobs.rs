@@ -8,32 +8,38 @@ use crate::db::schema::server as schema;
 
 #[derive(Debug, Queryable, Selectable, Serialize, Deserialize, Clone, ToSchema)]
 #[diesel(table_name = schema::jobs)]
-pub struct Job {
+pub struct JobSRV {
   pub id: String,
   pub job_name: String,
   pub job_type: String,
   pub job_status: String,
+  pub job_status_message: Option<String>,
   pub job_shell: String,
+  pub job_command: String,
   pub created_at: chrono::NaiveDateTime,
   pub updated_at: chrono::NaiveDateTime,
 }
 
 #[derive(Queryable, Insertable, Serialize, Deserialize, ToSchema)]
 #[diesel(table_name = schema::jobs)]
-pub struct NewJob {
+pub struct NewJobSRV {
   pub id: String,
   pub job_name: String,
   pub job_type: String,
   pub job_status: String,
+  pub job_status_message: Option<String>,
   pub job_shell: String,
+  pub job_command: String,
 }
 
 #[derive(Deserialize, AsChangeset, ToSchema)]
 #[diesel(table_name = schema::jobs)]
-pub struct UpdateJob {
+pub struct UpdateJobSRV {
   pub id: String,
   pub job_name: String,
   pub job_type: String,
   pub job_status: String,
+  pub job_status_message: Option<String>,
   pub job_shell: String,
+  pub job_command: String,
 }

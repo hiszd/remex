@@ -1,3 +1,4 @@
+pub mod dal;
 pub mod model;
 pub mod schema;
 

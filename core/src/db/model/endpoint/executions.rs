@@ -1,11 +1,15 @@
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 
+#[allow(unused_imports)]
+use crate::db::model::endpoint as model;
+use crate::db::schema::endpoint as schema;
+
 #[derive(Debug, Queryable, Identifiable, Associations, Serialize, Deserialize, Clone)]
-#[diesel(table_name = crate::db::schema::endpoint::executions)]
+#[diesel(table_name = schema::executions)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-#[diesel(belongs_to(crate::db::model::endpoint::jobs::Job, foreign_key = job_id))]
-pub struct Execution {
+#[diesel(belongs_to(model::jobs::JobCLT, foreign_key = job_id))]
+pub struct ExecutionCLT {
   pub id: String,
   pub job_id: Option<String>,
   pub client_id: String,
@@ -16,9 +20,9 @@ pub struct Execution {
 }
 
 #[derive(Queryable, Insertable, Serialize, Deserialize)]
-#[diesel(table_name = crate::db::schema::endpoint::executions)]
+#[diesel(table_name = schema::executions)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct NewExecution {
+pub struct NewExecutionCLT {
   pub job_id: Option<String>,
   pub client_id: String,
   pub executed_at: chrono::NaiveDateTime,
@@ -30,31 +34,11 @@ pub struct NewExecution {
 }
 
 #[derive(Deserialize, AsChangeset)]
-#[diesel(table_name = crate::db::schema::endpoint::executions)]
+#[diesel(table_name = schema::executions)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct UpdateExecution {
+pub struct UpdateExecutionCLT {
   job_id: Option<String>,
   client_id: String,
   executed_at: chrono::NaiveDateTime,
   execution_result: Option<String>,
-}
-
-impl From<crate::db::model::server::executions::Execution> for Execution {
-  fn from(execution: crate::db::model::server::executions::Execution) -> Self {
-    Self {
-      id: execution.id,
-      job_id: execution.job_id,
-      client_id: execution.client_id,
-      executed_at: execution.executed_at,
-      execution_result: execution.execution_result,
-      created_at: execution.created_at,
-      updated_at: execution.updated_at,
-    }
-  }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ExecutionLogs {
-  pub execution: Execution,
-  pub logs: Vec<crate::db::model::endpoint::logs::Log>,
 }

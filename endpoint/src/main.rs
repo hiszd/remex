@@ -191,20 +191,20 @@ async fn main() -> anyhow::Result<()> {
                   }
                   (ServerResponse::JobsResponse(j), true) => {
                     use codec::JobsResponse;
-                    use remex_core::db::model::endpoint::jobs::{Job, NewJob};
+                    use remex_core::db::model::endpoint::jobs::{JobCLT, NewJobCLT};
                     use remex_core::db::schema::endpoint::jobs;
                     tracing::info!("Received jobs response");
                     match j {
                       JobsResponse::ReceiveJobs(jobs) => {
                         // FIXME: Cache these for the life of the program and update them when a new
                         // one is added.
-                        let dbjobs: Vec<Job> = jobs::table.load(&mut dbconn).unwrap();
+                        let dbjobs: Vec<JobCLT> = jobs::table.load(&mut dbconn).unwrap();
                         tracing::info!("Received {} jobs", jobs.len());
                         for job in jobs {
                           if !dbjobs.iter().any(|j| j.id == job.id) {
-                          let job: Job = job.clone();
+                          let job: JobCLT = job.clone().into();
                           diesel::insert_into(jobs::table)
-                            .values(NewJob {
+                            .values(NewJobCLT {
                               id: job.id.clone(),
                               job_name: job.job_name.clone(),
                               job_type: job.job_type.clone(),

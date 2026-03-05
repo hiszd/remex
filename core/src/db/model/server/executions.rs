@@ -7,7 +7,8 @@ use crate::db::schema::server as schema;
 
 #[derive(Queryable, Serialize)]
 #[diesel(table_name = schema::executions)]
-pub struct Execution {
+#[diesel(belongs_to(model::jobs::JobSRV, foreign_key = job_id))]
+pub struct ExecutionSRV {
   pub id: String,
   pub job_id: Option<String>,
   pub client_id: String,
@@ -19,7 +20,7 @@ pub struct Execution {
 
 #[derive(Queryable, Insertable, Serialize, Deserialize)]
 #[diesel(table_name = schema::executions)]
-pub struct NewExecution {
+pub struct NewExecutionSRV {
   pub job_id: Option<String>,
   pub client_id: String,
   pub executed_at: chrono::NaiveDateTime,
@@ -32,7 +33,7 @@ pub struct NewExecution {
 
 #[derive(Deserialize, AsChangeset)]
 #[diesel(table_name = schema::executions)]
-pub struct UpdateExecution {
+pub struct UpdateExecutionSRV {
   job_id: Option<String>,
   client_id: String,
   executed_at: chrono::NaiveDateTime,
