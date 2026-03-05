@@ -6,8 +6,25 @@ mod handlers;
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(handlers::clients::get_clients), // Register your functions here
-    components(schemas(remex_core::db::model::server::clients::Client)) // Register your types
+    paths(
+      handlers::clients::get_clients,
+      handlers::clients::create_client,
+      handlers::jobs::get_jobs,
+      handlers::jobs::get_job_by_id,
+      handlers::jobs::create_job,
+      handlers::jobs::update_job,
+      handlers::jobs::add_clients_to_jobs,
+      handlers::jobs::remove_clients_from_jobs
+    ),
+    components(schemas(
+      remex_core::db::model::server::clients::Client,
+      handlers::clients::CreateClientForm,
+      remex_core::db::model::server::jobs::Job,
+      remex_core::db::model::server::jobs::UpdateJob,
+      handlers::jobs::JobWithClients,
+      handlers::jobs::CreateJobForm,
+      handlers::jobs::JobClientAction
+    ))
 )]
 struct ApiDoc;
 
@@ -38,7 +55,14 @@ pub fn start_web_server() -> actix_web::dev::Server {
         utoipa_swagger_ui::SwaggerUi::new("/swagger-ui/{_:.*}")
           .url("/api-docs/openapi.json", ApiDoc::openapi()),
       )
-      .service(handlers::clients::get_clients) // Register the API endpoint
+      .service(handlers::clients::get_clients)
+      .service(handlers::clients::create_client)
+      .service(handlers::jobs::get_jobs)
+      .service(handlers::jobs::get_job_by_id)
+      .service(handlers::jobs::create_job)
+      .service(handlers::jobs::update_job)
+      .service(handlers::jobs::add_clients_to_jobs)
+      .service(handlers::jobs::remove_clients_from_jobs)
       .wrap(
         Cors::default()
           .allowed_origin("http://localhost:5173") // Your Vue dev URL

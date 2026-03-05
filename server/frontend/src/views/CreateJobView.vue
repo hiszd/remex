@@ -1,0 +1,336 @@
+<script setup lang="ts">
+import { ref } from 'vue';
+import { useRouter } from 'vue-router';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query';
+import { getClients, createJob } from '@/client/index';
+import type { CreateJobForm } from '@/client/types.gen';
+
+const router = useRouter();
+const queryClient = useQueryClient();
+
+// Fetch clients for assignment
+const { data: clients, isLoading: loadingClients } = useQuery({
+  queryKey: ['clients'],
+  queryFn: async () => {
+    const { data, error } = await getClients();
+    if (error) throw error;
+    return data;
+  }
+});
+
+const form = ref<CreateJobForm>({
+  job_name: '',
+  job_type: 'Shell',
+  job_status: 'Pending',
+  job_shell: '',
+  group_ids: []
+});
+
+const isSubmitting = ref(false);
+const submitError = ref<string | null>(null);
+
+const mutation = useMutation({
+  mutationFn: async (newJob: CreateJobForm) => {
+    const { data, error } = await createJob({
+      body: newJob
+    });
+    if (error) throw error;
+    return data;
+  },
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ['jobs'] });
+    router.push('/jobs');
+  },
+  onError: (err: any) => {
+    submitError.value = err.message || 'Failed to create job';
+    isSubmitting.value = false;
+  }
+});
+
+const handleSubmit = async () => {
+  isSubmitting.value = true;
+  submitError.value = null;
+  mutation.mutate(form.value);
+};
+</script>
+
+<template>
+  <div class="page">
+    <header class="page-header">
+      <router-link to="/jobs" class="back-link">← Back to Jobs</router-link>
+      <h1 class="page-title">Create New Job</h1>
+      <p class="page-subtitle">Configure a new task to be executed by your clients.</p>
+    </header>
+
+    <form @submit.prevent="handleSubmit" class="form-card">
+      <div v-if="submitError" class="error-banner">
+        {{ submitError }}
+      </div>
+
+      <div class="form-section">
+        <label for="job_name">Job Name</label>
+        <input 
+          id="job_name"
+          v-model="form.job_name"
+          type="text"
+          placeholder="e.g. System Update"
+          required
+        />
+      </div>
+
+      <div class="form-row">
+        <div class="form-section">
+          <label for="job_type">Type</label>
+          <select id="job_type" v-model="form.job_type">
+            <option value="Shell">Shell</option>
+            <option value="Update">Update</option>
+            <option value="Internal">Internal</option>
+          </select>
+        </div>
+
+        <div class="form-section">
+          <label for="job_status">Initial Status</label>
+          <select id="job_status" v-model="form.job_status">
+            <option value="Pending">Pending</option>
+            <option value="Running">Running</option>
+            <option value="Paused">Paused</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <label for="job_shell">Shell Command</label>
+        <textarea 
+          id="job_shell"
+          v-model="form.job_shell"
+          placeholder="e.g. apt-get update && apt-get upgrade -y"
+          rows="4"
+          required
+        ></textarea>
+      </div>
+
+      <!-- Assign to Clients (Placeholder for group_ids logic) -->
+      <div class="form-section">
+        <label>Assign to Clients</label>
+        <p class="field-desc">Note: Assignment currently uses internal grouping. Select clients to include in the job group.</p>
+        
+        <div v-if="loadingClients" class="loading-inline">Loading clients...</div>
+        <div v-else class="client-selector">
+          <div v-for="client in clients" :key="client.id" class="client-checkbox">
+            <input 
+              type="checkbox" 
+              :id="client.id" 
+              :value="client.id"
+              v-model="form.group_ids"
+            />
+            <label :for="client.id">
+              <span class="client-name">{{ client.client_name }}</span>
+              <span class="client-id">{{ client.id }}</span>
+            </label>
+          </div>
+          <div v-if="!clients || clients.length === 0" class="no-clients">
+            No clients available to assign.
+          </div>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button type="button" @click="router.push('/jobs')" class="btn-secondary" :disabled="isSubmitting">
+          Cancel
+        </button>
+        <button type="submit" class="btn-primary" :disabled="isSubmitting">
+          {{ isSubmitting ? 'Creating...' : 'Create Job' }}
+        </button>
+      </div>
+    </form>
+  </div>
+</template>
+
+<style lang="scss" scoped>
+.page {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+  gap: 2rem;
+}
+
+.back-link {
+  display: inline-block;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+  color: var(--accent-500);
+  text-decoration: none;
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.page-header {
+  .page-title {
+    margin: 0;
+    font-size: 1.75rem;
+    font-weight: 800;
+  }
+  .page-subtitle {
+    margin: 0.25rem 0 0;
+    font-size: 0.95rem;
+    color: var(--text-500);
+  }
+}
+
+.form-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 2rem;
+  border-radius: 1rem;
+  background-color: var(--background-300);
+  color: var(--text-950);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.error-banner {
+  padding: 1rem;
+  background-color: var(--accent-50);
+  border: 1px solid var(--accent-400);
+  color: var(--accent-900);
+  border-radius: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+
+  label {
+    font-size: 0.85rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.025em;
+    opacity: 0.8;
+  }
+
+  .field-desc {
+    margin: -0.25rem 0 0.5rem;
+    font-size: 0.8rem;
+    opacity: 0.6;
+    font-style: italic;
+  }
+
+  input[type="text"], select, textarea {
+    padding: 0.75rem 1rem;
+    border-radius: 0.5rem;
+    border: 1px solid rgba(0,0,0,0.1);
+    background: white;
+    font-size: 1rem;
+    color: var(--text-950);
+    
+    &:focus {
+      outline: none;
+      border-color: var(--accent-500);
+      box-shadow: 0 0 0 2px var(--accent-100);
+    }
+  }
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+
+.client-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 1rem;
+  background: white;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(0,0,0,0.1);
+}
+
+.client-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem;
+  border-radius: 0.25rem;
+  
+  &:hover {
+    background: var(--background-50);
+  }
+
+  input {
+    width: 1.1rem;
+    height: 1.1rem;
+    cursor: pointer;
+  }
+
+  label {
+    display: flex;
+    flex-direction: column;
+    cursor: pointer;
+    text-transform: none;
+    letter-spacing: normal;
+    opacity: 1;
+
+    .client-name {
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+    .client-id {
+      font-size: 0.75rem;
+      opacity: 0.5;
+      font-family: monospace;
+    }
+  }
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid rgba(0,0,0,0.1);
+}
+
+.btn-primary {
+  padding: 0.75rem 2rem;
+  border-radius: 0.5rem;
+  background-color: var(--accent-500);
+  color: white;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+  transition: background 0.2s;
+
+  &:hover:not(:disabled) {
+    background-color: var(--accent-600);
+  }
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.btn-secondary {
+  padding: 0.75rem 2rem;
+  border-radius: 0.5rem;
+  background-color: transparent;
+  color: var(--text-950);
+  font-weight: 600;
+  border: 1px solid rgba(0,0,0,0.1);
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    background-color: rgba(0,0,0,0.05);
+  }
+}
+</style>

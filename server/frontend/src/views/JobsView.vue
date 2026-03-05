@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { getClients } from '@/client/index';
+import { getJobs } from '@/client/index';
 import { useQuery } from '@tanstack/vue-query';
-import Client1 from '@/components/Client1.vue';
+import JobComponent from '@/components/Job.vue';
 
-const { data: clients, isLoading, isError, error } = useQuery({
-  queryKey: ['clients'],
+const { data: jobs, isLoading, isError, error } = useQuery({
+  queryKey: ['jobs'],
   queryFn: async () => {
-    const { data, error } = await getClients();
+    const { data, error } = await getJobs();
     if (error) throw error;
     return data;
   },
@@ -16,15 +16,18 @@ const { data: clients, isLoading, isError, error } = useQuery({
 <template>
   <div class="page">
     <header class="page-header">
-      <h1 class="page-title">Clients</h1>
-      <p class="page-subtitle" v-if="clients && clients.length > 0">
-        {{ clients.length }} registered {{ clients.length === 1 ? 'client' : 'clients' }}
+      <div class="header-top">
+        <h1 class="page-title">Jobs</h1>
+        <router-link to="/jobs/new" class="btn-primary">Create Job</router-link>
+      </div>
+      <p class="page-subtitle" v-if="jobs && jobs.length > 0">
+        {{ jobs.length }} configured {{ jobs.length === 1 ? 'job' : 'jobs' }}
       </p>
     </header>
 
     <div v-if="isLoading" class="state-card">
       <div class="spinner" />
-      <p class="state-text">Fetching clients from backend...</p>
+      <p class="state-text">Fetching jobs from backend...</p>
     </div>
 
     <div v-else-if="isError" class="state-card state-error">
@@ -32,16 +35,16 @@ const { data: clients, isLoading, isError, error } = useQuery({
       <p class="state-text">{{ error }}</p>
     </div>
 
-    <div v-else-if="!clients || clients.length === 0" class="state-card state-empty">
-      <p class="state-label">No clients yet</p>
-      <p class="state-text">Clients will appear here once they connect.</p>
+    <div v-else-if="!jobs || jobs.length === 0" class="state-card state-empty">
+      <p class="state-label">No jobs found</p>
+      <p class="state-text">Jobs will appear here once they are created.</p>
     </div>
 
     <div v-else class="card-grid">
-      <Client1
-        v-for="client in clients"
-        :client="client"
-        :key="client.id"
+      <JobComponent
+        v-for="job in jobs"
+        :job="job"
+        :key="job.id"
       />
     </div>
   </div>
@@ -59,6 +62,12 @@ const { data: clients, isLoading, isError, error } = useQuery({
 }
 
 .page-header {
+  .header-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
   .page-title {
     margin: 0;
     font-size: 1.75rem;
@@ -131,5 +140,20 @@ const { data: clients, isLoading, isError, error } = useQuery({
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+.btn-primary {
+  padding: 0.6rem 1.25rem;
+  border-radius: 0.5rem;
+  background-color: var(--accent-500);
+  color: white;
+  font-weight: 700;
+  text-decoration: none;
+  font-size: 0.9rem;
+  transition: background 0.2s;
+
+  &:hover {
+    background-color: var(--accent-600);
+  }
 }
 </style>

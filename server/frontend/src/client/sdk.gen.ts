@@ -2,7 +2,7 @@
 
 import type { Client, Options as Options2, TDataShape } from './client';
 import { client } from './client.gen';
-import type { GetClientsData, GetClientsResponses } from './types.gen';
+import type { AddClientsToJobsData, AddClientsToJobsResponses, CreateClientData, CreateClientResponses, CreateJobData, CreateJobResponses, GetClientsData, GetClientsResponses, GetJobByIdData, GetJobByIdErrors, GetJobByIdResponses, GetJobsData, GetJobsResponses, RemoveClientsFromJobsData, RemoveClientsFromJobsResponses, UpdateJobData, UpdateJobErrors, UpdateJobResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean> = Options2<TData, ThrowOnError> & {
     /**
@@ -18,4 +18,53 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
     meta?: Record<string, unknown>;
 };
 
-export const getClients = <ThrowOnError extends boolean = false>(options?: Options<GetClientsData, ThrowOnError>) => (options?.client ?? client).get<GetClientsResponses, unknown, ThrowOnError>({ url: 'clients', ...options });
+export const getClients = <ThrowOnError extends boolean = false>(options?: Options<GetClientsData, ThrowOnError>) => (options?.client ?? client).get<GetClientsResponses, unknown, ThrowOnError>({ url: '/clients', ...options });
+
+export const createClient = <ThrowOnError extends boolean = false>(options: Options<CreateClientData, ThrowOnError>) => (options.client ?? client).post<CreateClientResponses, unknown, ThrowOnError>({
+    url: '/clients/new',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const getJobs = <ThrowOnError extends boolean = false>(options?: Options<GetJobsData, ThrowOnError>) => (options?.client ?? client).get<GetJobsResponses, unknown, ThrowOnError>({ url: '/jobs', ...options });
+
+export const addClientsToJobs = <ThrowOnError extends boolean = false>(options: Options<AddClientsToJobsData, ThrowOnError>) => (options.client ?? client).post<AddClientsToJobsResponses, unknown, ThrowOnError>({
+    url: '/jobs/addclients',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const createJob = <ThrowOnError extends boolean = false>(options: Options<CreateJobData, ThrowOnError>) => (options.client ?? client).post<CreateJobResponses, unknown, ThrowOnError>({
+    url: '/jobs/new',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const removeClientsFromJobs = <ThrowOnError extends boolean = false>(options: Options<RemoveClientsFromJobsData, ThrowOnError>) => (options.client ?? client).post<RemoveClientsFromJobsResponses, unknown, ThrowOnError>({
+    url: '/jobs/removeclients',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const updateJob = <ThrowOnError extends boolean = false>(options: Options<UpdateJobData, ThrowOnError>) => (options.client ?? client).post<UpdateJobResponses, UpdateJobErrors, ThrowOnError>({
+    url: '/jobs/update',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const getJobById = <ThrowOnError extends boolean = false>(options: Options<GetJobByIdData, ThrowOnError>) => (options.client ?? client).get<GetJobByIdResponses, GetJobByIdErrors, ThrowOnError>({ url: '/jobs/{id}', ...options });

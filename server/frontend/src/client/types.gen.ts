@@ -13,11 +13,51 @@ export type Client = {
     updated_at: string;
 };
 
+export type CreateClientForm = {
+    client_name: string;
+    hardware_hash: string;
+};
+
+export type CreateJobForm = {
+    group_ids?: Array<string> | null;
+    job_name: string;
+    job_shell: string;
+    job_status: string;
+    job_type: string;
+};
+
+export type Job = {
+    created_at: string;
+    id: string;
+    job_name: string;
+    job_shell: string;
+    job_status: string;
+    job_type: string;
+    updated_at: string;
+};
+
+export type JobClientAction = {
+    client_id: string;
+    job_id: string;
+};
+
+export type JobWithClients = Job & {
+    clients: Array<Client>;
+};
+
+export type UpdateJob = {
+    id: string;
+    job_name: string;
+    job_shell: string;
+    job_status: string;
+    job_type: string;
+};
+
 export type GetClientsData = {
     body?: never;
     path?: never;
     query?: never;
-    url: 'clients';
+    url: '/clients';
 };
 
 export type GetClientsResponses = {
@@ -28,3 +68,130 @@ export type GetClientsResponses = {
 };
 
 export type GetClientsResponse = GetClientsResponses[keyof GetClientsResponses];
+
+export type CreateClientData = {
+    body: CreateClientForm;
+    path?: never;
+    query?: never;
+    url: '/clients/new';
+};
+
+export type CreateClientResponses = {
+    /**
+     * Client created successfully
+     */
+    201: Client;
+};
+
+export type CreateClientResponse = CreateClientResponses[keyof CreateClientResponses];
+
+export type GetJobsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/jobs';
+};
+
+export type GetJobsResponses = {
+    /**
+     * Jobs found successfully
+     */
+    200: Array<JobWithClients>;
+};
+
+export type GetJobsResponse = GetJobsResponses[keyof GetJobsResponses];
+
+export type AddClientsToJobsData = {
+    body: Array<JobClientAction>;
+    path?: never;
+    query?: never;
+    url: '/jobs/addclients';
+};
+
+export type AddClientsToJobsResponses = {
+    /**
+     * Clients added to jobs successfully
+     */
+    200: unknown;
+};
+
+export type CreateJobData = {
+    body: CreateJobForm;
+    path?: never;
+    query?: never;
+    url: '/jobs/new';
+};
+
+export type CreateJobResponses = {
+    /**
+     * Job created successfully
+     */
+    201: Job;
+};
+
+export type CreateJobResponse = CreateJobResponses[keyof CreateJobResponses];
+
+export type RemoveClientsFromJobsData = {
+    body: Array<JobClientAction>;
+    path?: never;
+    query?: never;
+    url: '/jobs/removeclients';
+};
+
+export type RemoveClientsFromJobsResponses = {
+    /**
+     * Clients removed from jobs successfully
+     */
+    200: unknown;
+};
+
+export type UpdateJobData = {
+    body: UpdateJob;
+    path?: never;
+    query?: never;
+    url: '/jobs/update';
+};
+
+export type UpdateJobErrors = {
+    /**
+     * Job not found
+     */
+    404: unknown;
+};
+
+export type UpdateJobResponses = {
+    /**
+     * Job updated successfully
+     */
+    200: Job;
+};
+
+export type UpdateJobResponse = UpdateJobResponses[keyof UpdateJobResponses];
+
+export type GetJobByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Job ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/jobs/{id}';
+};
+
+export type GetJobByIdErrors = {
+    /**
+     * Job not found
+     */
+    404: unknown;
+};
+
+export type GetJobByIdResponses = {
+    /**
+     * Job found successfully
+     */
+    200: JobWithClients;
+};
+
+export type GetJobByIdResponse = GetJobByIdResponses[keyof GetJobByIdResponses];

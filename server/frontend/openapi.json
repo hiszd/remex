@@ -35,6 +35,208 @@
           }
         }
       }
+    },
+    "/clients/new": {
+      "post": {
+        "tags": [
+          "handlers::clients"
+        ],
+        "operationId": "create_client",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateClientForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Client created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Client"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs": {
+      "get": {
+        "tags": [
+          "handlers::jobs"
+        ],
+        "operationId": "get_jobs",
+        "responses": {
+          "200": {
+            "description": "Jobs found successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/JobWithClients"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/addclients": {
+      "post": {
+        "tags": [
+          "handlers::jobs"
+        ],
+        "operationId": "add_clients_to_jobs",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/JobClientAction"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Clients added to jobs successfully"
+          }
+        }
+      }
+    },
+    "/jobs/new": {
+      "post": {
+        "tags": [
+          "handlers::jobs"
+        ],
+        "operationId": "create_job",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateJobForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Job created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/removeclients": {
+      "post": {
+        "tags": [
+          "handlers::jobs"
+        ],
+        "operationId": "remove_clients_from_jobs",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/JobClientAction"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Clients removed from jobs successfully"
+          }
+        }
+      }
+    },
+    "/jobs/update": {
+      "post": {
+        "tags": [
+          "handlers::jobs"
+        ],
+        "operationId": "update_job",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateJob"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Job updated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job not found"
+          }
+        }
+      }
+    },
+    "/jobs/{id}": {
+      "get": {
+        "tags": [
+          "handlers::jobs"
+        ],
+        "operationId": "get_job_by_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Job ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Job found successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobWithClients"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job not found"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -69,6 +271,153 @@
           "updated_at": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "CreateClientForm": {
+        "type": "object",
+        "required": [
+          "client_name",
+          "hardware_hash"
+        ],
+        "properties": {
+          "client_name": {
+            "type": "string"
+          },
+          "hardware_hash": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateJobForm": {
+        "type": "object",
+        "required": [
+          "job_name",
+          "job_type",
+          "job_status",
+          "job_shell"
+        ],
+        "properties": {
+          "group_ids": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "job_name": {
+            "type": "string"
+          },
+          "job_shell": {
+            "type": "string"
+          },
+          "job_status": {
+            "type": "string"
+          },
+          "job_type": {
+            "type": "string"
+          }
+        }
+      },
+      "Job": {
+        "type": "object",
+        "required": [
+          "id",
+          "job_name",
+          "job_type",
+          "job_status",
+          "job_shell",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string"
+          },
+          "job_name": {
+            "type": "string"
+          },
+          "job_shell": {
+            "type": "string"
+          },
+          "job_status": {
+            "type": "string"
+          },
+          "job_type": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "JobClientAction": {
+        "type": "object",
+        "required": [
+          "job_id",
+          "client_id"
+        ],
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "job_id": {
+            "type": "string"
+          }
+        }
+      },
+      "JobWithClients": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Job"
+          },
+          {
+            "type": "object",
+            "required": [
+              "clients"
+            ],
+            "properties": {
+              "clients": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Client"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "UpdateJob": {
+        "type": "object",
+        "required": [
+          "id",
+          "job_name",
+          "job_type",
+          "job_status",
+          "job_shell"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "job_name": {
+            "type": "string"
+          },
+          "job_shell": {
+            "type": "string"
+          },
+          "job_status": {
+            "type": "string"
+          },
+          "job_type": {
+            "type": "string"
           }
         }
       }
