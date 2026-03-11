@@ -2,16 +2,32 @@
 //! proxies commands from peer to `RemexServer`.
 
 use std::{
-  io, net,
+  io,
+  net,
   str::FromStr,
-  time::{Duration, Instant},
+  time::{
+    Duration,
+    Instant,
+  },
 };
 
 use actix::prelude::*;
-use diesel::{ExpressionMethods, JoinOnDsl, QueryDsl, RunQueryDsl, SelectableHelper};
+use diesel::{
+  ExpressionMethods,
+  JoinOnDsl,
+  QueryDsl,
+  RunQueryDsl,
+  SelectableHelper,
+};
 use tokio::{
-  io::{split, WriteHalf},
-  net::{TcpListener, TcpStream},
+  io::{
+    split,
+    WriteHalf,
+  },
+  net::{
+    TcpListener,
+    TcpStream,
+  },
 };
 use tokio_util::codec::FramedRead;
 use tracing::info;
@@ -19,10 +35,20 @@ use tracing::info;
 use crate::{
   actors::{
     self,
-    server::{self, RemexServer},
+    server::{
+      self,
+      RemexServer,
+    },
   },
-  codec::{self, ClientRequest},
-  db::{self, model, schema},
+  codec::{
+    self,
+    ClientRequest,
+  },
+  db::{
+    self,
+    model,
+    schema,
+  },
   utils,
 };
 
@@ -90,7 +116,10 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
                 // create a new client or pull existing
                 futures::executor::block_on(async {
                   let mut c = db::establish_connection_postgres();
-                  use model::server::clients::{ClientSRV, NewClientSRV};
+                  use model::server::clients::{
+                    ClientSRV,
+                    NewClientSRV,
+                  };
                   use schema::server::clients;
                   match clients::table
                     .select(ClientSRV::as_select())
@@ -177,8 +206,14 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
             JobsRequest::All => {
               tracing::info!("Received request to send along all related jobs");
               let mut conn = db::establish_connection_postgres();
-              use crate::db::model::server::jobs::JobSRV;
-              use crate::db::schema::server::{groups_clients, jobs, jobs_groups};
+              use crate::db::{
+                model::server::jobs::JobSRV,
+                schema::server::{
+                  groups_clients,
+                  jobs,
+                  jobs_groups,
+                },
+              };
               let assigned_jobs: Vec<JobSRV> = jobs::table
                 // Implicitly joins `jobs` and `jobs_groups` utilizing `diesel::joinable!`
                 .inner_join(jobs_groups::table)

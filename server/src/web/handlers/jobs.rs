@@ -1,8 +1,23 @@
-use actix_web::{get, post, web, HttpResponse, Responder};
+use actix_web::{
+  get,
+  post,
+  web,
+  HttpResponse,
+  Responder,
+};
 use diesel::prelude::*;
-use remex_core::db::model::server::clients::ClientSRV;
-use remex_core::db::model::server::jobs::{JobSRV, NewJobSRV, UpdateJobSRV};
-use serde::{Deserialize, Serialize};
+use remex_core::db::model::server::{
+  clients::ClientSRV,
+  jobs::{
+    JobSRV,
+    NewJobSRV,
+    UpdateJobSRV,
+  },
+};
+use serde::{
+  Deserialize,
+  Serialize,
+};
 use utoipa::ToSchema;
 
 #[derive(Deserialize, ToSchema)]
@@ -11,6 +26,7 @@ pub struct CreateJobForm {
   pub job_type: String,
   pub job_status: String,
   pub job_shell: String,
+  pub job_command: String,
   pub group_ids: Option<Vec<String>>,
 }
 
@@ -36,7 +52,12 @@ pub struct JobWithClients {
 )]
 #[get("/jobs")]
 pub async fn get_jobs() -> impl Responder {
-  use remex_core::db::schema::server::{clients, groups_clients, jobs, jobs_groups};
+  use remex_core::db::schema::server::{
+    clients,
+    groups_clients,
+    jobs,
+    jobs_groups,
+  };
   let mut pool = remex_core::db::establish_connection_postgres();
 
   let all_jobs = jobs::table.load::<JobSRV>(&mut pool).unwrap();
@@ -74,11 +95,19 @@ pub async fn get_jobs() -> impl Responder {
 )]
 #[get("/jobs/{id}")]
 pub async fn get_job_by_id(id: web::Path<String>) -> impl Responder {
-  use remex_core::db::schema::server::{clients, groups_clients, jobs, jobs_groups};
+  use remex_core::db::schema::server::{
+    clients,
+    groups_clients,
+    jobs,
+    jobs_groups,
+  };
   let mut pool = remex_core::db::establish_connection_postgres();
 
-  let job =
-    jobs::table.filter(jobs::id.eq(id.into_inner())).first::<JobSRV>(&mut pool).optional().unwrap();
+  let job = jobs::table
+    .filter(jobs::id.eq(id.into_inner()))
+    .first::<JobSRV>(&mut pool)
+    .optional()
+    .unwrap();
 
   if let Some(job) = job {
     let job_clients = clients::table
@@ -109,8 +138,13 @@ pub async fn get_job_by_id(id: web::Path<String>) -> impl Responder {
 )]
 #[post("/jobs/new")]
 pub async fn create_job(form: web::Json<CreateJobForm>) -> impl Responder {
-  use remex_core::db::model::server::jobs_groups::NewJobGroupSRV;
-  use remex_core::db::schema::server::{jobs, jobs_groups};
+  use remex_core::db::{
+    model::server::jobs_groups::NewJobGroupSRV,
+    schema::server::{
+      jobs,
+      jobs_groups,
+    },
+  };
   let mut pool = remex_core::db::establish_connection_postgres();
 
   let new_job_id = uuid::Uuid::now_v7().to_string();
@@ -119,11 +153,17 @@ pub async fn create_job(form: web::Json<CreateJobForm>) -> impl Responder {
     job_name: form.job_name.clone(),
     job_type: form.job_type.clone(),
     job_status: form.job_status.clone(),
+    job_status_message: None,
     job_shell: form.job_shell.clone(),
+    job_command: form.job_command.clone(),
+    created_at: None,
+    updated_at: None,
   };
 
-  let job =
-    diesel::insert_into(jobs::table).values(&new_job).get_result::<JobSRV>(&mut pool).unwrap();
+  let job = diesel::insert_into(jobs::table)
+    .values(&new_job)
+    .get_result::<JobSRV>(&mut pool)
+    .unwrap();
 
   if let Some(group_ids) = &form.group_ids {
     for gid in group_ids {
@@ -131,7 +171,10 @@ pub async fn create_job(form: web::Json<CreateJobForm>) -> impl Responder {
         job_id: new_job_id.clone(),
         group_id: gid.clone(),
       };
-      diesel::insert_into(jobs_groups::table).values(&new_job_group).execute(&mut pool).unwrap();
+      diesel::insert_into(jobs_groups::table)
+        .values(&new_job_group)
+        .execute(&mut pool)
+        .unwrap();
     }
   }
 
@@ -176,10 +219,19 @@ pub async fn update_job(job_update: web::Json<UpdateJobSRV>) -> impl Responder {
 )]
 #[post("/jobs/addclients")]
 pub async fn add_clients_to_jobs(actions: web::Json<Vec<JobClientAction>>) -> impl Responder {
-  use remex_core::db::model::server::groups::NewGroupSRV;
-  use remex_core::db::model::server::groups_clients::NewGroupClientsSRV;
-  use remex_core::db::model::server::jobs_groups::NewJobGroupSRV;
-  use remex_core::db::schema::server::{groups, groups_clients, jobs, jobs_groups};
+  use remex_core::db::{
+    model::server::{
+      groups::NewGroupSRV,
+      groups_clients::NewGroupClientsSRV,
+      jobs_groups::NewJobGroupSRV,
+    },
+    schema::server::{
+      groups,
+      groups_clients,
+      jobs,
+      jobs_groups,
+    },
+  };
   let mut pool = remex_core::db::establish_connection_postgres();
 
   for action in actions.into_inner() {
@@ -214,14 +266,20 @@ pub async fn add_clients_to_jobs(actions: web::Json<Vec<JobClientAction>>) -> im
         group_name: format!("Group for Job {}", action.job_id),
       };
 
-      diesel::insert_into(groups::table).values(&new_group).execute(&mut pool).unwrap();
+      diesel::insert_into(groups::table)
+        .values(&new_group)
+        .execute(&mut pool)
+        .unwrap();
 
       let new_job_group = NewJobGroupSRV {
         job_id: action.job_id.clone(),
         group_id: new_group_id.clone(),
       };
 
-      diesel::insert_into(jobs_groups::table).values(&new_job_group).execute(&mut pool).unwrap();
+      diesel::insert_into(jobs_groups::table)
+        .values(&new_job_group)
+        .execute(&mut pool)
+        .unwrap();
 
       new_group_id
     };
@@ -234,7 +292,10 @@ pub async fn add_clients_to_jobs(actions: web::Json<Vec<JobClientAction>>) -> im
       updated_at: chrono::Utc::now().naive_utc(),
     };
 
-    diesel::insert_into(groups_clients::table).values(&new_assoc).execute(&mut pool).unwrap();
+    diesel::insert_into(groups_clients::table)
+      .values(&new_assoc)
+      .execute(&mut pool)
+      .unwrap();
   }
 
   HttpResponse::Ok().finish()
@@ -250,7 +311,10 @@ pub async fn add_clients_to_jobs(actions: web::Json<Vec<JobClientAction>>) -> im
 )]
 #[post("/jobs/removeclients")]
 pub async fn remove_clients_from_jobs(actions: web::Json<Vec<JobClientAction>>) -> impl Responder {
-  use remex_core::db::schema::server::{groups_clients, jobs_groups};
+  use remex_core::db::schema::server::{
+    groups_clients,
+    jobs_groups,
+  };
   let mut pool = remex_core::db::establish_connection_postgres();
 
   for action in actions.into_inner() {

@@ -2,8 +2,8 @@
 # see https://diesel.rs/guides/configuring-diesel-cli
 
 [print_schema]
-file = "../core/src/db/schema/server.rs"
+file = "../core/src/db/endpoint/server.rs"
 custom_type_derives = ["diesel::query_builder::QueryId", "Clone"]
 
 [migrations_directory]
-dir = "../migrations/server/"
+dir = "../migrations/endpoint/"

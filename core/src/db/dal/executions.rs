@@ -7,7 +7,7 @@ pub struct Execution {
   pub id: String,
   pub job_id: Option<String>,
   pub client_id: String,
-  pub executed_at: chrono::NaiveDateTime,
+  pub executed_at: Option<chrono::NaiveDateTime>,
   pub execution_result: Option<String>,
   pub created_at: chrono::NaiveDateTime,
   pub updated_at: chrono::NaiveDateTime,

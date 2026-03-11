@@ -1,9 +1,15 @@
 use diesel::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::{
+  Deserialize,
+  Serialize,
+};
 
 #[allow(unused_imports)]
-use crate::db::model::endpoint as model;
-use crate::db::schema::endpoint as schema;
+use crate::db::{
+  dal,
+  model::endpoint as model,
+  schema::endpoint as schema,
+};
 
 #[derive(Debug, Queryable, Identifiable, Associations, Serialize, Deserialize, Clone)]
 #[diesel(table_name = schema::logs)]
@@ -28,6 +34,17 @@ pub struct NewLogCLT {
   pub log: String,
 }
 
+impl From<LogCLT> for NewLogCLT {
+  fn from(log: LogCLT) -> Self {
+    NewLogCLT {
+      id: log.id,
+      client_id: log.client_id,
+      execution_id: log.execution_id,
+      log: log.log,
+    }
+  }
+}
+
 #[allow(dead_code)]
 #[derive(Deserialize, AsChangeset)]
 #[diesel(table_name = schema::logs)]
@@ -37,4 +54,15 @@ pub struct UpdateLogCLT {
   client_id: String,
   execution_id: String,
   log: String,
+}
+
+impl From<LogCLT> for UpdateLogCLT {
+  fn from(log: LogCLT) -> Self {
+    UpdateLogCLT {
+      id: log.id,
+      client_id: log.client_id,
+      execution_id: log.execution_id,
+      log: log.log,
+    }
+  }
 }

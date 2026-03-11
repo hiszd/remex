@@ -2,12 +2,25 @@
 
 use clap::Parser;
 use diesel::RunQueryDsl;
-use futures_util::{SinkExt as _, StreamExt as _};
-use gethostname::gethostname;
-use remex_core::codec::{
-  self, ClientRequest, ConnectionResponse, DisconnectReason, ServerResponse,
+use futures_util::{
+  SinkExt as _,
+  StreamExt as _,
 };
-use tokio::{net::TcpStream, sync::Mutex};
+use gethostname::gethostname;
+use remex_core::{
+  codec::{
+    self,
+    ClientRequest,
+    ConnectionResponse,
+    DisconnectReason,
+    ServerResponse,
+  },
+  db::dal::CltDbOperator,
+};
+use tokio::{
+  net::TcpStream,
+  sync::Mutex,
+};
 
 mod fs;
 
@@ -98,7 +111,9 @@ async fn main() -> anyhow::Result<()> {
       let mut framed = actix_codec::Framed::new(stream, codec::ServerCodec);
 
       // initialize Sqlite Db
-      remex_core::db::migrate(remex_core::db::ConnectionType::Sqlite).await.unwrap();
+      remex_core::db::migrate(remex_core::db::ConnectionType::Sqlite)
+        .await
+        .unwrap();
       let mut dbconn = remex_core::db::establish_connection_sqlite();
 
       // spawn a new thread that will monitor the ctx variable and check for new jobs every 5
@@ -191,8 +206,7 @@ async fn main() -> anyhow::Result<()> {
                   }
                   (ServerResponse::JobsResponse(j), true) => {
                     use codec::JobsResponse;
-                    use remex_core::db::model::endpoint::jobs::{JobCLT, NewJobCLT};
-                    use remex_core::db::schema::endpoint::jobs;
+                    use remex_core::db::{schema::endpoint::jobs, model::endpoint::jobs::{JobCLT} };
                     tracing::info!("Received jobs response");
                     match j {
                       JobsResponse::ReceiveJobs(jobs) => {
@@ -202,18 +216,8 @@ async fn main() -> anyhow::Result<()> {
                         tracing::info!("Received {} jobs", jobs.len());
                         for job in jobs {
                           if !dbjobs.iter().any(|j| j.id == job.id) {
-                          let job: JobCLT = job.clone().into();
-                          diesel::insert_into(jobs::table)
-                            .values(NewJobCLT {
-                              id: job.id.clone(),
-                              job_name: job.job_name.clone(),
-                              job_type: job.job_type.clone(),
-                              job_shell: job.job_shell.clone(),
-                              job_status: job.job_status.clone(),
-                            })
-                            .execute(&mut dbconn)
-                            .unwrap();
-                          tracing::info!("Job: {} \n Inserted into database", job.job_name);
+                            job.create_clt(&mut dbconn).unwrap();
+                            tracing::info!("Job: {} \n Inserted into database", job.job_name);
                           } else {
                             tracing::info!("Job: {} \n Already exists in database", job.job_name);
                           }
