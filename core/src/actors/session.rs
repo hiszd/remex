@@ -102,7 +102,7 @@ impl actix::io::WriteHandler<io::Error> for RemexSession {
 }
 
 impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
-  fn handle(&mut self, msg: Result<ClientRequest, io::Error>, ctx: &mut Context<Self>) {
+  fn handle(&mut self, msg: Result<ClientRequest, io::Error>, _ctx: &mut Context<Self>) {
     match msg {
       Ok(m) => match (m, self.authenticated) {
         (ClientRequest::ConnectionRequest(codec::ConnectionRequest::Identify(iden)), _) => {
@@ -168,6 +168,7 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
                   .select(ClientSRV::as_select())
                   .filter(clients::client_name.eq(&name))
                   .filter(clients::hardware_hash.eq(&hw_hash))
+                  .filter(clients::secret.eq(&sec))
                   .filter(clients::id.eq(&id))
                   .get_result(&mut c)
               });
@@ -193,7 +194,7 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
               self.framed.write(codec::ServerResponse::ConnectionResponse(
                 codec::ConnectionResponse::Disconnect(codec::DisconnectReason::AuthFailed),
               ));
-              ctx.stop();
+              self.framed.close();
             }
           }
         }
