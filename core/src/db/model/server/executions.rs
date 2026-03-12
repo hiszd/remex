@@ -1,11 +1,15 @@
 use diesel::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::{
+  Deserialize,
+  Serialize,
+};
+use utoipa::ToSchema;
 
 #[allow(unused_imports)]
 use crate::db::model::server as model;
 use crate::db::schema::server as schema;
 
-#[derive(Queryable, Serialize)]
+#[derive(Debug, Queryable, Selectable, Serialize, Identifiable, Deserialize, Clone, ToSchema)]
 #[diesel(table_name = schema::executions)]
 #[diesel(belongs_to(model::jobs::JobSRV, foreign_key = job_id))]
 pub struct ExecutionSRV {

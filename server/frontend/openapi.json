@@ -328,7 +328,8 @@
           "job_name",
           "job_type",
           "job_status",
-          "job_shell"
+          "job_shell",
+          "job_command"
         ],
         "properties": {
           "group_ids": {
@@ -339,6 +340,9 @@
             "items": {
               "type": "string"
             }
+          },
+          "job_command": {
+            "type": "string"
           },
           "job_name": {
             "type": "string"
@@ -377,6 +381,7 @@
           "job_type",
           "job_status",
           "job_shell",
+          "job_command",
           "created_at",
           "updated_at"
         ],
@@ -388,6 +393,9 @@
           "id": {
             "type": "string"
           },
+          "job_command": {
+            "type": "string"
+          },
           "job_name": {
             "type": "string"
           },
@@ -396,6 +404,12 @@
           },
           "job_status": {
             "type": "string"
+          },
+          "job_status_message": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "job_type": {
             "type": "string"
@@ -430,27 +444,61 @@
       "UpdateJobSRV": {
         "type": "object",
         "required": [
-          "id",
-          "job_name",
-          "job_type",
-          "job_status",
-          "job_shell"
+          "id"
         ],
         "properties": {
+          "created_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
           "id": {
             "type": "string"
           },
+          "job_command": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "job_name": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "job_shell": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "job_status": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "job_status_message": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "job_type": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
           }
         }
       }

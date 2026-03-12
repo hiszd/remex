@@ -216,7 +216,7 @@ async fn main() -> anyhow::Result<()> {
                         tracing::info!("Received {} jobs", jobs.len());
                         for job in jobs {
                           if !dbjobs.iter().any(|j| j.id == job.id) {
-                            job.create_clt(&mut dbconn).unwrap();
+                            job.upsert_clt(&mut dbconn).unwrap();
                             tracing::info!("Job: {} \n Inserted into database", job.job_name);
                           } else {
                             tracing::info!("Job: {} \n Already exists in database", job.job_name);

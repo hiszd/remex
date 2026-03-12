@@ -15,7 +15,7 @@ use crate::db::{
   schema::server as schema,
 };
 
-#[derive(Debug, Queryable, Selectable, Serialize, Deserialize, Clone, ToSchema)]
+#[derive(Debug, Queryable, Selectable, Serialize, Identifiable, Deserialize, Clone, ToSchema)]
 #[diesel(table_name = schema::jobs)]
 pub struct JobSRV {
   pub id: String,
@@ -75,9 +75,10 @@ impl From<Job> for NewJobSRV {
   }
 }
 
-#[derive(Deserialize, AsChangeset, ToSchema)]
+#[derive(Deserialize, AsChangeset, Identifiable, ToSchema)]
 #[diesel(table_name = schema::jobs)]
 pub struct UpdateJobSRV {
+  pub id: String,
   pub job_name: Option<String>,
   pub job_type: Option<String>,
   pub job_status: Option<String>,
@@ -91,6 +92,7 @@ pub struct UpdateJobSRV {
 impl From<JobSRV> for UpdateJobSRV {
   fn from(job: JobSRV) -> Self {
     UpdateJobSRV {
+      id: job.id,
       job_name: Some(job.job_name),
       job_type: Some(job.job_type),
       job_status: Some(job.job_status),
@@ -106,6 +108,7 @@ impl From<JobSRV> for UpdateJobSRV {
 impl From<Job> for UpdateJobSRV {
   fn from(job: Job) -> Self {
     UpdateJobSRV {
+      id: job.id,
       job_name: Some(job.job_name),
       job_type: Some(job.job_type),
       job_status: Some(job.job_status),

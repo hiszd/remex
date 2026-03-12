@@ -1,6 +1,8 @@
 use actix::Actor;
-use remex_core::actors::server::RemexServer;
-use remex_core::utils::generate_secret;
+use remex_core::{
+  actors::server::RemexServer,
+  utils::generate_secret,
+};
 
 mod pnpm;
 mod secret;

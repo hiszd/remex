@@ -1,8 +1,17 @@
-use actix_web::{get, post, web, HttpResponse, Responder};
+use actix_web::{
+  get,
+  post,
+  web,
+  HttpResponse,
+  Responder,
+};
 use diesel::prelude::*;
 use remex_core::db::{
   dal::clients::Client,
-  model::server::clients::{ClientSRV, NewClientSRV},
+  model::server::clients::{
+    ClientSRV,
+    NewClientSRV,
+  },
 };
 use serde::Deserialize;
 use utoipa::ToSchema;
@@ -24,8 +33,12 @@ pub struct CreateClientForm {
 pub async fn get_clients() -> impl Responder {
   use remex_core::db::schema::server::clients;
   let mut pool = remex_core::db::establish_connection_postgres();
-  let clients: Vec<Client> =
-    clients::table.load::<ClientSRV>(&mut pool).unwrap().iter().map(|c| c.clone().into()).collect();
+  let clients: Vec<Client> = clients::table
+    .load::<ClientSRV>(&mut pool)
+    .unwrap()
+    .iter()
+    .map(|c| c.clone().into())
+    .collect();
   HttpResponse::Ok().json(clients)
 }
 

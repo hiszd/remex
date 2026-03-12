@@ -13,6 +13,15 @@ export type Client = {
     updated_at: string;
 };
 
+export type ClientSrv = {
+    client_name: string;
+    created_at: string;
+    hardware_hash: string;
+    id: string;
+    secret: string;
+    updated_at: string;
+};
+
 export type CreateClientForm = {
     client_name: string;
     hardware_hash: string;
@@ -20,20 +29,11 @@ export type CreateClientForm = {
 
 export type CreateJobForm = {
     group_ids?: Array<string> | null;
+    job_command: string;
     job_name: string;
     job_shell: string;
     job_status: string;
     job_type: string;
-};
-
-export type Job = {
-    created_at: string;
-    id: string;
-    job_name: string;
-    job_shell: string;
-    job_status: string;
-    job_type: string;
-    updated_at: string;
 };
 
 export type JobClientAction = {
@@ -41,16 +41,32 @@ export type JobClientAction = {
     job_id: string;
 };
 
-export type JobWithClients = Job & {
-    clients: Array<Client>;
-};
-
-export type UpdateJob = {
+export type JobSrv = {
+    created_at: string;
     id: string;
+    job_command: string;
     job_name: string;
     job_shell: string;
     job_status: string;
+    job_status_message?: string | null;
     job_type: string;
+    updated_at: string;
+};
+
+export type JobWithClients = JobSrv & {
+    clients: Array<ClientSrv>;
+};
+
+export type UpdateJobSrv = {
+    created_at?: string | null;
+    id: string;
+    job_command?: string | null;
+    job_name?: string | null;
+    job_shell?: string | null;
+    job_status?: string | null;
+    job_status_message?: string | null;
+    job_type?: string | null;
+    updated_at?: string | null;
 };
 
 export type GetClientsData = {
@@ -126,7 +142,7 @@ export type CreateJobResponses = {
     /**
      * Job created successfully
      */
-    201: Job;
+    201: JobSrv;
 };
 
 export type CreateJobResponse = CreateJobResponses[keyof CreateJobResponses];
@@ -146,7 +162,7 @@ export type RemoveClientsFromJobsResponses = {
 };
 
 export type UpdateJobData = {
-    body: UpdateJob;
+    body: UpdateJobSrv;
     path?: never;
     query?: never;
     url: '/jobs/update';
@@ -163,7 +179,7 @@ export type UpdateJobResponses = {
     /**
      * Job updated successfully
      */
-    200: Job;
+    200: JobSrv;
 };
 
 export type UpdateJobResponse = UpdateJobResponses[keyof UpdateJobResponses];

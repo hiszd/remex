@@ -1,11 +1,15 @@
 use diesel::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::{
+  Deserialize,
+  Serialize,
+};
+use utoipa::ToSchema;
 
 #[allow(unused_imports)]
 use crate::db::model::server as model;
 use crate::db::schema::server as schema;
 
-#[derive(Queryable, Serialize)]
+#[derive(Queryable, Selectable, Serialize, Identifiable, ToSchema)]
 #[diesel(table_name = schema::groups)]
 pub struct GroupSRV {
   pub id: String,

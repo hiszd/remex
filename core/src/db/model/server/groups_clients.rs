@@ -1,10 +1,18 @@
 use diesel::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::{
+  Deserialize,
+  Serialize,
+};
+use utoipa::ToSchema;
 
-use crate::db::model::server as model;
-use crate::db::schema::server as schema;
+use crate::db::{
+  model::server as model,
+  schema::server as schema,
+};
 
-#[derive(Identifiable, Queryable, Selectable, Associations)]
+#[derive(
+  Debug, Queryable, Associations, Selectable, Serialize, Identifiable, Deserialize, Clone, ToSchema,
+)]
 #[diesel(belongs_to(model::groups::GroupSRV, foreign_key = group_id))]
 #[diesel(belongs_to(model::clients::ClientSRV, foreign_key = client_id))]
 #[diesel(table_name = schema::groups_clients)]

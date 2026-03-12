@@ -1,5 +1,7 @@
-use std::env;
-use std::io::Write;
+use std::{
+  env,
+  io::Write,
+};
 
 pub fn save_secret(name: &str, secret: String) -> anyhow::Result<()> {
   let usr = env::var("USER").expect("No $USER env var found");

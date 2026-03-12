@@ -1,7 +1,10 @@
 use std::process::Stdio;
 
 use tokio::{
-  io::{AsyncBufReadExt, BufReader},
+  io::{
+    AsyncBufReadExt,
+    BufReader,
+  },
   process::Command,
 };
 
@@ -20,7 +23,10 @@ pub async fn start_server() {
     .expect("Failed to spawn pnpm server");
 
   // Take the stdout handle to read from it
-  let stdout = child.stdout.take().expect("child did not have a handle to stdout");
+  let stdout = child
+    .stdout
+    .take()
+    .expect("child did not have a handle to stdout");
 
   // Spawn a dedicated task to process the logs
   tokio::spawn(async move {

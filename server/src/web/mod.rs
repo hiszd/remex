@@ -1,5 +1,8 @@
 use actix_cors::Cors;
-use actix_web::{App, HttpServer};
+use actix_web::{
+  App,
+  HttpServer,
+};
 use utoipa::OpenApi;
 
 mod handlers;
