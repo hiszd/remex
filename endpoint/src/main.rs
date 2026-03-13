@@ -22,6 +22,7 @@ use tokio::{
   sync::Mutex,
 };
 
+mod async_tasks;
 mod fs;
 
 #[derive(Parser, Debug)]
@@ -39,6 +40,11 @@ struct Args {
 }
 
 #[derive(Debug, Clone)]
+struct Cache {
+  jobs: Vec<remex_core::db::dal::jobs::Job>,
+}
+
+#[derive(Debug, Clone)]
 struct Context {
   id: Option<String>,
   secret: Option<String>,
@@ -47,6 +53,7 @@ struct Context {
   auth_type: Option<codec::IdentifyType>,
   authentication_used: Option<codec::IdentifyType>,
   jobs_last_requested: Option<std::time::Instant>,
+  cache: Cache,
 }
 
 #[actix_web::main]
@@ -70,6 +77,18 @@ async fn main() -> anyhow::Result<()> {
     auth_type: None,
     authentication_used: None,
     jobs_last_requested: None,
+    cache: Cache {
+      jobs: {
+        let mut dbconn = remex_core::db::establish_connection_sqlite();
+        use remex_core::db::schema::endpoint::jobs;
+        jobs::table
+          .load::<remex_core::db::model::endpoint::jobs::JobCLT>(&mut dbconn)
+          .unwrap()
+          .iter()
+          .map(|j| j.clone().into())
+          .collect::<Vec<remex_core::db::dal::jobs::Job>>()
+      },
+    },
   };
   ctx_data.auth_type = match (id_result, secret_result, args.secret.clone()) {
     // if using the server secret for auth, ensure that the ID and secret are removed first
@@ -116,32 +135,10 @@ async fn main() -> anyhow::Result<()> {
         .unwrap();
       let mut dbconn = remex_core::db::establish_connection_sqlite();
 
-      // spawn a new thread that will monitor the ctx variable and check for new jobs every 5
-      // minutes
-      let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-      let ctx_clone = ctx.clone();
-      let tx_clone = tx.clone();
-      tokio::spawn(async move {
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
-        loop {
-          interval.tick().await;
-          let mut ctx_lock = ctx_clone.lock().await;
-          if ctx_lock.authenticated {
-            let mut should_request = false;
-            if let Some(last_requested) = ctx_lock.jobs_last_requested {
-              if last_requested.elapsed().as_secs() >= 30 {
-                should_request = true;
-              }
-            } else {
-              should_request = true;
-            }
-            if should_request {
-              ctx_lock.jobs_last_requested = Some(std::time::Instant::now());
-              let _ = tx_clone.send(codec::ClientRequest::JobsRequest(codec::JobsRequest::All));
-            }
-          }
-        }
-      });
+      // spawn thread to request new jobs from the server
+      let (job_check_tx, mut job_check_rx) =
+        tokio::sync::mpsc::unbounded_channel::<codec::ClientRequest>();
+      tokio::spawn(async_tasks::jobs::jobs_check(ctx.clone(), job_check_tx));
 
       /* ********** SERVER MESSAGE LOOP ********** */
 
@@ -174,18 +171,16 @@ async fn main() -> anyhow::Result<()> {
                   (ServerResponse::ConnectionResponse(ConnectionResponse::Disconnect(reason)), _) => {
                     match reason {
                       DisconnectReason::AuthFailed => {
-                        tracing::error!("Authentication failed\n Removing stored credentials and trying again in 5 seconds");
-                        fs::id::remove_id().unwrap();
-                        fs::secret::remove_secret().unwrap();
-                        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                        break;
+                        tracing::error!("Authentication failed. Removing stored credentials and quitting. Please restart with a valid --secret.");
+                        let _ = fs::id::remove_id();
+                        let _ = fs::secret::remove_secret();
+                        std::process::exit(1);
                       }
                       DisconnectReason::InvalidClientId => {
-                        tracing::error!("Invalid client ID\n Removing stored credentials and trying again in 5 seconds");
-                        fs::id::remove_id().unwrap();
-                        fs::secret::remove_secret().unwrap();
-                        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                        break;
+                        tracing::error!("Invalid client ID. Removing stored credentials and quitting. Please restart with a valid --secret.");
+                        let _ = fs::id::remove_id();
+                        let _ = fs::secret::remove_secret();
+                        std::process::exit(1);
                       }
                       DisconnectReason::DuplicateClient => {
                         tracing::error!("Duplicate client ID\n Trying again in 5 seconds");
@@ -255,10 +250,10 @@ async fn main() -> anyhow::Result<()> {
               }
             }
           },
-          req = rx.recv() => {
+          req = job_check_rx.recv() => {
             if let Some(req) = req {
-              if let Err(e) = framed.send(req).await {
-                tracing::error!("Failed to send scheduled request: {}", e);
+              if let Err(e) = framed.send(req.clone()).await {
+                tracing::error!("Failed to send job_check request: {:?}\n Error: {}", &req, &e);
                 break;
               }
             }

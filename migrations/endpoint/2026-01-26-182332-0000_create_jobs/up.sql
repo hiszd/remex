@@ -1,11 +1,13 @@
 -- Your SQL goes here
 
 CREATE TABLE jobs (
-    id INT PRIMARY KEY NOT NULL,
+    id TEXT PRIMARY KEY NOT NULL,
     job_name TEXT NOT NULL,
     job_type TEXT NOT NULL,
     job_status TEXT NOT NULL,
+    job_status_message TEXT,
     job_shell TEXT NOT NULL,
+    job_command TEXT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
