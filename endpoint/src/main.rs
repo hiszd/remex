@@ -118,6 +118,15 @@ async fn main() -> anyhow::Result<()> {
 
   /* ********** MAIN LOOP ********** */
 
+  // Create bounded channel for outgoing requests with backpressure
+  let (client_request_tx, mut client_request_rx) =
+    tokio::sync::mpsc::channel::<codec::ClientRequest>(1000);
+
+  // spawn threads to request new jobs and execute them outside of the reconnection loop
+  // so they keep generating messages even when the connection is down.
+  tokio::spawn(async_tasks::jobs::jobs_check(ctx.clone(), client_request_tx.clone()));
+  tokio::spawn(async_tasks::jobs::jobs_exec(ctx.clone(), client_request_tx.clone()));
+
   loop {
     // continually try and connect to the server every 5 seconds until we succeed
     // TODO: Maybe handle errors that aren't "Connection Refused" differently in the future
@@ -134,12 +143,6 @@ async fn main() -> anyhow::Result<()> {
         .await
         .unwrap();
       let mut dbconn = remex_core::db::establish_connection_sqlite();
-
-      // spawn threads to request new jobs and execute them
-      let (client_request_tx, mut client_request_rx) =
-        tokio::sync::mpsc::unbounded_channel::<codec::ClientRequest>();
-      tokio::spawn(async_tasks::jobs::jobs_check(ctx.clone(), client_request_tx.clone()));
-      tokio::spawn(async_tasks::jobs::jobs_exec(ctx.clone(), client_request_tx));
 
       /* ********** SERVER MESSAGE LOOP ********** */
 
