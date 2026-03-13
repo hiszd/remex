@@ -135,10 +135,11 @@ async fn main() -> anyhow::Result<()> {
         .unwrap();
       let mut dbconn = remex_core::db::establish_connection_sqlite();
 
-      // spawn thread to request new jobs from the server
-      let (job_check_tx, mut job_check_rx) =
+      // spawn threads to request new jobs and execute them
+      let (client_request_tx, mut client_request_rx) =
         tokio::sync::mpsc::unbounded_channel::<codec::ClientRequest>();
-      tokio::spawn(async_tasks::jobs::jobs_check(ctx.clone(), job_check_tx));
+      tokio::spawn(async_tasks::jobs::jobs_check(ctx.clone(), client_request_tx.clone()));
+      tokio::spawn(async_tasks::jobs::jobs_exec(ctx.clone(), client_request_tx));
 
       /* ********** SERVER MESSAGE LOOP ********** */
 
@@ -250,10 +251,10 @@ async fn main() -> anyhow::Result<()> {
               }
             }
           },
-          req = job_check_rx.recv() => {
+          req = client_request_rx.recv() => {
             if let Some(req) = req {
               if let Err(e) = framed.send(req.clone()).await {
-                tracing::error!("Failed to send job_check request: {:?}\n Error: {}", &req, &e);
+                tracing::error!("Failed to send job request: {:?}\n Error: {}", &req, &e);
                 break;
               }
             }
