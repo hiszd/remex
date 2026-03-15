@@ -231,14 +231,16 @@ async fn main() -> anyhow::Result<()> {
                         tracing::info!("Received {} jobs", jobs.len());
                         for job in jobs {
                           job.upsert_clt(&mut dbconn).unwrap();
-                          tracing::info!("Job: {} \n Inserted into database", job.job_name);
-                          let jbs: Vec<JobCLT> = jobs::table.load::<JobCLT>(&mut dbconn).unwrap();
-                          {
-                          let mut clock = ctx.lock().await;
-                          clock.cache.jobs = jbs.iter().map(|j| {tracing::info!("Job: {}, status: {}", j.job_name, j.job_status); j.clone().into()}).collect();
-                          }
-                          tracing::info!("Job: {} \n Already exists in database", job.job_name);
+                          tracing::info!("Job: {} \n Inserted/Updated in database", job.job_name);
                         }
+                        let jbs: Vec<JobCLT> = jobs::table.load::<JobCLT>(&mut dbconn).unwrap();
+                        ctx_lock.cache.jobs = jbs
+                          .iter()
+                          .map(|j| {
+                            tracing::info!("Job: {}, status: {}", j.job_name, j.job_status);
+                            j.clone().into()
+                          })
+                          .collect();
                       }
                       j => {
                         tracing::info!("Ignored jobs response: {:#?}", &j);

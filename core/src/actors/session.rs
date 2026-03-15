@@ -46,6 +46,7 @@ use crate::{
   },
   db::{
     self,
+    dal::SrvDbOperator,
     model,
     schema,
   },
@@ -244,7 +245,10 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
               )
             }
             JobsRequest::UpdateJob(job) => {
-              tracing::info!("Received update for job: {}", &job.job_name,)
+              tracing::info!("Received update for job: {}", &job.job_name,);
+              job
+                .upsert_srv(&mut db::establish_connection_postgres())
+                .unwrap();
             }
           }
         }
