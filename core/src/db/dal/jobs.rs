@@ -1,6 +1,4 @@
 use diesel::{
-  query_dsl::methods::FilterDsl,
-  ExpressionMethods,
   QueryDsl,
   RunQueryDsl,
 };
@@ -126,17 +124,16 @@ impl super::CltDbOperator for Job {
       UpsertJobCLT,
     };
     use schema::endpoint::jobs;
-    match diesel::insert_into(jobs::table)
+    diesel::insert_into(jobs::table)
       .values(NewJobCLT::from(self.clone()))
       .on_conflict(jobs::id)
       .do_update()
       .set(UpsertJobCLT::from(self.clone()))
-      .filter(jobs::updated_at.lt(self.updated_at))
+      .execute(conn)?;
+    jobs::table
+      .find(self.id.clone())
       .get_result::<JobCLT>(conn)
-    {
-      Ok(job) => Ok(job.into()),
-      Err(e) => Err(e),
-    }
+      .map(|job| job.into())
   }
 }
 
@@ -183,5 +180,23 @@ impl super::SrvDbOperator for Job {
       Ok(job) => Ok(job.into()),
       Err(e) => Err(e),
     }
+  }
+  fn upsert_srv(&self, conn: &mut diesel::PgConnection) -> Result<Self, diesel::result::Error> {
+    use model::server::jobs::{
+      JobSRV,
+      NewJobSRV,
+      UpsertJobSRV,
+    };
+    use schema::server::jobs;
+    diesel::insert_into(jobs::table)
+      .values(NewJobSRV::from(self.clone()))
+      .on_conflict(jobs::id)
+      .do_update()
+      .set(UpsertJobSRV::from(self.clone()))
+      .execute(conn)?;
+    jobs::table
+      .find(self.id.clone())
+      .get_result::<JobSRV>(conn)
+      .map(|job| job.into())
   }
 }

@@ -152,7 +152,6 @@ pub struct UpsertJobCLT {
   pub created_at: Option<chrono::NaiveDateTime>,
   pub updated_at: Option<chrono::NaiveDateTime>,
 }
-
 impl From<Job> for UpsertJobCLT {
   fn from(job: Job) -> Self {
     UpsertJobCLT {

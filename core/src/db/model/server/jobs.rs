@@ -58,7 +58,6 @@ impl From<JobSRV> for NewJobSRV {
     }
   }
 }
-
 impl From<Job> for NewJobSRV {
   fn from(job: Job) -> Self {
     NewJobSRV {
@@ -88,7 +87,6 @@ pub struct UpdateJobSRV {
   pub created_at: Option<chrono::NaiveDateTime>,
   pub updated_at: Option<chrono::NaiveDateTime>,
 }
-
 impl From<JobSRV> for UpdateJobSRV {
   fn from(job: JobSRV) -> Self {
     UpdateJobSRV {
@@ -104,11 +102,39 @@ impl From<JobSRV> for UpdateJobSRV {
     }
   }
 }
-
 impl From<Job> for UpdateJobSRV {
   fn from(job: Job) -> Self {
     UpdateJobSRV {
       id: job.id,
+      job_name: Some(job.job_name),
+      job_type: Some(job.job_type),
+      job_status: Some(job.job_status),
+      job_status_message: job.job_status_message,
+      job_shell: Some(job.job_shell),
+      job_command: Some(job.job_command),
+      created_at: Some(job.created_at),
+      updated_at: Some(job.updated_at),
+    }
+  }
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize, AsChangeset)]
+#[diesel(table_name = schema::jobs)]
+#[diesel(check_for_backend(diesel::postgres::Pg))]
+pub struct UpsertJobSRV {
+  pub job_name: Option<String>,
+  pub job_type: Option<String>,
+  pub job_status: Option<String>,
+  pub job_status_message: Option<String>,
+  pub job_shell: Option<String>,
+  pub job_command: Option<String>,
+  pub created_at: Option<chrono::NaiveDateTime>,
+  pub updated_at: Option<chrono::NaiveDateTime>,
+}
+impl From<Job> for UpsertJobSRV {
+  fn from(job: Job) -> Self {
+    UpsertJobSRV {
       job_name: Some(job.job_name),
       job_type: Some(job.job_type),
       job_status: Some(job.job_status),

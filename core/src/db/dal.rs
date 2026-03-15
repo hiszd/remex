@@ -12,6 +12,7 @@ where
   fn update_srv(&self, conn: &mut diesel::PgConnection) -> Result<Self, diesel::result::Error>;
   fn delete_srv(&self, conn: &mut diesel::PgConnection) -> Result<(), diesel::result::Error>;
   fn read_srv(&self, conn: &mut diesel::PgConnection) -> Result<Self, diesel::result::Error>;
+  fn upsert_srv(&self, conn: &mut diesel::PgConnection) -> Result<Self, diesel::result::Error>;
 }
 
 pub trait CltDbOperator

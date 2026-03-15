@@ -232,9 +232,11 @@ async fn main() -> anyhow::Result<()> {
                         for job in jobs {
                           job.upsert_clt(&mut dbconn).unwrap();
                           tracing::info!("Job: {} \n Inserted into database", job.job_name);
-                          let mut clock = ctx.lock().await;
                           let jbs: Vec<JobCLT> = jobs::table.load::<JobCLT>(&mut dbconn).unwrap();
+                          {
+                          let mut clock = ctx.lock().await;
                           clock.cache.jobs = jbs.iter().map(|j| {tracing::info!("Job: {}, status: {}", j.job_name, j.job_status); j.clone().into()}).collect();
+                          }
                           tracing::info!("Job: {} \n Already exists in database", job.job_name);
                         }
                       }
