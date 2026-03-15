@@ -24,7 +24,9 @@ impl Actor for RemexServer {
     self.migrated = false;
     // migrate the database and panic if migration fails
     futures::executor::block_on(async {
-      crate::db::migrate(crate::db::ConnectionType::Postgres).await.unwrap();
+      crate::db::migrate(crate::db::ConnectionType::Postgres)
+        .await
+        .unwrap();
       self.migrated = true;
       tracing::info!("Database migrated");
     });

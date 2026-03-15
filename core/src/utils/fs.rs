@@ -1,9 +1,23 @@
-use std::fs::{self, File};
-use std::io::{self, Write};
-use std::path::Path;
-use std::time::SystemTime;
+use std::{
+  fs::{
+    self,
+    File,
+  },
+  io::{
+    self,
+    Write,
+  },
+  path::Path,
+  time::SystemTime,
+};
 
-use chrono::{self, DateTime, NaiveDateTime, TimeZone, Utc};
+use chrono::{
+  self,
+  DateTime,
+  NaiveDateTime,
+  TimeZone,
+  Utc,
+};
 
 #[derive(Debug, Clone)]
 struct FileInformation {
@@ -25,7 +39,11 @@ impl FileInterface {
   /// Reads the file content and metadata upon creation.
   pub fn new(file_path: &str) -> Result<Self, io::Error> {
     let path = Path::new(file_path);
-    let filename = path.file_name().and_then(|name| name.to_str()).unwrap_or("unknown").to_string();
+    let filename = path
+      .file_name()
+      .and_then(|name| name.to_str())
+      .unwrap_or("unknown")
+      .to_string();
 
     let (content, size, last_modified) = match fs::metadata(path) {
       Ok(metadata) => {
@@ -40,7 +58,11 @@ impl FileInterface {
         (
           String::new(),
           0,
-          Utc.timestamp_opt(0, 0).single().unwrap_or_else(|| Utc::now()).naive_utc(),
+          Utc
+            .timestamp_opt(0, 0)
+            .single()
+            .unwrap_or_else(|| Utc::now())
+            .naive_utc(),
         )
       }
       Err(e) => return Err(e),

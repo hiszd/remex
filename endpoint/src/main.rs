@@ -24,6 +24,7 @@ use tokio::{
 
 mod async_tasks;
 mod fs;
+mod utils;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -122,6 +123,9 @@ async fn main() -> anyhow::Result<()> {
   let (client_request_tx, mut client_request_rx) =
     tokio::sync::mpsc::channel::<codec::ClientRequest>(1000);
 
+  // Buffer to hold a message that was popped but failed to send due to disconnect
+  let mut pending_request: Option<codec::ClientRequest> = None;
+
   // spawn threads to request new jobs and execute them outside of the reconnection loop
   // so they keep generating messages even when the connection is down.
   tokio::spawn(async_tasks::jobs::jobs_check(ctx.clone(), client_request_tx.clone()));
@@ -144,6 +148,16 @@ async fn main() -> anyhow::Result<()> {
         .unwrap();
       let mut dbconn = remex_core::db::establish_connection_sqlite();
 
+      // Flush pending request from a previous failed send before entering the main loop
+      if let Some(req) = pending_request.take() {
+        if let Err(e) = framed.send(req.clone()).await {
+          tracing::error!("Failed to send pending request: {}\n Trying again in 5 seconds", e);
+          pending_request = Some(req);
+          tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+          continue;
+        }
+      }
+
       /* ********** SERVER MESSAGE LOOP ********** */
 
       loop {
@@ -159,16 +173,19 @@ async fn main() -> anyhow::Result<()> {
                 let authenticated = ctx_lock.authenticated;
                 match (m, authenticated) {
                   (ServerResponse::Ping, _) => {
-                    framed.send(ClientRequest::Ping).await.unwrap();
+                    if let Err(e) = client_request_tx.try_send(ClientRequest::Ping) {
+                      tracing::error!("Failed to queue Ping reply: {}", e);
+                    }
                     if !ctx_lock.authenticated {
                       tracing::info!("Attempting to authenticate");
                       let iden = ctx_lock.auth_type.clone().unwrap();
-                      framed
-                        .send(codec::ClientRequest::ConnectionRequest(
+                      if let Err(e) = client_request_tx.try_send(
+                        codec::ClientRequest::ConnectionRequest(
                           codec::ConnectionRequest::Identify(iden.clone()),
-                        ))
-                        .await
-                        .unwrap();
+                        ),
+                      ) {
+                        tracing::error!("Failed to queue Identify request: {}", e);
+                      }
                       ctx_lock.authentication_used = Some(iden);
                     }
                   }
@@ -211,15 +228,14 @@ async fn main() -> anyhow::Result<()> {
                       JobsResponse::ReceiveJobs(jobs) => {
                         // FIXME: Cache these for the life of the program and update them when a new
                         // one is added.
-                        let dbjobs: Vec<JobCLT> = jobs::table.load(&mut dbconn).unwrap();
                         tracing::info!("Received {} jobs", jobs.len());
                         for job in jobs {
-                          if !dbjobs.iter().any(|j| j.id == job.id) {
-                            job.upsert_clt(&mut dbconn).unwrap();
-                            tracing::info!("Job: {} \n Inserted into database", job.job_name);
-                          } else {
-                            tracing::info!("Job: {} \n Already exists in database", job.job_name);
-                          }
+                          job.upsert_clt(&mut dbconn).unwrap();
+                          tracing::info!("Job: {} \n Inserted into database", job.job_name);
+                          let mut clock = ctx.lock().await;
+                          let jbs: Vec<JobCLT> = jobs::table.load::<JobCLT>(&mut dbconn).unwrap();
+                          clock.cache.jobs = jbs.iter().map(|j| {tracing::info!("Job: {}, status: {}", j.job_name, j.job_status); j.clone().into()}).collect();
+                          tracing::info!("Job: {} \n Already exists in database", job.job_name);
                         }
                       }
                       j => {
@@ -237,10 +253,11 @@ async fn main() -> anyhow::Result<()> {
                     ctx_lock.authenticated = true;
                     fs::id::save_id(id).unwrap();
                     fs::secret::save_secret(secret).unwrap();
-                    framed
-                      .send(codec::ClientRequest::JobsRequest(codec::JobsRequest::All))
-                      .await
-                      .unwrap();
+                    if let Err(e) = client_request_tx.try_send(
+                      codec::ClientRequest::JobsRequest(codec::JobsRequest::All),
+                    ) {
+                      tracing::error!("Failed to queue JobsRequest: {}", e);
+                    }
                     ctx_lock.jobs_last_requested = Some(std::time::Instant::now());
                   }
                   s => {
@@ -257,7 +274,8 @@ async fn main() -> anyhow::Result<()> {
           req = client_request_rx.recv() => {
             if let Some(req) = req {
               if let Err(e) = framed.send(req.clone()).await {
-                tracing::error!("Failed to send job request: {:?}\n Error: {}", &req, &e);
+                tracing::error!("Failed to send request: {:?}\n Error: {}", &req, &e);
+                pending_request = Some(req);
                 break;
               }
             }

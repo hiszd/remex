@@ -1,4 +1,7 @@
-use rand::{distr::Alphanumeric, RngExt};
+use rand::{
+  distr::Alphanumeric,
+  RngExt,
+};
 
 pub mod fs;
 
@@ -6,5 +9,9 @@ pub mod fs;
 pub fn generate_secret(long: bool) -> String {
   let len = if long { 64 } else { 32 };
 
-  rand::rng().sample_iter(&Alphanumeric).take(len).map(char::from).collect()
+  rand::rng()
+    .sample_iter(&Alphanumeric)
+    .take(len)
+    .map(char::from)
+    .collect()
 }

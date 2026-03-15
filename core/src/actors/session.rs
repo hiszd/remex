@@ -243,6 +243,9 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
                 &logs
               )
             }
+            JobsRequest::UpdateJob(job) => {
+              tracing::info!("Received update for job: {}", &job.job_name,)
+            }
           }
         }
         s => {

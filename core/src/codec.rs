@@ -2,12 +2,28 @@
 use std::io;
 
 use actix::prelude::*;
-use actix_codec::{Decoder, Encoder};
-use actix_web::web::{BufMut, BytesMut};
-use aes_gcm::aead::Aead;
-use aes_gcm::{AeadCore, Aes256Gcm, KeyInit};
-use byteorder::{BigEndian, ByteOrder};
-use serde::{Deserialize, Serialize};
+use actix_codec::{
+  Decoder,
+  Encoder,
+};
+use actix_web::web::{
+  BufMut,
+  BytesMut,
+};
+use aes_gcm::{
+  aead::Aead,
+  AeadCore,
+  Aes256Gcm,
+  KeyInit,
+};
+use byteorder::{
+  BigEndian,
+  ByteOrder,
+};
+use serde::{
+  Deserialize,
+  Serialize,
+};
 use serde_json as json;
 use tracing::error;
 
@@ -37,7 +53,9 @@ fn encrypt(plaintext: String) -> Vec<u8> {
   let key = aes_gcm::Key::<Aes256Gcm>::from_slice(KEY.as_bytes());
   let nonce = Aes256Gcm::generate_nonce(&mut aes_gcm::aead::OsRng);
   let cipher = Aes256Gcm::new(key);
-  let ciphered_data = cipher.encrypt(&nonce, plaintext.as_bytes()).expect("failed to encrypt");
+  let ciphered_data = cipher
+    .encrypt(&nonce, plaintext.as_bytes())
+    .expect("failed to encrypt");
   // combining nonce and encrypted data together
   // for storage purpose
   let mut encrypted_data: Vec<u8> = nonce.to_vec();
@@ -116,6 +134,8 @@ pub enum JobsRequest {
   All,
   /// Send executions to the server (Job_Id, Executions, Logs)
   SendExecutions(String, Vec<dal::executions::Execution>, Vec<dal::logs::Log>),
+  /// Send executions to the server (Job_Id, Executions, Logs)
+  UpdateJob(crate::db::dal::jobs::Job),
 }
 
 /// Client request - come from client

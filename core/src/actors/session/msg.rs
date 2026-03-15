@@ -1,6 +1,13 @@
-use actix::{Context, Handler, Message};
+use actix::{
+  Context,
+  Handler,
+  Message,
+};
 
-use crate::codec::{ConnectionResponse, ServerResponse};
+use crate::codec::{
+  ConnectionResponse,
+  ServerResponse,
+};
 
 /// Force session close
 #[derive(Message)]
