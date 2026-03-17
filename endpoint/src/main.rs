@@ -41,8 +41,14 @@ struct Args {
 }
 
 #[derive(Debug, Clone)]
+struct CacheJob {
+  locked: bool,
+  job: remex_core::db::dal::jobs::Job,
+}
+
+#[derive(Debug, Clone)]
 struct Cache {
-  jobs: Vec<remex_core::db::dal::jobs::Job>,
+  jobs: Vec<CacheJob>,
 }
 
 #[derive(Debug, Clone)]

@@ -61,10 +61,11 @@ pub async fn jobs_exec(
       let ctx_lock = ctx.lock().await;
       if ctx_lock.authenticated {
         for j in &ctx_lock.cache.jobs {
-          if j.job_status == "ready_for_execution" {
+          if j.job.job_status == "ready_for_execution" {
             jobs_to_exec.push(j.clone());
+            j.locked = true;
           } else {
-            tracing::info!("Job {} is in {} state", j.job_name, j.job_status);
+            tracing::info!("Job {} is in {} state", j.job.job_name, j.job.job_status.into());
           }
         }
       }
@@ -73,15 +74,15 @@ pub async fn jobs_exec(
     for mut j in jobs_to_exec {
       tracing::info!(
         "Executing command: {}\n for Job {} because job is in {} state",
-        j.job_command,
-        j.job_name,
-        j.job_status
+        j.job.job_command,
+        j.job.job_status.into(),
+        j.job.job_name,
       );
-      let command: Vec<&str> = j.job_command.split(' ').collect();
+      let command: Vec<&str> = j.job.job_command.split(' ').collect();
       match crate::utils::run_command(command[0], &command[1..]) {
         Ok(output) => {
           tracing::info!("Command {} output: {}", command[0], output);
-          j.job_status = "completed".to_string();
+          j.job.job_status = "completed".to_string().into();
           {
             let mut ctx_lock = ctx.lock().await;
             ctx_lock.cache.jobs = ctx_lock
@@ -90,15 +91,15 @@ pub async fn jobs_exec(
               .iter()
               .map(|n| {
                 let mut nj = n.clone();
-                if n.id == j.id {
-                  nj.job_status = "completed".to_string();
+                if n.job.id == j.job.id {
+                  nj.job.job_status = "completed".to_string().into();
                 }
                 nj
               })
               .collect();
           }
           if tx
-            .send(codec::ClientRequest::JobsRequest(codec::JobsRequest::UpdateJob(j)))
+            .send(codec::ClientRequest::JobsRequest(codec::JobsRequest::UpdateJob(j.job)))
             .await
             .is_err()
           {

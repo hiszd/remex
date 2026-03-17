@@ -60,12 +60,13 @@ impl From<JobSRV> for NewJobSRV {
 }
 impl From<Job> for NewJobSRV {
   fn from(job: Job) -> Self {
+    let (job_status, job_status_message): (String, Option<String>) = job.job_status.into();
     NewJobSRV {
       id: job.id,
       job_name: job.job_name,
       job_type: job.job_type,
-      job_status: job.job_status,
-      job_status_message: job.job_status_message,
+      job_status,
+      job_status_message,
       job_shell: job.job_shell,
       job_command: job.job_command,
       created_at: Some(job.created_at),
@@ -104,12 +105,13 @@ impl From<JobSRV> for UpdateJobSRV {
 }
 impl From<Job> for UpdateJobSRV {
   fn from(job: Job) -> Self {
+    let (job_status, job_status_message): (String, Option<String>) = job.job_status.into();
     UpdateJobSRV {
       id: job.id,
       job_name: Some(job.job_name),
       job_type: Some(job.job_type),
-      job_status: Some(job.job_status),
-      job_status_message: job.job_status_message,
+      job_status: Some(job_status),
+      job_status_message,
       job_shell: Some(job.job_shell),
       job_command: Some(job.job_command),
       created_at: Some(job.created_at),
@@ -117,7 +119,6 @@ impl From<Job> for UpdateJobSRV {
     }
   }
 }
-
 #[allow(dead_code)]
 #[derive(Deserialize, AsChangeset)]
 #[diesel(table_name = schema::jobs)]
@@ -134,11 +135,12 @@ pub struct UpsertJobSRV {
 }
 impl From<Job> for UpsertJobSRV {
   fn from(job: Job) -> Self {
+    let (job_status, job_status_message): (String, Option<String>) = job.job_status.into();
     UpsertJobSRV {
       job_name: Some(job.job_name),
       job_type: Some(job.job_type),
-      job_status: Some(job.job_status),
-      job_status_message: job.job_status_message,
+      job_status: Some(job_status),
+      job_status_message,
       job_shell: Some(job.job_shell),
       job_command: Some(job.job_command),
       created_at: Some(job.created_at),
