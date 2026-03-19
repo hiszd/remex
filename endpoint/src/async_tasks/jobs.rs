@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use remex_core::codec;
+use remex_core::{
+  codec,
+  db::dal::jobs::JobStatus,
+};
 use tokio::sync::Mutex;
 
 pub async fn jobs_check(
@@ -58,31 +61,33 @@ pub async fn jobs_exec(
 
     // Scoped lock to avoid holding the Mutex across an await point
     {
-      let ctx_lock = ctx.lock().await;
+      let mut ctx_lock = ctx.lock().await;
       if ctx_lock.authenticated {
-        for j in &ctx_lock.cache.jobs {
-          if j.job.job_status == "ready_for_execution" {
+        for j in &mut ctx_lock.cache.jobs {
+          if j.job.job_status == JobStatus::Pending {
             jobs_to_exec.push(j.clone());
             j.locked = true;
           } else {
-            tracing::info!("Job {} is in {} state", j.job.job_name, j.job.job_status.into());
+            let (status_str, _) = j.job.job_status.clone().into();
+            tracing::info!("Job {} is in {} state", j.job.job_name, status_str);
           }
         }
       }
     }
 
     for mut j in jobs_to_exec {
+      let (status_str, _) = j.job.job_status.into();
       tracing::info!(
         "Executing command: {}\n for Job {} because job is in {} state",
         j.job.job_command,
-        j.job.job_status.into(),
+        status_str,
         j.job.job_name,
       );
       let command: Vec<&str> = j.job.job_command.split(' ').collect();
       match crate::utils::run_command(command[0], &command[1..]) {
         Ok(output) => {
           tracing::info!("Command {} output: {}", command[0], output);
-          j.job.job_status = "completed".to_string().into();
+          j.job.job_status = JobStatus::Completed;
           {
             let mut ctx_lock = ctx.lock().await;
             ctx_lock.cache.jobs = ctx_lock

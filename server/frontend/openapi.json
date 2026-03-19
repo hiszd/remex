@@ -66,6 +66,244 @@
         }
       }
     },
+    "/clients/{id}": {
+      "get": {
+        "tags": [
+          "handlers::clients"
+        ],
+        "operationId": "get_client_by_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Client ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Client found successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientWithGroups"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Client not found"
+          }
+        }
+      }
+    },
+    "/groups": {
+      "get": {
+        "tags": [
+          "handlers::groups"
+        ],
+        "operationId": "get_groups",
+        "responses": {
+          "200": {
+            "description": "Groups found successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Group"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/groups/new": {
+      "post": {
+        "tags": [
+          "handlers::groups"
+        ],
+        "operationId": "create_group",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateGroupForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Group created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Group"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/groups/{group_id}": {
+      "get": {
+        "tags": [
+          "handlers::groups"
+        ],
+        "operationId": "get_group_by_id",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "description": "Group ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Group found successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Group"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Group not found"
+          }
+        }
+      }
+    },
+    "/groups/{group_id}/clients": {
+      "get": {
+        "tags": [
+          "handlers::groups"
+        ],
+        "operationId": "get_group_clients",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "description": "Group ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Clients in group found successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ClientSRV"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Group not found"
+          }
+        }
+      }
+    },
+    "/groups/{group_id}/jobs": {
+      "get": {
+        "tags": [
+          "handlers::groups"
+        ],
+        "operationId": "get_group_jobs",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "description": "Group ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Jobs in group found successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/JobSRV"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Group not found"
+          }
+        }
+      }
+    },
+    "/groups/{group_id}/jobs/{job_id}/status": {
+      "get": {
+        "tags": [
+          "handlers::groups"
+        ],
+        "operationId": "get_group_job_status_handler",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "description": "Group ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "job_id",
+            "in": "path",
+            "description": "Job ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Group job status found successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupJobStatusResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Group or job not found"
+          }
+        }
+      }
+    },
     "/jobs": {
       "get": {
         "tags": [
@@ -137,7 +375,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/JobSRV"
+                  "$ref": "#/components/schemas/Job"
                 }
               }
             }
@@ -237,6 +475,117 @@
           }
         }
       }
+    },
+    "/jobs/{id}/groups": {
+      "get": {
+        "tags": [
+          "handlers::jobs"
+        ],
+        "operationId": "get_job_groups",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Job ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Groups for job found successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/JobWithGroups"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job not found"
+          }
+        }
+      }
+    },
+    "/jobs/{job_id}/client-statuses": {
+      "get": {
+        "tags": [
+          "handlers::jobs"
+        ],
+        "operationId": "get_job_client_statuses",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "description": "Job ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Client statuses for job found successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ClientJobStatusResponse"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job not found"
+          }
+        }
+      }
+    },
+    "/jobs/{job_id}/groups": {
+      "post": {
+        "tags": [
+          "handlers::jobs"
+        ],
+        "operationId": "update_job_groups",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "description": "Job ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateJobGroupsForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Job groups updated successfully"
+          },
+          "404": {
+            "description": "Job not found"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -274,6 +623,43 @@
           }
         }
       },
+      "ClientJobStatusResponse": {
+        "type": "object",
+        "required": [
+          "client_id",
+          "client_name",
+          "status",
+          "execution_count"
+        ],
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "client_name": {
+            "type": "string"
+          },
+          "execution_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "latest_execution_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "latest_execution_timestamp": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
       "ClientSRV": {
         "type": "object",
         "required": [
@@ -307,6 +693,46 @@
           }
         }
       },
+      "ClientStatusSummary": {
+        "type": "object",
+        "required": [
+          "client_id",
+          "client_name",
+          "status"
+        ],
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "client_name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "ClientWithGroups": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ClientSRV"
+          },
+          {
+            "type": "object",
+            "required": [
+              "group_ids"
+            ],
+            "properties": {
+              "group_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        ]
+      },
       "CreateClientForm": {
         "type": "object",
         "required": [
@@ -318,6 +744,17 @@
             "type": "string"
           },
           "hardware_hash": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateGroupForm": {
+        "type": "object",
+        "required": [
+          "group_name"
+        ],
+        "properties": {
+          "group_name": {
             "type": "string"
           }
         }
@@ -358,6 +795,196 @@
           }
         }
       },
+      "Group": {
+        "type": "object",
+        "required": [
+          "id",
+          "group_name",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "group_name": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "GroupJobPath": {
+        "type": "object",
+        "required": [
+          "group_id",
+          "job_id"
+        ],
+        "properties": {
+          "group_id": {
+            "type": "string"
+          },
+          "job_id": {
+            "type": "string"
+          }
+        }
+      },
+      "GroupJobStatusMetadata": {
+        "type": "object",
+        "required": [
+          "client_statuses",
+          "total_clients",
+          "completed_clients",
+          "failed_clients",
+          "running_clients"
+        ],
+        "properties": {
+          "client_statuses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClientStatusSummary"
+            }
+          },
+          "completed_clients": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "failed_clients": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "running_clients": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total_clients": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "GroupJobStatusResponse": {
+        "type": "object",
+        "required": [
+          "group_id",
+          "job_id",
+          "status",
+          "client_statuses",
+          "total_clients",
+          "completed_clients",
+          "failed_clients",
+          "running_clients"
+        ],
+        "properties": {
+          "client_statuses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClientStatusSummary"
+            }
+          },
+          "completed_clients": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "failed_clients": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "group_id": {
+            "type": "string"
+          },
+          "job_id": {
+            "type": "string"
+          },
+          "running_clients": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "type": "string"
+          },
+          "total_clients": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "GroupPath": {
+        "type": "object",
+        "required": [
+          "group_id"
+        ],
+        "properties": {
+          "group_id": {
+            "type": "string"
+          }
+        }
+      },
+      "GroupWithClients": {
+        "type": "object",
+        "required": [
+          "group",
+          "clients"
+        ],
+        "properties": {
+          "clients": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClientSRV"
+            }
+          },
+          "group": {
+            "$ref": "#/components/schemas/Group"
+          }
+        }
+      },
+      "Job": {
+        "type": "object",
+        "required": [
+          "id",
+          "job_name",
+          "job_type",
+          "job_status",
+          "job_shell",
+          "job_command",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string"
+          },
+          "job_command": {
+            "type": "string"
+          },
+          "job_name": {
+            "type": "string"
+          },
+          "job_shell": {
+            "type": "string"
+          },
+          "job_status": {
+            "$ref": "#/components/schemas/JobStatus"
+          },
+          "job_type": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "JobClientAction": {
         "type": "object",
         "required": [
@@ -368,6 +995,17 @@
           "client_id": {
             "type": "string"
           },
+          "job_id": {
+            "type": "string"
+          }
+        }
+      },
+      "JobGroupPath": {
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
           "job_id": {
             "type": "string"
           }
@@ -420,6 +1058,65 @@
           }
         }
       },
+      "JobStatus": {
+        "oneOf": [
+          {
+            "type": "string",
+            "description": "The job is created but not yet assigned to any client or is waiting for execution.",
+            "enum": [
+              "pending"
+            ]
+          },
+          {
+            "type": "string",
+            "description": "The job is currently being executed by a client.",
+            "enum": [
+              "running"
+            ]
+          },
+          {
+            "type": "string",
+            "description": "The job has finished successfully.",
+            "enum": [
+              "completed"
+            ]
+          },
+          {
+            "type": "object",
+            "description": "The job has failed during execution, includes an error message.",
+            "required": [
+              "failed"
+            ],
+            "properties": {
+              "failed": {
+                "type": "string",
+                "description": "The job has failed during execution, includes an error message."
+              }
+            }
+          },
+          {
+            "type": "string",
+            "description": "The job was cancelled by a user or system administrator.",
+            "enum": [
+              "cancelled"
+            ]
+          },
+          {
+            "type": "string",
+            "description": "The job execution exceeded the allocated time limit.",
+            "enum": [
+              "timed_out"
+            ]
+          },
+          {
+            "type": "string",
+            "description": "The job is disabled and will not be picked up for execution.",
+            "enum": [
+              "disabled"
+            ]
+          }
+        ]
+      },
       "JobWithClients": {
         "allOf": [
           {
@@ -440,6 +1137,45 @@
             }
           }
         ]
+      },
+      "JobWithGroups": {
+        "type": "object",
+        "required": [
+          "id",
+          "group_name",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "group_name": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "UpdateJobGroupsForm": {
+        "type": "object",
+        "required": [
+          "group_ids"
+        ],
+        "properties": {
+          "group_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
       },
       "UpdateJobSRV": {
         "type": "object",

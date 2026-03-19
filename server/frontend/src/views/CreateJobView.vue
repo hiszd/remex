@@ -2,19 +2,18 @@
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query';
-import { getClients, createJob } from '@/client/index';
-import type { CreateJobForm } from '@/client/types.gen';
+import { getGroups, createJob } from '@/client/index';
+import type { CreateJobForm, Group } from '@/client/types.gen';
 
 const router = useRouter();
 const queryClient = useQueryClient();
 
-// Fetch clients for assignment
-const { data: clients, isLoading: loadingClients } = useQuery({
-  queryKey: ['clients'],
+const { data: groups, isLoading: loadingGroups } = useQuery({
+  queryKey: ['groups'],
   queryFn: async () => {
-    const { data, error } = await getClients();
+    const { data, error } = await getGroups();
     if (error) throw error;
-    return data;
+    return data as Group[];
   }
 });
 
@@ -23,6 +22,7 @@ const form = ref<CreateJobForm>({
   job_type: 'Shell',
   job_status: 'Pending',
   job_shell: '',
+  job_command: '',
   group_ids: []
 });
 
@@ -41,7 +41,7 @@ const mutation = useMutation({
     queryClient.invalidateQueries({ queryKey: ['jobs'] });
     router.push('/jobs');
   },
-  onError: (err: any) => {
+  onError: (err: Error) => {
     submitError.value = err.message || 'Failed to create job';
     isSubmitting.value = false;
   }
@@ -109,27 +109,29 @@ const handleSubmit = async () => {
         ></textarea>
       </div>
 
-      <!-- Assign to Clients (Placeholder for group_ids logic) -->
+      <!-- Assign to Groups -->
       <div class="form-section">
-        <label>Assign to Clients</label>
-        <p class="field-desc">Note: Assignment currently uses internal grouping. Select clients to include in the job group.</p>
+        <div class="label-row">
+          <label>Assign to Groups</label>
+          <a href="/groups/new" target="_blank" class="create-link">+ Create New Group</a>
+        </div>
         
-        <div v-if="loadingClients" class="loading-inline">Loading clients...</div>
-        <div v-else class="client-selector">
-          <div v-for="client in clients" :key="client.id" class="client-checkbox">
+        <div v-if="loadingGroups" class="loading-inline">Loading groups...</div>
+        <div v-else class="group-selector">
+          <div v-for="group in groups" :key="group.id" class="group-checkbox">
             <input 
               type="checkbox" 
-              :id="client.id" 
-              :value="client.id"
+              :id="group.id" 
+              :value="group.id"
               v-model="form.group_ids"
             />
-            <label :for="client.id">
-              <span class="client-name">{{ client.client_name }}</span>
-              <span class="client-id">{{ client.id }}</span>
+            <label :for="group.id">
+              <span class="group-name">{{ group.group_name }}</span>
+              <span class="group-id">{{ group.id }}</span>
             </label>
           </div>
-          <div v-if="!clients || clients.length === 0" class="no-clients">
-            No clients available to assign.
+          <div v-if="!groups || groups.length === 0" class="no-groups">
+            No groups available. <a href="/groups/new" target="_blank">Create a group</a> to assign jobs to.
           </div>
         </div>
       </div>
@@ -224,8 +226,8 @@ const handleSubmit = async () => {
   input[type="text"], select, textarea {
     padding: 0.75rem 1rem;
     border-radius: 0.5rem;
-    border: 1px solid rgba(0,0,0,0.1);
-    background: white;
+    border: 1px solid var(--color-border);
+    background: var(--background-50);
     font-size: 1rem;
     color: var(--text-950);
     
@@ -243,19 +245,47 @@ const handleSubmit = async () => {
   gap: 1.5rem;
 }
 
-.client-selector {
+.label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  label {
+    font-size: 0.85rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.025em;
+    opacity: 0.8;
+  }
+}
+
+.create-link {
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: normal;
+  opacity: 1;
+  color: var(--accent-500);
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.group-selector {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
   max-height: 200px;
   overflow-y: auto;
   padding: 1rem;
-  background: white;
+  background: var(--background-50);
   border-radius: 0.5rem;
-  border: 1px solid rgba(0,0,0,0.1);
+  border: 1px solid var(--color-border);
 }
 
-.client-checkbox {
+.group-checkbox {
   display: flex;
   align-items: center;
   gap: 0.75rem;
@@ -280,14 +310,29 @@ const handleSubmit = async () => {
     letter-spacing: normal;
     opacity: 1;
 
-    .client-name {
+    .group-name {
       font-weight: 600;
       font-size: 0.95rem;
     }
-    .client-id {
+    .group-id {
       font-size: 0.75rem;
       opacity: 0.5;
       font-family: monospace;
+    }
+  }
+}
+
+.no-groups {
+  font-size: 0.9rem;
+  color: var(--text-500);
+  text-align: center;
+  padding: 1rem;
+
+  a {
+    color: var(--accent-500);
+    text-decoration: none;
+    &:hover {
+      text-decoration: underline;
     }
   }
 }

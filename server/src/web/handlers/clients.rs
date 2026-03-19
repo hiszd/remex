@@ -8,12 +8,19 @@ use actix_web::{
 use diesel::prelude::*;
 use remex_core::db::{
   dal::clients::Client,
-  model::server::clients::{
-    ClientSRV,
-    NewClientSRV,
+  model::server::{
+    clients::{
+      ClientSRV,
+      NewClientSRV,
+    },
+    executions::ExecutionSRV,
   },
+  schema::server::groups_clients,
 };
-use serde::Deserialize;
+use serde::{
+  Deserialize,
+  Serialize,
+};
 use utoipa::ToSchema;
 
 #[derive(Deserialize, ToSchema)]
@@ -68,4 +75,62 @@ pub async fn create_client(form: web::Json<CreateClientForm>) -> impl Responder 
     .unwrap();
 
   HttpResponse::Created().json(client)
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct ClientWithGroups {
+  #[serde(flatten)]
+  pub client: ClientSRV,
+  pub group_ids: Vec<String>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct ClientWithExecutions {
+  #[serde(flatten)]
+  pub client: ClientSRV,
+  pub executions: Vec<ExecutionSRV>,
+  pub group_ids: Vec<String>,
+}
+
+#[utoipa::path(
+  get,
+  path = "/clients/{id}",
+  responses(
+    (status = 200, description = "Client found successfully", body = ClientWithGroups),
+    (status = 404, description = "Client not found"),
+  ),
+  params(
+    ("id" = String, Path, description = "Client ID")
+  )
+)]
+#[get("/clients/{id}")]
+pub async fn get_client_by_id(id: web::Path<String>) -> impl Responder {
+  use remex_core::db::schema::server::clients;
+  let mut pool = remex_core::db::establish_connection_postgres();
+
+  let client_id = id.into_inner();
+
+  let client = clients::table
+    .filter(clients::id.eq(&client_id))
+    .first::<ClientSRV>(&mut pool)
+    .optional()
+    .unwrap();
+
+  if let Some(client) = client {
+    let group_ids: Vec<String> = groups_clients::table
+      .filter(groups_clients::client_id.eq(&client_id))
+      .select(groups_clients::group_id)
+      .load::<Option<String>>(&mut pool)
+      .unwrap()
+      .into_iter()
+      .flatten()
+      .collect();
+
+    HttpResponse::Ok().json(ClientWithGroups {
+      client,
+      group_ids,
+    })
+  } else {
+    HttpResponse::NotFound().finish()
+  }
 }

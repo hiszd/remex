@@ -92,8 +92,11 @@ async fn main() -> anyhow::Result<()> {
           .load::<remex_core::db::model::endpoint::jobs::JobCLT>(&mut dbconn)
           .unwrap()
           .iter()
-          .map(|j| j.clone().into())
-          .collect::<Vec<remex_core::db::dal::jobs::Job>>()
+          .map(|j| CacheJob {
+            locked: false,
+            job: j.clone().into(),
+          })
+          .collect()
       },
     },
   };
@@ -244,7 +247,10 @@ async fn main() -> anyhow::Result<()> {
                           .iter()
                           .map(|j| {
                             tracing::info!("Job: {}, status: {}", j.job_name, j.job_status);
-                            j.clone().into()
+                            CacheJob {
+                              locked: false,
+                              job: j.clone().into(),
+                            }
                           })
                           .collect();
                       }

@@ -1,0 +1,299 @@
+<script setup lang="ts">
+import { useRoute } from 'vue-router';
+import { useQuery } from '@tanstack/vue-query';
+import { getClientById, getGroups, type ClientWithGroups, type Group } from '@/client/index';
+import { formatDate } from '@/utils/date';
+
+const route = useRoute();
+const clientId = route.params.id as string;
+
+const { data: client, isLoading, isError } = useQuery({
+  queryKey: ['client', clientId],
+  queryFn: async () => {
+    const { data, error } = await getClientById({ path: { id: clientId } });
+    if (error) throw error;
+    return data as ClientWithGroups;
+  }
+});
+
+const { data: allGroups } = useQuery({
+  queryKey: ['groups'],
+  queryFn: async () => {
+    const { data, error } = await getGroups();
+    if (error) return [];
+    return (data as Group[]) || [];
+  }
+});
+
+const getGroupName = (groupId: string): string => {
+  const group = allGroups.value?.find(g => g.id === groupId);
+  return group?.group_name || 'Unknown Group';
+};
+</script>
+
+<template>
+  <div class="page">
+    <header class="page-header">
+      <router-link to="/clients" class="back-link">← Back to Clients</router-link>
+      <div v-if="client" class="header-main">
+        <div class="title-group">
+          <h1 class="page-title">{{ client.client_name }}</h1>
+          <p class="client-id">{{ client.id }}</p>
+        </div>
+      </div>
+    </header>
+
+    <div v-if="isLoading" class="state-card">
+      <div class="spinner" />
+      <p>Loading client details...</p>
+    </div>
+
+    <div v-else-if="isError || !client" class="state-card state-error">
+      <p class="state-label">Client not found</p>
+      <p class="state-text">The requested client could not be retrieved.</p>
+    </div>
+
+    <div v-else class="details-container">
+      <!-- Client Info Section -->
+      <section class="info-section card">
+        <div class="section-header">
+          <h2>General Information</h2>
+        </div>
+
+        <div class="info-grid">
+          <div class="info-item">
+            <span class="label">Client Name</span>
+            <span class="value">{{ client.client_name }}</span>
+          </div>
+          <div class="info-item">
+            <span class="label">ID</span>
+            <span class="value monospace">{{ client.id }}</span>
+          </div>
+          <div class="info-item full-width">
+            <span class="label">Secret</span>
+            <span class="value monospace">{{ client.secret }}</span>
+          </div>
+          <div class="info-item full-width">
+            <span class="label">Hardware Hash</span>
+            <span class="value monospace">{{ client.hardware_hash }}</span>
+          </div>
+          <div class="info-item">
+            <span class="label">Created At</span>
+            <span class="value">{{ formatDate(client.created_at) }}</span>
+          </div>
+          <div class="info-item">
+            <span class="label">Updated At</span>
+            <span class="value">{{ formatDate(client.updated_at) }}</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Groups Section -->
+      <section class="groups-section card">
+        <div class="section-header">
+          <h2>Assigned Groups</h2>
+        </div>
+
+        <div v-if="!client.group_ids || client.group_ids.length === 0" class="empty-text">
+          This client is not assigned to any groups.
+        </div>
+
+        <div v-else class="groups-list">
+          <router-link 
+            v-for="groupId in client.group_ids" 
+            :key="groupId"
+            :to="'/groups/' + groupId"
+            class="group-chip"
+          >
+            {{ getGroupName(groupId) }}
+          </router-link>
+        </div>
+      </section>
+    </div>
+  </div>
+</template>
+
+<style lang="scss" scoped>
+.page {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+  gap: 2rem;
+}
+
+.back-link {
+  display: inline-block;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+  color: var(--accent-500);
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.header-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.title-group {
+  .page-title {
+    margin: 0;
+    font-size: 2rem;
+    font-weight: 800;
+  }
+
+  .client-id {
+    margin: 0.25rem 0 0;
+    font-size: 0.9rem;
+    font-family: monospace;
+    opacity: 0.5;
+  }
+}
+
+.details-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.card {
+  background: var(--background-300);
+  color: var(--text-950);
+  border-radius: 1rem;
+  padding: 1.5rem;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.section-header {
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  padding-bottom: 0.75rem;
+
+  h2 {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 700;
+  }
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.5rem;
+}
+
+.info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+
+  &.full-width {
+    grid-column: 1 / -1;
+  }
+
+  .label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    opacity: 0.6;
+  }
+
+  .value {
+    font-size: 1rem;
+
+    &.monospace {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 0.85rem;
+      background: rgba(0, 0, 0, 0.05);
+      padding: 0.2rem 0.4rem;
+      border-radius: 0.25rem;
+      word-break: break-all;
+    }
+  }
+}
+
+.groups-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.group-chip {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  background: var(--background-200);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 9999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-900);
+  text-decoration: none;
+  transition: background 0.2s;
+
+  &:hover {
+    background: var(--background-100);
+  }
+}
+
+.empty-text {
+  color: var(--text-500);
+  font-size: 0.9rem;
+  font-style: italic;
+}
+
+.state-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 3rem 1.5rem;
+  border-radius: 1rem;
+  background-color: var(--background-300);
+  color: var(--text-950);
+  text-align: center;
+}
+
+.state-label {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.state-text {
+  margin: 0;
+  font-size: 0.9rem;
+  opacity: 0.7;
+}
+
+.state-error {
+  border: 1px solid var(--accent-400);
+
+  .state-label {
+    color: var(--accent-500);
+  }
+}
+
+.spinner {
+  width: 2rem;
+  height: 2rem;
+  border: 3px solid rgba(0, 0, 0, 0.1);
+  border-top-color: var(--accent-500);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+</style>

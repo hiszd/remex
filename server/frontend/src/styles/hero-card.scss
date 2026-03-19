@@ -1,0 +1,119 @@
+.hero-card-link {
+  padding: 1rem;
+  text-decoration: none;
+  color: inherit;
+  display: block;
+  transition: transform 0.2s;
+
+  &:hover {
+    .hero-card {
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.5);
+    }
+
+    transform: translateY(-4px);
+    background-color: transparent;
+    color: transparent;
+  }
+}
+
+.hero-card {
+  border: 1px solid rgba(0 0 0 / 0);
+  border-radius: 1rem;
+  overflow: hidden;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+.hero-header {
+  padding: 1.5rem;
+  border-bottom: 1px solid rgba(0 0 0 / 0.1);
+
+  .hero-name {
+    margin: 0;
+    font-size: 2.25rem;
+    font-weight: 800;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+  }
+
+  .hero-id {
+    margin: 0.5rem 0 0;
+    font-size: 0.85rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    opacity: 0.5;
+  }
+}
+
+.hero-details {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  padding: 1.5rem;
+
+  @media (min-width: 768px) {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .detail {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+
+    &.full-width {
+      grid-column: span 1;
+
+      @media (min-width: 768px) {
+        grid-column: span 2;
+      }
+    }
+
+    .label {
+      margin: 0;
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      opacity: 0.5;
+    }
+
+    .value {
+      margin: 0;
+      font-size: 0.95rem;
+      line-height: 1.5;
+      word-break: break-all;
+
+      &.monospace {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: 0.85rem;
+        background: var(--background-100);
+        padding: 0.2rem 0.4rem;
+        border-radius: 0.25rem;
+      }
+
+      &.status-badge {
+        display: inline-block;
+        width: fit-content;
+        padding: 0.1rem 0.5rem;
+        border-radius: 9999px;
+        font-weight: 600;
+        font-size: 0.8rem;
+        background: var(--background-200);
+
+        &.active,
+        &.running {
+          background: var(--status-running-bg);
+          color: var(--status-running-text);
+        }
+
+        &.pending {
+          background: var(--status-pending-bg);
+          color: var(--status-pending-text);
+        }
+
+        &.failed {
+          background: var(--status-failed-bg);
+          color: var(--status-failed-text);
+        }
+      }
+    }
+  }
+}

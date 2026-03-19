@@ -1,6 +1,7 @@
 pub mod clients;
 pub mod executions;
 pub mod groups;
+pub mod job_status;
 pub mod jobs;
 pub mod logs;
 

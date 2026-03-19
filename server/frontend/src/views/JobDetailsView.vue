@@ -4,13 +4,21 @@ import { useRoute } from 'vue-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query';
 import {
   getJobById,
-  getClients,
+  getJobGroups,
+  getGroupClients,
+  getGroups,
   updateJob,
-  addClientsToJobs,
-  removeClientsFromJobs
+  updateJobGroups
 } from '@/client/index';
-import type { JobWithClients, UpdateJob } from '@/client/types.gen';
+import type { JobWithClients, UpdateJobSrv, JobWithGroups, ClientSrv, Group, UpdateJobGroupsForm } from '@/client/types.gen';
 import { formatDate } from '@/utils/date';
+import ClientTree from '@/components/ClientTree.vue';
+
+interface GroupWithClients {
+  id: string;
+  group_name: string;
+  clients: ClientSrv[];
+}
 
 const route = useRoute();
 const queryClient = useQueryClient();
@@ -26,24 +34,54 @@ const { data: job, isLoading: loadingJob, isError: jobError } = useQuery({
   }
 });
 
-// Fetch All Clients (for adding)
-const { data: allClients } = useQuery({
-  queryKey: ['clients'],
+// Fetch Groups for Job
+const { data: groups, isLoading: loadingGroups } = useQuery({
+  queryKey: ['job-groups', jobId],
   queryFn: async () => {
-    const { data, error } = await getClients();
-    if (error) throw error;
-    return data;
+    const { data, error } = await getJobGroups({ path: { id: jobId } });
+    if (error) return [];
+    return (data as JobWithGroups[]) || [];
   }
 });
 
+// Fetch all available groups for selection
+const { data: allGroups } = useQuery({
+  queryKey: ['groups'],
+  queryFn: async () => {
+    const { data, error } = await getGroups();
+    if (error) throw error;
+    return (data as Group[]) || [];
+  }
+});
+
+// Fetch clients for each group
+const { data: groupsWithClients } = useQuery({
+  queryKey: ['job-groups-clients', jobId],
+  queryFn: async () => {
+    if (!groups.value) return [];
+    const result: GroupWithClients[] = [];
+    for (const group of groups.value) {
+      const { data: clients } = await getGroupClients({ path: { group_id: group.id } });
+      result.push({
+        id: group.id,
+        group_name: group.group_name,
+        clients: (clients as ClientSrv[]) || [],
+      });
+    }
+    return result;
+  },
+  enabled: computed(() => (groups.value?.length ?? 0) > 0)
+});
+
 const isEditing = ref(false);
-const editForm = ref<UpdateJob>({
+const editForm = ref<UpdateJobSrv>({
   id: '',
   job_name: '',
   job_type: '',
   job_status: '',
   job_shell: ''
 });
+const selectedGroupIds = ref<string[]>([]);
 
 const startEditing = () => {
   if (job.value) {
@@ -54,54 +92,40 @@ const startEditing = () => {
       job_status: job.value.job_status,
       job_shell: job.value.job_shell
     };
+    selectedGroupIds.value = groups.value?.map(g => g.id) || [];
     isEditing.value = true;
   }
 };
 
 const updateMutation = useMutation({
-  mutationFn: async (updatedJob: UpdateJob) => {
+  mutationFn: async (updatedJob: UpdateJobSrv) => {
     const { data, error } = await updateJob({ body: updatedJob });
     if (error) throw error;
     return data;
   },
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: ['job', jobId] });
-    isEditing.value = false;
   }
 });
 
-const addClientMutation = useMutation({
-  mutationFn: async (clientId: string) => {
-    const { error } = await addClientsToJobs({
-      body: [{ job_id: jobId, client_id: clientId }]
+const updateGroupsMutation = useMutation({
+  mutationFn: async (groupIds: UpdateJobGroupsForm) => {
+    const { error } = await updateJobGroups({
+      path: { job_id: jobId },
+      body: groupIds
     });
     if (error) throw error;
   },
   onSuccess: () => {
-    queryClient.invalidateQueries({ queryKey: ['job', jobId] });
+    queryClient.invalidateQueries({ queryKey: ['job-groups', jobId] });
+    queryClient.invalidateQueries({ queryKey: ['job-groups-clients', jobId] });
   }
-});
-
-const removeClientMutation = useMutation({
-  mutationFn: async (clientId: string) => {
-    const { error } = await removeClientsFromJobs({
-      body: [{ job_id: jobId, client_id: clientId }]
-    });
-    if (error) throw error;
-  },
-  onSuccess: () => {
-    queryClient.invalidateQueries({ queryKey: ['job', jobId] });
-  }
-});
-
-const availableClients = computed(() => {
-  if (!allClients.value || !job.value) return [];
-  const assignedIds = new Set(job.value.clients.map(c => c.id));
-  return allClients.value.filter(c => !assignedIds.has(c.id));
 });
 
 const handleUpdate = () => {
   updateMutation.mutate(editForm.value);
+  updateGroupsMutation.mutate({ group_ids: selectedGroupIds.value });
+  isEditing.value = false;
 };
 </script>
 
@@ -198,33 +222,32 @@ const handleUpdate = () => {
         </div>
       </section>
 
-      <!-- Clients Assignment Section -->
-      <section class="clients-section card">
+      <!-- Group Assignment Section (only shown when editing) -->
+      <section v-if="isEditing" class="info-section card">
         <div class="section-header">
-          <h2>Assigned Clients</h2>
-          <div class="add-client">
-            <select v-if="availableClients.length"
-              @change="(e) => addClientMutation.mutate((e.target as HTMLSelectElement).value)" class="client-select">
-              <option value="" disabled selected>Add client...</option>
-              <option v-for="c in availableClients" :key="c.id" :value="c.id">
-                {{ c.client_name }}
-              </option>
-            </select>
+          <h2>Assigned Groups</h2>
+          <a href="/groups/new" target="_blank" class="create-link">+ Create New Group</a>
+        </div>
+        <div class="group-selector">
+          <div v-if="!allGroups || allGroups.length === 0" class="no-groups">
+            No groups available. <a href="/groups/new" target="_blank">Create a group</a> first.
+          </div>
+          <div v-else v-for="group in allGroups" :key="group.id" class="group-checkbox">
+            <input type="checkbox" :id="group.id" :value="group.id" v-model="selectedGroupIds" />
+            <label :for="group.id">
+              <span class="group-name">{{ group.group_name }}</span>
+              <span class="group-id">{{ group.id }}</span>
+            </label>
           </div>
         </div>
+      </section>
 
-        <div class="clients-list">
-          <div v-for="c in job.clients" :key="c.id" class="client-row">
-            <div class="client-info">
-              <span class="client-name">{{ c.client_name }}</span>
-              <span class="client-id">{{ c.id }}</span>
-            </div>
-            <button @click="removeClientMutation.mutate(c.id)" class="btn-remove" title="Remove client">
-              ✕
-            </button>
-          </div>
-          <p v-if="!job.clients.length" class="empty-text">No clients assigned to this job.</p>
+      <!-- Client Tree Section -->
+      <section v-if="!isEditing" class="client-tree-section card">
+        <div class="section-header">
+          <h2>Client Groups</h2>
         </div>
+        <ClientTree :groups="groupsWithClients || []" :job-id="jobId" />
       </section>
     </div>
   </div>
@@ -340,32 +363,32 @@ const handleUpdate = () => {
   border-radius: 9999px;
   font-weight: 600;
   font-size: 0.85rem;
-  background: rgba(0, 0, 0, 0.1);
+  background: var(--background-200);
 
   &.active,
   &.running {
-    background: #dcfce7;
-    color: #166534;
+    background: var(--status-running-bg);
+    color: var(--status-running-text);
   }
 
   &.pending {
-    background: #fef9c3;
-    color: #854d0e;
+    background: var(--status-pending-bg);
+    color: var(--status-pending-text);
   }
 
   &.completed {
-    background: #dcfce7;
-    color: #166534;
+    background: var(--status-completed-bg);
+    color: var(--status-completed-text);
   }
 
   &.failed {
-    background: #fee2e2;
-    color: #991b1b;
+    background: var(--status-failed-bg);
+    color: var(--status-failed-text);
   }
 }
 
 .command-box {
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--background-100);
   padding: 1rem;
   border-radius: 0.5rem;
   font-family: ui-monospace, monospace;
@@ -404,62 +427,90 @@ const handleUpdate = () => {
   }
 }
 
-.form-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.75rem;
+.create-link {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: normal;
+  opacity: 1;
+  color: var(--accent-500);
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+  }
 }
 
-/* Clients List */
-.clients-list {
+.group-selector {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 0.75rem;
+  background: var(--background-100);
+  border-radius: 0.4rem;
+  border: 1px solid rgba(0, 0, 0, 0.1);
 }
 
-.client-row {
+.group-checkbox {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 0.75rem 1rem;
-  background: white;
-  border-radius: 0.5rem;
-  border: 1px solid rgba(0, 0, 0, 0.05);
+  gap: 0.5rem;
+  padding: 0.35rem;
+  border-radius: 0.25rem;
 
-  .client-info {
+  &:hover {
+    background: rgba(0, 0, 0, 0.03);
+  }
+
+  input {
+    width: 1rem;
+    height: 1rem;
+    cursor: pointer;
+  }
+
+  label {
     display: flex;
     flex-direction: column;
+    cursor: pointer;
+    text-transform: none;
+    letter-spacing: normal;
+    opacity: 1;
 
-    .client-name {
+    .group-name {
       font-weight: 600;
+      font-size: 0.9rem;
     }
 
-    .client-id {
-      font-size: 0.75rem;
-      opacity: 0.5;
+    .group-id {
+      font-size: 0.7rem;
+      opacity: 0.4;
       font-family: monospace;
     }
   }
 }
 
-.btn-remove {
-  background: transparent;
-  border: none;
-  color: #ef4444;
-  font-size: 1.25rem;
-  cursor: pointer;
-  padding: 0.25rem;
-  border-radius: 0.25rem;
+.no-groups {
+  font-size: 0.85rem;
+  color: var(--text-500);
+  text-align: center;
+  padding: 0.75rem;
 
-  &:hover {
-    background: #fef2f2;
+  a {
+    color: var(--accent-500);
+    text-decoration: none;
+
+    &:hover {
+      text-decoration: underline;
+    }
   }
 }
 
-.client-select {
-  padding: 0.4rem;
-  border-radius: 0.4rem;
-  border: 1px solid rgba(0, 0, 0, 0.1);
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
 }
 
 /* Buttons */
@@ -497,6 +548,41 @@ const handleUpdate = () => {
   border-top-color: var(--accent-500);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
+}
+
+.spinner-small {
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid rgba(0, 0, 0, 0.1);
+  border-top-color: var(--accent-500);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.loading-text {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem;
+  color: var(--text-500);
+  font-size: 0.9rem;
+}
+
+.groups-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.group-chip {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  background: var(--background-200);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 9999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-900);
 }
 
 @keyframes spin {

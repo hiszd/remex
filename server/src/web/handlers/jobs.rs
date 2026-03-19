@@ -6,12 +6,20 @@ use actix_web::{
   Responder,
 };
 use diesel::prelude::*;
-use remex_core::db::model::server::{
-  clients::ClientSRV,
-  jobs::{
-    JobSRV,
-    NewJobSRV,
-    UpdateJobSRV,
+use remex_core::db::{
+  dal::{
+    job_status::ClientJobStatusMetadata,
+    jobs::Job,
+    SrvDbOperator,
+  },
+  model::server::{
+    clients::ClientSRV,
+    groups::GroupSRV,
+    jobs::{
+      JobSRV,
+      NewJobSRV,
+      UpdateJobSRV,
+    },
   },
 };
 use serde::{
@@ -34,6 +42,11 @@ pub struct CreateJobForm {
 pub struct JobClientAction {
   pub job_id: String,
   pub client_id: String,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct UpdateJobGroupsForm {
+  pub group_ids: Vec<String>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -133,37 +146,28 @@ pub async fn get_job_by_id(id: web::Path<String>) -> impl Responder {
   path = "/jobs/new",
   request_body = CreateJobForm,
   responses(
-    (status = 201, description = "Job created successfully", body = JobSRV),
+    (status = 201, description = "Job created successfully", body = Job),
   ),
 )]
 #[post("/jobs/new")]
 pub async fn create_job(form: web::Json<CreateJobForm>) -> impl Responder {
   use remex_core::db::{
     model::server::jobs_groups::NewJobGroupSRV,
-    schema::server::{
-      jobs,
-      jobs_groups,
-    },
+    schema::server::jobs_groups,
   };
   let mut pool = remex_core::db::establish_connection_postgres();
 
   let new_job_id = uuid::Uuid::now_v7().to_string();
-  let new_job = NewJobSRV {
-    id: new_job_id.clone(),
-    job_name: form.job_name.clone(),
-    job_type: form.job_type.clone(),
-    job_status: form.job_status.clone(),
-    job_status_message: None,
-    job_shell: form.job_shell.clone(),
-    job_command: form.job_command.clone(),
-    created_at: None,
-    updated_at: None,
-  };
+  let new_job: Job = Job::new(
+    new_job_id.clone(),
+    form.job_name.clone(),
+    form.job_type.clone(),
+    form.job_status.clone().into(),
+    form.job_shell.clone(),
+    form.job_command.clone(),
+  );
 
-  let job = diesel::insert_into(jobs::table)
-    .values(&new_job)
-    .get_result::<JobSRV>(&mut pool)
-    .unwrap();
+  new_job.create_srv(&mut pool).unwrap();
 
   if let Some(group_ids) = &form.group_ids {
     for gid in group_ids {
@@ -178,7 +182,7 @@ pub async fn create_job(form: web::Json<CreateJobForm>) -> impl Responder {
     }
   }
 
-  HttpResponse::Created().json(job)
+  HttpResponse::Created().json(new_job)
 }
 
 #[utoipa::path(
@@ -207,6 +211,69 @@ pub async fn update_job(job_update: web::Json<UpdateJobSRV>) -> impl Responder {
   } else {
     HttpResponse::NotFound().finish()
   }
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct JobGroupPath {
+  pub job_id: String,
+}
+
+#[utoipa::path(
+  post,
+  path = "/jobs/{job_id}/groups",
+  request_body = UpdateJobGroupsForm,
+  responses(
+    (status = 200, description = "Job groups updated successfully"),
+    (status = 404, description = "Job not found"),
+  ),
+  params(
+    ("job_id" = String, Path, description = "Job ID")
+  )
+)]
+#[post("/jobs/{job_id}/groups")]
+pub async fn update_job_groups(
+  path: web::Path<JobGroupPath>,
+  form: web::Json<UpdateJobGroupsForm>
+) -> impl Responder {
+  use remex_core::db::{
+    model::server::jobs_groups::NewJobGroupSRV,
+    schema::server::{
+      jobs,
+      jobs_groups,
+    },
+  };
+  let mut pool = remex_core::db::establish_connection_postgres();
+
+  let job_id = path.job_id.clone();
+
+  let job_exists = jobs::table
+    .filter(jobs::id.eq(&job_id))
+    .select(jobs::id)
+    .first::<String>(&mut pool)
+    .optional()
+    .unwrap()
+    .is_some();
+
+  if !job_exists {
+    return HttpResponse::NotFound().finish();
+  }
+
+  diesel::delete(jobs_groups::table.filter(jobs_groups::job_id.eq(&job_id)))
+    .execute(&mut pool)
+    .unwrap();
+
+  for group_id in &form.group_ids {
+    let new_job_group = NewJobGroupSRV {
+      job_id: job_id.clone(),
+      group_id: group_id.clone(),
+    };
+    diesel::insert_into(jobs_groups::table)
+      .values(&new_job_group)
+      .execute(&mut pool)
+      .unwrap();
+  }
+
+  HttpResponse::Ok().finish()
 }
 
 #[utoipa::path(
@@ -337,4 +404,136 @@ pub async fn remove_clients_from_jobs(actions: web::Json<Vec<JobClientAction>>) 
   }
 
   HttpResponse::Ok().finish()
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct ClientJobStatusResponse {
+  pub client_id: String,
+  pub client_name: String,
+  pub status: String,
+  pub latest_execution_id: Option<String>,
+  pub latest_execution_timestamp: Option<chrono::NaiveDateTime>,
+  pub execution_count: i64,
+}
+
+#[utoipa::path(
+  get,
+  path = "/jobs/{job_id}/client-statuses",
+  responses(
+    (status = 200, description = "Client statuses for job found successfully", body = [ClientJobStatusResponse]),
+    (status = 404, description = "Job not found"),
+  ),
+  params(
+    ("job_id" = String, Path, description = "Job ID")
+  )
+)]
+#[get("/jobs/{job_id}/client-statuses")]
+pub async fn get_job_client_statuses(id: web::Path<String>) -> impl Responder {
+  use remex_core::db::dal::job_status::get_client_job_status;
+  let mut pool = remex_core::db::establish_connection_postgres();
+
+  let job_id = id.into_inner();
+
+  let job_clients = remex_core::db::schema::server::clients::table
+    .inner_join(
+      remex_core::db::schema::server::groups_clients::table.on(
+        remex_core::db::schema::server::groups_clients::client_id
+          .eq(remex_core::db::schema::server::clients::id.nullable()),
+      ),
+    )
+    .inner_join(
+      remex_core::db::schema::server::jobs_groups::table.on(
+        remex_core::db::schema::server::jobs_groups::group_id
+          .eq(remex_core::db::schema::server::groups_clients::group_id),
+      ),
+    )
+    .filter(remex_core::db::schema::server::jobs_groups::job_id.eq(&job_id))
+    .select((
+      remex_core::db::schema::server::clients::id,
+      remex_core::db::schema::server::clients::client_name,
+    ))
+    .distinct()
+    .load::<(String, String)>(&mut pool)
+    .unwrap_or_default();
+
+  let mut response = Vec::new();
+  for (client_id, client_name) in job_clients {
+    let (status, metadata) = get_client_job_status(&mut pool, &client_id, &job_id).unwrap_or((
+      "pending".to_string(),
+      ClientJobStatusMetadata {
+        latest_execution_id: None,
+        latest_execution_timestamp: None,
+        execution_count: 0,
+      },
+    ));
+
+    response.push(ClientJobStatusResponse {
+      client_id,
+      client_name,
+      status,
+      latest_execution_id: metadata.latest_execution_id,
+      latest_execution_timestamp: metadata.latest_execution_timestamp,
+      execution_count: metadata.execution_count,
+    });
+  }
+
+  HttpResponse::Ok().json(response)
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct JobWithGroups {
+  pub id: String,
+  pub group_name: String,
+  pub created_at: chrono::NaiveDateTime,
+  pub updated_at: chrono::NaiveDateTime,
+}
+
+#[utoipa::path(
+  get,
+  path = "/jobs/{id}/groups",
+  responses(
+    (status = 200, description = "Groups for job found successfully", body = [JobWithGroups]),
+    (status = 404, description = "Job not found"),
+  ),
+  params(
+    ("id" = String, Path, description = "Job ID")
+  )
+)]
+#[get("/jobs/{id}/groups")]
+pub async fn get_job_groups(id: web::Path<String>) -> impl Responder {
+  use remex_core::db::schema::server::jobs_groups;
+  let mut pool = remex_core::db::establish_connection_postgres();
+
+  let job_id = id.into_inner();
+
+  let group_ids: Vec<String> = jobs_groups::table
+    .filter(jobs_groups::job_id.eq(&job_id))
+    .select(jobs_groups::group_id)
+    .load::<Option<String>>(&mut pool)
+    .unwrap()
+    .into_iter()
+    .flatten()
+    .collect();
+
+  let groups: Vec<remex_core::db::model::server::groups::GroupSRV> =
+    remex_core::db::schema::server::groups::table
+      .filter(
+        remex_core::db::schema::server::groups::id
+          .nullable()
+          .eq_any(group_ids),
+      )
+      .load::<remex_core::db::model::server::groups::GroupSRV>(&mut pool)
+      .unwrap_or_default();
+
+  let job_groups: Vec<JobWithGroups> = groups
+    .into_iter()
+    .map(|g| JobWithGroups {
+      id: g.id,
+      group_name: g.group_name,
+      created_at: g.created_at,
+      updated_at: g.updated_at,
+    })
+    .collect();
+
+  HttpResponse::Ok().json(job_groups)
 }

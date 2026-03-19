@@ -80,6 +80,28 @@ pub struct Job {
   pub updated_at: chrono::NaiveDateTime,
 }
 
+impl Job {
+  pub fn new(
+    id: String,
+    job_name: String,
+    job_type: String,
+    job_status: JobStatus,
+    job_shell: String,
+    job_command: String,
+  ) -> Self {
+    Job {
+      id,
+      job_name,
+      job_type,
+      job_status,
+      job_shell,
+      job_command,
+      created_at: chrono::Utc::now().naive_utc(),
+      updated_at: chrono::Utc::now().naive_utc(),
+    }
+  }
+}
+
 impl super::CltDbOperator for Job {
   fn create_clt(&self, conn: &mut diesel::SqliteConnection) -> Result<Self, diesel::result::Error> {
     use model::endpoint::jobs::{

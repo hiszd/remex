@@ -12,12 +12,22 @@ mod handlers;
   paths(
     handlers::clients::get_clients,
     handlers::clients::create_client,
+    handlers::clients::get_client_by_id,
     handlers::jobs::get_jobs,
     handlers::jobs::get_job_by_id,
     handlers::jobs::create_job,
     handlers::jobs::update_job,
+    handlers::jobs::update_job_groups,
     handlers::jobs::add_clients_to_jobs,
-    handlers::jobs::remove_clients_from_jobs
+    handlers::jobs::remove_clients_from_jobs,
+    handlers::jobs::get_job_client_statuses,
+    handlers::jobs::get_job_groups,
+    handlers::groups::get_groups,
+    handlers::groups::create_group,
+    handlers::groups::get_group_by_id,
+    handlers::groups::get_group_clients,
+    handlers::groups::get_group_jobs,
+    handlers::groups::get_group_job_status_handler
   ),
   components(schemas(
     remex_core::db::model::server::clients::ClientSRV,
@@ -26,7 +36,19 @@ mod handlers;
     remex_core::db::model::server::jobs::UpdateJobSRV,
     handlers::jobs::JobWithClients,
     handlers::jobs::CreateJobForm,
-    handlers::jobs::JobClientAction
+    handlers::jobs::JobClientAction,
+    handlers::jobs::UpdateJobGroupsForm,
+    handlers::jobs::JobGroupPath,
+    handlers::jobs::ClientJobStatusResponse,
+    handlers::jobs::JobWithGroups,
+    handlers::groups::Group,
+    handlers::groups::GroupWithClients,
+    handlers::groups::GroupJobStatusResponse,
+    handlers::groups::GroupPath,
+    handlers::groups::GroupJobPath,
+    handlers::groups::CreateGroupForm,
+    remex_core::db::dal::job_status::ClientStatusSummary,
+    remex_core::db::dal::job_status::GroupJobStatusMetadata
   ))
 )]
 struct ApiDoc;
@@ -60,12 +82,22 @@ pub fn start_web_server() -> actix_web::dev::Server {
       )
       .service(handlers::clients::get_clients)
       .service(handlers::clients::create_client)
+      .service(handlers::clients::get_client_by_id)
       .service(handlers::jobs::get_jobs)
       .service(handlers::jobs::get_job_by_id)
       .service(handlers::jobs::create_job)
       .service(handlers::jobs::update_job)
+      .service(handlers::jobs::update_job_groups)
       .service(handlers::jobs::add_clients_to_jobs)
       .service(handlers::jobs::remove_clients_from_jobs)
+      .service(handlers::jobs::get_job_client_statuses)
+      .service(handlers::jobs::get_job_groups)
+      .service(handlers::groups::get_groups)
+      .service(handlers::groups::create_group)
+      .service(handlers::groups::get_group_by_id)
+      .service(handlers::groups::get_group_clients)
+      .service(handlers::groups::get_group_jobs)
+      .service(handlers::groups::get_group_job_status_handler)
       .wrap(
         Cors::default()
           .allowed_origin("http://localhost:5173") // Your Vue dev URL

@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import { RouterView } from 'vue-router'
+import AppSidebar from '@/components/AppSidebar.vue'
 </script>
 
 <template>
-  <RouterView />
+  <div class="app-layout">
+    <AppSidebar />
+    <main class="main-content">
+      <RouterView />
+    </main>
+  </div>
 </template>
 
 <style lang="scss">
@@ -75,6 +81,20 @@ import { RouterView } from 'vue-router'
     --accent-900: #331900;
     --accent-950: #1a0c00;
 
+    /* status badge colors - light */
+    --status-pending-bg: #fef9c3;
+    --status-pending-text: #854d0e;
+    --status-running-bg: #dcfce7;
+    --status-running-text: #166534;
+    --status-completed-bg: #dcfce7;
+    --status-completed-text: #166534;
+    --status-failed-bg: #fee2e2;
+    --status-failed-text: #991b1b;
+
+    /* danger colors - light */
+    --danger-bg: #fee2e2;
+    --danger-text: #991b1b;
+
   }
 }
 
@@ -145,6 +165,20 @@ import { RouterView } from 'vue-router'
     --accent-800: #ffca99;
     --accent-900: #ffe5cc;
     --accent-950: #fff2e5;
+
+    /* status badge colors - dark */
+    --status-pending-bg: #422006;
+    --status-pending-text: #fbbf24;
+    --status-running-bg: #052e16;
+    --status-running-text: #22c55e;
+    --status-completed-bg: #052e16;
+    --status-completed-text: #22c55e;
+    --status-failed-bg: #450a0a;
+    --status-failed-text: #ef4444;
+
+    /* danger colors - dark */
+    --danger-bg: #450a0a;
+    --danger-text: #fca5a5;
 
   }
 }

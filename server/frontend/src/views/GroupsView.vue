@@ -1,48 +1,30 @@
 <script setup lang="ts">
-import { getClients, getGroups, type Client } from '@/client/index';
+import { getGroups, type Group } from '@/client/index';
 import { useQuery } from '@tanstack/vue-query';
-import Client1 from '@/components/Client1.vue';
+import GroupComponent from '@/components/Group.vue';
 
-interface ClientWithGroups extends Client {
-  groupIds?: string[];
-}
-
-const { data: clients, isLoading, isError, error } = useQuery({
-  queryKey: ['clients'],
-  queryFn: async () => {
-    const { data, error } = await getClients();
-    if (error) throw error;
-    return data as ClientWithGroups[];
-  },
-});
-
-const { data: allGroups } = useQuery({
+const { data: groups, isLoading, isError, error } = useQuery({
   queryKey: ['groups'],
   queryFn: async () => {
     const { data, error } = await getGroups();
-    if (error) return [];
-    return data || [];
+    if (error) throw error;
+    return data as Group[];
   },
 });
-
-const getClientGroups = (clientId: string): string[] => {
-  if (!allGroups.value) return [];
-  return [];
-};
 </script>
 
 <template>
   <div class="page">
     <header class="page-header">
-      <h1 class="page-title">Clients</h1>
-      <p class="page-subtitle" v-if="clients && clients.length > 0">
-        {{ clients.length }} registered {{ clients.length === 1 ? 'client' : 'clients' }}
+      <h1 class="page-title">Groups</h1>
+      <p class="page-subtitle" v-if="groups && groups.length > 0">
+        {{ groups.length }} {{ groups.length === 1 ? 'group' : 'groups' }}
       </p>
     </header>
 
     <div v-if="isLoading" class="state-card">
       <div class="spinner" />
-      <p class="state-text">Fetching clients from backend...</p>
+      <p class="state-text">Fetching groups from backend...</p>
     </div>
 
     <div v-else-if="isError" class="state-card state-error">
@@ -50,16 +32,16 @@ const getClientGroups = (clientId: string): string[] => {
       <p class="state-text">{{ error }}</p>
     </div>
 
-    <div v-else-if="!clients || clients.length === 0" class="state-card state-empty">
-      <p class="state-label">No clients yet</p>
-      <p class="state-text">Clients will appear here once they connect.</p>
+    <div v-else-if="!groups || groups.length === 0" class="state-card state-empty">
+      <p class="state-label">No groups yet</p>
+      <p class="state-text">Groups will appear here once they are created.</p>
     </div>
 
     <div v-else class="card-grid">
-      <Client1
-        v-for="client in clients"
-        :client="client"
-        :key="client.id"
+      <GroupComponent
+        v-for="group in groups"
+        :group="group"
+        :key="group.id"
       />
     </div>
   </div>
@@ -91,7 +73,6 @@ const getClientGroups = (clientId: string): string[] => {
   }
 }
 
-/* responsive card grid */
 .card-grid {
   display: flex;
   flex-direction: column;
@@ -99,7 +80,6 @@ const getClientGroups = (clientId: string): string[] => {
   width: 100%;
 }
 
-/* shared state card (loading / error / empty) */
 .state-card {
   display: flex;
   flex-direction: column;
@@ -137,7 +117,6 @@ const getClientGroups = (clientId: string): string[] => {
   border: 1px dashed var(--primary-400);
 }
 
-/* simple loading spinner */
 .spinner {
   width: 2rem;
   height: 2rem;

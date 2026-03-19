@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { getJobs } from '@/client/index';
+import { getJobs, type JobSrv } from '@/client/index';
 import { useQuery } from '@tanstack/vue-query';
 import JobComponent from '@/components/Job.vue';
 
@@ -8,7 +8,7 @@ const { data: jobs, isLoading, isError, error } = useQuery({
   queryFn: async () => {
     const { data, error } = await getJobs();
     if (error) throw error;
-    return data;
+    return data as JobSrv[];
   },
 });
 </script>
@@ -41,11 +41,9 @@ const { data: jobs, isLoading, isError, error } = useQuery({
     </div>
 
     <div v-else class="card-grid">
-      <JobComponent
-        v-for="job in jobs"
-        :job="job"
-        :key="job.id"
-      />
+      <div v-for="job in jobs" :key="job.id">
+        <JobComponent :job="job" />
+      </div>
     </div>
   </div>
 </template>
@@ -139,7 +137,9 @@ const { data: jobs, isLoading, isError, error } = useQuery({
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .btn-primary {
