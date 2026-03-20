@@ -12,15 +12,34 @@ use crate::db::{
   model,
   schema,
 };
-
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum JobType {}
+pub enum JobType {
+  Instant,
+  Scheduled(chrono::NaiveDateTime),
+  Recurring(chrono::NaiveDateTime, std::time::Duration),
+}
+
+impl From<String> for JobType {
+  fn from(s: String) -> Self {
+    match serde_json::from_str(&s) {
+      Ok(v) => v,
+      Err(e) => {
+        tracing::info!("Failed to parse job type: {}", s);
+        panic!("{}", e);
+      }
+    }
+  }
+}
+
+impl From<JobType> for String {
+  fn from(jt: JobType) -> Self { serde_json::to_string(&jt).unwrap() }
+}
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum JobStatus {
-  /// The job is created but not yet assigned to any client or is waiting for execution.
+  /// The job is waiting to be picked up for execution.
   Pending,
   /// The job is currently being executed by a client.
   Running,
@@ -37,31 +56,10 @@ pub enum JobStatus {
 }
 
 impl From<String> for JobStatus {
-  fn from(status: String) -> Self {
-    match status.as_str() {
-      "pending" => JobStatus::Pending,
-      "running" => JobStatus::Running,
-      "completed" => JobStatus::Completed,
-      "failed" => JobStatus::Failed("".to_string()),
-      "cancelled" => JobStatus::Cancelled,
-      "timed_out" => JobStatus::TimedOut,
-      "disabled" => JobStatus::Disabled,
-      _ => JobStatus::Pending,
-    }
-  }
+  fn from(status: String) -> Self { serde_json::from_str(&status).unwrap() }
 }
-impl Into<(String, Option<String>)> for JobStatus {
-  fn into(self) -> (String, Option<String>) {
-    match self {
-      JobStatus::Pending => ("pending".to_string(), None),
-      JobStatus::Running => ("running".to_string(), None),
-      JobStatus::Completed => ("completed".to_string(), None),
-      JobStatus::Failed(f) => ("failed".to_string(), Some(f)),
-      JobStatus::Cancelled => ("cancelled".to_string(), None),
-      JobStatus::TimedOut => ("timed_out".to_string(), None),
-      JobStatus::Disabled => ("disabled".to_string(), None),
-    }
-  }
+impl From<JobStatus> for String {
+  fn from(val: JobStatus) -> Self { serde_json::to_string(&val).unwrap() }
 }
 
 // This is the job object that we will use to handle data being sent between the server and
@@ -72,7 +70,7 @@ impl Into<(String, Option<String>)> for JobStatus {
 pub struct Job {
   pub id: String,
   pub job_name: String,
-  pub job_type: String,
+  pub job_type: JobType,
   pub job_status: JobStatus,
   pub job_shell: String,
   pub job_command: String,
@@ -84,7 +82,7 @@ impl Job {
   pub fn new(
     id: String,
     job_name: String,
-    job_type: String,
+    job_type: JobType,
     job_status: JobStatus,
     job_shell: String,
     job_command: String,
@@ -235,7 +233,7 @@ impl From<model::server::jobs::JobSRV> for Job {
     Job {
       id: job.id,
       job_name: job.job_name,
-      job_type: job.job_type,
+      job_type: job.job_type.into(),
       job_status: job.job_status.into(),
       job_shell: job.job_shell,
       job_command: job.job_command,
@@ -249,7 +247,7 @@ impl From<model::endpoint::jobs::JobCLT> for Job {
     Job {
       id: job.id,
       job_name: job.job_name,
-      job_type: job.job_type,
+      job_type: job.job_type.into(),
       job_status: job.job_status.into(),
       job_shell: job.job_shell,
       job_command: job.job_command,

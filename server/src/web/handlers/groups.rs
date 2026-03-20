@@ -6,22 +6,23 @@ use actix_web::{
   Responder,
 };
 use diesel::prelude::*;
-use remex_core::db::{
-  dal::job_status::{
-    get_group_job_status,
-    ClientStatusSummary,
-  },
-  model::server::{
-    clients::ClientSRV,
-    groups::GroupSRV,
-    jobs::JobSRV,
-  },
+use remex_core::db::model::server::{
+  clients::ClientSRV,
+  groups::GroupSRV,
+  jobs::JobSRV,
 };
 use serde::{
   Deserialize,
   Serialize,
 };
 use utoipa::ToSchema;
+
+use crate::web::handlers::jobs::data_gathering::{
+  get_group_job_status,
+  ClientStatusSummary,
+};
+
+pub mod data_gathering;
 
 #[derive(Deserialize, ToSchema)]
 pub struct CreateGroupForm {
@@ -106,6 +107,8 @@ pub async fn create_group(form: web::Json<CreateGroupForm>) -> impl Responder {
   let new_group = NewGroupSRV {
     id: uuid::Uuid::now_v7().to_string(),
     group_name: form.group_name.clone(),
+    created_at: None,
+    updated_at: None,
   };
 
   let group = diesel::insert_into(groups::table)

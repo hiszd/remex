@@ -1,14 +1,13 @@
 use diesel::prelude::*;
+use remex_core::db::{
+  model::server::executions::ExecutionSRV,
+  schema::server::groups_clients,
+};
 use serde::{
   Deserialize,
   Serialize,
 };
 use utoipa::ToSchema;
-
-use crate::db::{
-  model::server::executions::ExecutionSRV,
-  schema::server::groups_clients,
-};
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ClientJobStatusMetadata {
@@ -38,7 +37,7 @@ pub fn get_client_job_status(
   client_id: &str,
   job_id: &str,
 ) -> Result<(String, ClientJobStatusMetadata), diesel::result::Error> {
-  use crate::db::schema::server::executions;
+  use remex_core::db::schema::server::executions;
 
   let latest_execution: Option<ExecutionSRV> = executions::table
     .filter(executions::client_id.eq(client_id))
@@ -83,7 +82,7 @@ pub fn get_client_job_status_for_job(
   conn: &mut PgConnection,
   job_id: &str,
 ) -> Result<Vec<(String, String, ClientJobStatusMetadata)>, diesel::result::Error> {
-  use crate::db::schema::server::{
+  use remex_core::db::schema::server::{
     clients,
     jobs_groups,
   };
@@ -110,7 +109,7 @@ pub fn get_group_job_status(
   group_id: &str,
   job_id: &str,
 ) -> Result<(String, GroupJobStatusMetadata), diesel::result::Error> {
-  use crate::db::schema::server::clients;
+  use remex_core::db::schema::server::clients;
 
   let group_clients: Vec<String> = groups_clients::table
     .filter(groups_clients::group_id.eq(group_id))

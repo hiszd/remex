@@ -5,6 +5,7 @@ use serde::{
 };
 
 use crate::db::{
+  dal::executions::Execution,
   model::endpoint as model,
   schema::endpoint as schema,
 };
@@ -23,6 +24,20 @@ pub struct ExecutionCLT {
   pub execution_result: Option<String>,
   pub created_at: chrono::NaiveDateTime,
   pub updated_at: chrono::NaiveDateTime,
+}
+
+impl From<Execution> for ExecutionCLT {
+  fn from(execution: Execution) -> Self {
+    ExecutionCLT {
+      id: execution.id,
+      job_id: execution.job_id,
+      client_id: execution.client_id,
+      executed_at: execution.executed_at,
+      execution_result: execution.execution_result,
+      created_at: execution.created_at,
+      updated_at: execution.updated_at,
+    }
+  }
 }
 
 #[derive(Queryable, Insertable, Serialize, Deserialize)]
@@ -50,6 +65,19 @@ impl From<ExecutionCLT> for NewExecutionCLT {
   }
 }
 
+impl From<Execution> for NewExecutionCLT {
+  fn from(execution: Execution) -> Self {
+    NewExecutionCLT {
+      job_id: execution.job_id,
+      client_id: execution.client_id,
+      executed_at: execution.executed_at,
+      execution_result: execution.execution_result,
+      created_at: Some(execution.created_at),
+      updated_at: Some(execution.updated_at),
+    }
+  }
+}
+
 #[derive(Deserialize, AsChangeset)]
 #[diesel(table_name = schema::executions)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
@@ -63,6 +91,50 @@ pub struct UpdateExecutionCLT {
 impl From<ExecutionCLT> for UpdateExecutionCLT {
   fn from(job: ExecutionCLT) -> Self {
     UpdateExecutionCLT {
+      job_id: job.job_id,
+      client_id: Some(job.client_id),
+      executed_at: job.executed_at,
+      execution_result: job.execution_result,
+    }
+  }
+}
+
+impl From<Execution> for UpdateExecutionCLT {
+  fn from(job: Execution) -> Self {
+    UpdateExecutionCLT {
+      job_id: job.job_id,
+      client_id: Some(job.client_id),
+      executed_at: job.executed_at,
+      execution_result: job.execution_result,
+    }
+  }
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize, AsChangeset)]
+#[diesel(table_name = schema::executions)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct UpsertExecutionCLT {
+  job_id: Option<String>,
+  client_id: Option<String>,
+  executed_at: Option<chrono::NaiveDateTime>,
+  execution_result: Option<String>,
+}
+
+impl From<ExecutionCLT> for UpsertExecutionCLT {
+  fn from(job: ExecutionCLT) -> Self {
+    UpsertExecutionCLT {
+      job_id: job.job_id,
+      client_id: Some(job.client_id),
+      executed_at: job.executed_at,
+      execution_result: job.execution_result,
+    }
+  }
+}
+
+impl From<Execution> for UpsertExecutionCLT {
+  fn from(job: Execution) -> Self {
+    UpsertExecutionCLT {
       job_id: job.job_id,
       client_id: Some(job.client_id),
       executed_at: job.executed_at,

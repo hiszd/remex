@@ -5,7 +5,6 @@ CREATE TABLE jobs (
     job_name TEXT NOT NULL,
     job_type TEXT NOT NULL,
     job_status TEXT NOT NULL,
-    job_status_message TEXT,
     job_shell TEXT NOT NULL,
     job_command TEXT NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,

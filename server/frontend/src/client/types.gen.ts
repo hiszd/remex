@@ -51,12 +51,14 @@ export type CreateGroupForm = {
 };
 
 export type CreateJobForm = {
+    frequency?: string | null;
     group_ids?: Array<string> | null;
     job_command: string;
     job_name: string;
     job_shell: string;
-    job_status: string;
+    job_status: JobStatus;
     job_type: string;
+    scheduled_at?: string | null;
 };
 
 export type Group = {
@@ -106,12 +108,16 @@ export type Job = {
     job_name: string;
     job_shell: string;
     job_status: JobStatus;
-    job_type: string;
+    job_type: JobType;
     updated_at: string;
 };
 
 export type JobClientAction = {
     client_id: string;
+    job_id: string;
+};
+
+export type JobGroupPath = {
     job_id: string;
 };
 
@@ -122,7 +128,6 @@ export type JobSrv = {
     job_name: string;
     job_shell: string;
     job_status: string;
-    job_status_message?: string | null;
     job_type: string;
     updated_at: string;
 };
@@ -133,6 +138,19 @@ export type JobStatus = 'pending' | 'running' | 'completed' | {
      */
     failed: string;
 } | 'cancelled' | 'timed_out' | 'disabled';
+
+export type JobType = 'instant' | {
+    scheduled: string;
+} | {
+    recurring: [
+        {
+            [key: string]: unknown;
+        },
+        {
+            [key: string]: unknown;
+        }
+    ];
+};
 
 export type JobWithClients = JobSrv & {
     clients: Array<ClientSrv>;
@@ -145,6 +163,10 @@ export type JobWithGroups = {
     updated_at: string;
 };
 
+export type UpdateJobGroupsForm = {
+    group_ids: Array<string>;
+};
+
 export type UpdateJobSrv = {
     created_at?: string | null;
     id: string;
@@ -152,13 +174,8 @@ export type UpdateJobSrv = {
     job_name?: string | null;
     job_shell?: string | null;
     job_status?: string | null;
-    job_status_message?: string | null;
     job_type?: string | null;
     updated_at?: string | null;
-};
-
-export type UpdateJobGroupsForm = {
-    group_ids: Array<string>;
 };
 
 export type GetClientsData = {
@@ -237,6 +254,22 @@ export type GetGroupsResponses = {
 
 export type GetGroupsResponse = GetGroupsResponses[keyof GetGroupsResponses];
 
+export type CreateGroupData = {
+    body: CreateGroupForm;
+    path?: never;
+    query?: never;
+    url: '/groups/new';
+};
+
+export type CreateGroupResponses = {
+    /**
+     * Group created successfully
+     */
+    201: Group;
+};
+
+export type CreateGroupResponse = CreateGroupResponses[keyof CreateGroupResponses];
+
 export type GetGroupByIdData = {
     body?: never;
     path: {
@@ -264,22 +297,6 @@ export type GetGroupByIdResponses = {
 };
 
 export type GetGroupByIdResponse = GetGroupByIdResponses[keyof GetGroupByIdResponses];
-
-export type CreateGroupData = {
-    body: CreateGroupForm;
-    path?: never;
-    query?: never;
-    url: '/groups/new';
-};
-
-export type CreateGroupResponses = {
-    /**
-     * Group created successfully
-     */
-    201: Group;
-};
-
-export type CreateGroupResponse = CreateGroupResponses[keyof CreateGroupResponses];
 
 export type GetGroupClientsData = {
     body?: never;
@@ -452,31 +469,33 @@ export type UpdateJobResponses = {
 
 export type UpdateJobResponse = UpdateJobResponses[keyof UpdateJobResponses];
 
-export type UpdateJobGroupsData = {
-    body: UpdateJobGroupsForm;
+export type DeleteJobData = {
+    body?: never;
     path: {
         /**
          * Job ID
          */
-        job_id: string;
+        id: string;
     };
     query?: never;
-    url: '/jobs/{job_id}/groups';
+    url: '/jobs/{id}';
 };
 
-export type UpdateJobGroupsErrors = {
+export type DeleteJobErrors = {
     /**
      * Job not found
      */
     404: unknown;
 };
 
-export type UpdateJobGroupsResponses = {
+export type DeleteJobResponses = {
     /**
-     * Job groups updated successfully
+     * Job deleted successfully
      */
-    200: unknown;
+    204: void;
 };
+
+export type DeleteJobResponse = DeleteJobResponses[keyof DeleteJobResponses];
 
 export type GetJobByIdData = {
     body?: never;
@@ -561,3 +580,29 @@ export type GetJobClientStatusesResponses = {
 };
 
 export type GetJobClientStatusesResponse = GetJobClientStatusesResponses[keyof GetJobClientStatusesResponses];
+
+export type UpdateJobGroupsData = {
+    body: UpdateJobGroupsForm;
+    path: {
+        /**
+         * Job ID
+         */
+        job_id: string;
+    };
+    query?: never;
+    url: '/jobs/{job_id}/groups';
+};
+
+export type UpdateJobGroupsErrors = {
+    /**
+     * Job not found
+     */
+    404: unknown;
+};
+
+export type UpdateJobGroupsResponses = {
+    /**
+     * Job groups updated successfully
+     */
+    200: unknown;
+};

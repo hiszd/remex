@@ -23,7 +23,6 @@ pub struct JobCLT {
   pub job_name: String,
   pub job_type: String,
   pub job_status: String,
-  pub job_status_message: Option<String>,
   pub job_shell: String,
   pub job_command: String,
   pub created_at: chrono::NaiveDateTime,
@@ -32,13 +31,11 @@ pub struct JobCLT {
 
 impl From<Job> for JobCLT {
   fn from(job: Job) -> Self {
-    let (job_status, job_status_message): (String, Option<String>) = job.job_status.into();
     JobCLT {
       id: job.id,
       job_name: job.job_name,
-      job_type: job.job_type,
-      job_status,
-      job_status_message,
+      job_type: job.job_type.into(),
+      job_status: job.job_status.into(),
       job_shell: job.job_shell,
       job_command: job.job_command,
       created_at: job.created_at,
@@ -55,7 +52,6 @@ pub struct NewJobCLT {
   pub job_name: String,
   pub job_type: String,
   pub job_status: String,
-  pub job_status_message: Option<String>,
   pub job_shell: String,
   pub job_command: String,
   pub created_at: Option<chrono::NaiveDateTime>,
@@ -69,7 +65,6 @@ impl From<JobCLT> for NewJobCLT {
       job_name: job.job_name,
       job_type: job.job_type,
       job_status: job.job_status,
-      job_status_message: job.job_status_message,
       job_shell: job.job_shell,
       job_command: job.job_command,
       created_at: Some(job.created_at),
@@ -80,13 +75,11 @@ impl From<JobCLT> for NewJobCLT {
 
 impl From<Job> for NewJobCLT {
   fn from(job: Job) -> Self {
-    let (job_status, job_status_message): (String, Option<String>) = job.job_status.into();
     NewJobCLT {
       id: job.id,
       job_name: job.job_name,
-      job_type: job.job_type,
-      job_status,
-      job_status_message,
+      job_type: job.job_type.into(),
+      job_status: job.job_status.into(),
       job_shell: job.job_shell,
       job_command: job.job_command,
       created_at: Some(job.created_at),
@@ -103,7 +96,6 @@ pub struct UpdateJobCLT {
   pub job_name: Option<String>,
   pub job_type: Option<String>,
   pub job_status: Option<String>,
-  pub job_status_message: Option<String>,
   pub job_shell: Option<String>,
   pub job_command: Option<String>,
   pub created_at: Option<chrono::NaiveDateTime>,
@@ -116,7 +108,6 @@ impl From<JobCLT> for UpdateJobCLT {
       job_name: Some(job.job_name),
       job_type: Some(job.job_type),
       job_status: Some(job.job_status),
-      job_status_message: job.job_status_message,
       job_shell: Some(job.job_shell),
       job_command: Some(job.job_command),
       created_at: Some(job.created_at),
@@ -127,12 +118,10 @@ impl From<JobCLT> for UpdateJobCLT {
 
 impl From<Job> for UpdateJobCLT {
   fn from(job: Job) -> Self {
-    let (job_status, job_status_message): (String, Option<String>) = job.job_status.into();
     UpdateJobCLT {
       job_name: Some(job.job_name),
-      job_type: Some(job.job_type),
-      job_status: Some(job_status),
-      job_status_message,
+      job_type: Some(job.job_type.into()),
+      job_status: Some(job.job_status.into()),
       job_shell: Some(job.job_shell),
       job_command: Some(job.job_command),
       created_at: Some(job.created_at),
@@ -149,20 +138,18 @@ pub struct UpsertJobCLT {
   pub job_name: Option<String>,
   pub job_type: Option<String>,
   pub job_status: Option<String>,
-  pub job_status_message: Option<String>,
   pub job_shell: Option<String>,
   pub job_command: Option<String>,
   pub created_at: Option<chrono::NaiveDateTime>,
   pub updated_at: Option<chrono::NaiveDateTime>,
 }
+
 impl From<Job> for UpsertJobCLT {
   fn from(job: Job) -> Self {
-    let (job_status, job_status_message): (String, Option<String>) = job.job_status.into();
     UpsertJobCLT {
       job_name: Some(job.job_name),
-      job_type: Some(job.job_type),
-      job_status: Some(job_status),
-      job_status_message,
+      job_type: Some(job.job_type.into()),
+      job_status: Some(job.job_status.into()),
       job_shell: Some(job.job_shell),
       job_command: Some(job.job_command),
       created_at: Some(job.created_at),

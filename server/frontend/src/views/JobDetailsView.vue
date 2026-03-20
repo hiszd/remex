@@ -1,18 +1,21 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query';
 import {
   getJobById,
   getJobGroups,
+  getJobClientStatuses,
   getGroupClients,
   getGroups,
   updateJob,
-  updateJobGroups
+  updateJobGroups,
+  deleteJob
 } from '@/client/index';
-import type { JobWithClients, UpdateJobSrv, JobWithGroups, ClientSrv, Group, UpdateJobGroupsForm } from '@/client/types.gen';
+import type { JobWithClients, UpdateJobSrv, JobWithGroups, ClientSrv, Group, UpdateJobGroupsForm, ClientJobStatusResponse } from '@/client/types.gen';
 import { formatDate } from '@/utils/date';
 import ClientTree from '@/components/ClientTree.vue';
+import ConfirmationModal from '@/components/ConfirmationModal.vue';
 
 interface GroupWithClients {
   id: string;
@@ -21,8 +24,11 @@ interface GroupWithClients {
 }
 
 const route = useRoute();
+const router = useRouter();
 const queryClient = useQueryClient();
 const jobId = route.params.id as string;
+
+const showDeleteModal = ref(false);
 
 // Fetch Job Details
 const { data: job, isLoading: loadingJob, isError: jobError } = useQuery({
@@ -35,7 +41,7 @@ const { data: job, isLoading: loadingJob, isError: jobError } = useQuery({
 });
 
 // Fetch Groups for Job
-const { data: groups, isLoading: loadingGroups } = useQuery({
+const { data: groups } = useQuery({
   queryKey: ['job-groups', jobId],
   queryFn: async () => {
     const { data, error } = await getJobGroups({ path: { id: jobId } });
@@ -73,26 +79,102 @@ const { data: groupsWithClients } = useQuery({
   enabled: computed(() => (groups.value?.length ?? 0) > 0)
 });
 
+const { data: clientStatuses, isLoading: loadingClientStatuses } = useQuery({
+  queryKey: ['job-client-statuses', jobId],
+  queryFn: async () => {
+    const { data, error } = await getJobClientStatuses({ path: { job_id: jobId } });
+    if (error) return [];
+    return (data as ClientJobStatusResponse[]) || [];
+  }
+});
+
 const isEditing = ref(false);
-const editForm = ref<UpdateJobSrv>({
+const showScheduleWarning = ref(false);
+const editForm = ref<UpdateJobSrv & { 
+  scheduled_at: string | null; 
+  frequency_number: number; 
+  frequency_unit: string 
+}>({
   id: '',
   job_name: '',
   job_type: '',
   job_status: '',
-  job_shell: ''
+  job_shell: '',
+  job_command: '',
+  scheduled_at: null,
+  frequency_number: 1,
+  frequency_unit: 'hours'
 });
 const selectedGroupIds = ref<string[]>([]);
 
+const parseIso8601ToNumberUnit = (iso: string | null): { frequency_number: number; frequency_unit: string } | null => {
+  if (!iso) return null;
+  const numMatch = iso.match(/\d+/);
+  const num = numMatch ? parseInt(numMatch[0]) : 1;
+  if (iso.includes('H')) return { frequency_number: num, frequency_unit: 'hours' };
+  if (iso.includes('D')) return { frequency_number: num, frequency_unit: 'days' };
+  if (iso.includes('W')) return { frequency_number: num, frequency_unit: 'weeks' };
+  if (iso.includes('M')) return { frequency_number: num, frequency_unit: 'minutes' };
+  return null;
+};
+
+const convertToIso8601 = (num: number, unit: string): string => {
+  if (unit === 'minutes') return `PT${num}M`;
+  if (unit === 'hours') return `PT${num}H`;
+  if (unit === 'days') return `P${num}D`;
+  if (unit === 'weeks') return `P${num}W`;
+  return `PT${num}H`;
+};
+
+const parsedJobType = computed(() => {
+  if (!job.value) return { type: 'instant', scheduledAt: null, frequency_number: null as number | null, frequency_unit: null as string | null };
+  const typeStr = job.value.job_type;
+  if (typeStr === 'instant') return { type: 'instant', scheduledAt: null, frequency_number: null, frequency_unit: null };
+  if (typeStr.startsWith('scheduled(')) {
+    const match = typeStr.match(/scheduled\("([^"]+)"\)/);
+    return { type: 'scheduled', scheduledAt: match?.[1] || null, frequency_number: null, frequency_unit: null };
+  }
+  if (typeStr.startsWith('recurring(')) {
+    const match = typeStr.match(/recurring\("([^"]+)","([^"]+)"\)/);
+    const freq = match?.[2] || null;
+    const parsedFreq = parseIso8601ToNumberUnit(freq);
+    return { 
+      type: 'recurring', 
+      scheduledAt: match?.[1] || null, 
+      frequency_number: parsedFreq?.frequency_number ?? 1,
+      frequency_unit: parsedFreq?.frequency_unit ?? 'hours'
+    };
+  }
+  return { type: 'instant', scheduledAt: null, frequency_number: null, frequency_unit: null };
+});
+
+const checkScheduleWarning = (scheduledAt: string | null) => {
+  if (!scheduledAt) {
+    showScheduleWarning.value = false;
+    return;
+  }
+  const scheduledTime = new Date(scheduledAt).getTime();
+  const now = Date.now();
+  const oneHourMs = 60 * 60 * 1000;
+  showScheduleWarning.value = scheduledTime - now < oneHourMs;
+};
+
 const startEditing = () => {
   if (job.value) {
+    const parsed = parsedJobType.value;
     editForm.value = {
       id: job.value.id,
       job_name: job.value.job_name,
-      job_type: job.value.job_type,
+      job_type: parsed.type,
       job_status: job.value.job_status,
-      job_shell: job.value.job_shell
+      job_shell: job.value.job_shell,
+      job_command: job.value.job_command,
+      scheduled_at: parsed.scheduledAt,
+      frequency_number: parsed.frequency_number ?? 1,
+      frequency_unit: parsed.frequency_unit ?? 'hours'
     };
     selectedGroupIds.value = groups.value?.map(g => g.id) || [];
+    checkScheduleWarning(parsed.scheduledAt);
     isEditing.value = true;
   }
 };
@@ -122,8 +204,37 @@ const updateGroupsMutation = useMutation({
   }
 });
 
+const deleteMutation = useMutation({
+  mutationFn: async () => {
+    const { error } = await deleteJob({ path: { id: jobId } });
+    if (error) throw error;
+  },
+  onSuccess: () => {
+    router.push('/jobs');
+  }
+});
+
+const handleDelete = () => {
+  deleteMutation.mutate();
+};
+
 const handleUpdate = () => {
-  updateMutation.mutate(editForm.value);
+  checkScheduleWarning(editForm.value.scheduled_at);
+  
+  let finalJobType = editForm.value.job_type;
+  if (editForm.value.job_type === 'scheduled' && editForm.value.scheduled_at) {
+    finalJobType = `scheduled("${editForm.value.scheduled_at}")`;
+  } else if (editForm.value.job_type === 'recurring' && editForm.value.scheduled_at) {
+    const freqIso = convertToIso8601(editForm.value.frequency_number, editForm.value.frequency_unit);
+    finalJobType = `recurring("${editForm.value.scheduled_at}","${freqIso}")`;
+  }
+  
+  const { frequency_number, frequency_unit, ...rest } = editForm.value;
+  const updatePayload = {
+    ...rest,
+    job_type: finalJobType
+  };
+  updateMutation.mutate(updatePayload as UpdateJobSrv);
   updateGroupsMutation.mutate({ group_ids: selectedGroupIds.value });
   isEditing.value = false;
 };
@@ -138,7 +249,10 @@ const handleUpdate = () => {
           <h1 class="page-title">{{ job.job_name }}</h1>
           <p class="job-id">{{ job.id }}</p>
         </div>
-        <button v-if="job && !isEditing" @click="startEditing" class="btn-secondary">Edit Job</button>
+        <div class="header-actions">
+          <button v-if="job && !isEditing" @click="startEditing" class="btn-secondary">Edit Job</button>
+          <button v-if="job && !isEditing" @click="showDeleteModal = true" class="btn-danger">Delete Job</button>
+        </div>
       </div>
     </header>
 
@@ -168,9 +282,9 @@ const handleUpdate = () => {
             <div class="form-group">
               <label>Type</label>
               <select v-model="editForm.job_type">
-                <option value="Shell">Shell</option>
-                <option value="Update">Update</option>
-                <option value="Internal">Internal</option>
+                <option value="instant">Instant</option>
+                <option value="scheduled">Scheduled</option>
+                <option value="recurring">Recurring</option>
               </select>
             </div>
             <div class="form-group">
@@ -185,9 +299,41 @@ const handleUpdate = () => {
             </div>
           </div>
           <div class="form-group">
-            <label>Shell Command</label>
-            <textarea v-model="editForm.job_shell" rows="4" required></textarea>
+            <label>Shell</label>
+            <input type="text" v-model="editForm.job_shell" required />
           </div>
+          <div class="form-group">
+            <label>Command</label>
+            <textarea v-model="editForm.job_command" rows="4" required></textarea>
+          </div>
+
+          <template v-if="editForm.job_type === 'scheduled' || editForm.job_type === 'recurring'">
+            <div class="form-group">
+              <label>Scheduled Time</label>
+              <input type="datetime-local" v-model="editForm.scheduled_at" required />
+              <span class="field-desc">Format: YYYY-MM-DDTHH:MM:SS</span>
+            </div>
+          </template>
+
+          <template v-if="editForm.job_type === 'recurring'">
+            <div class="form-group">
+              <label>Repeat Every</label>
+              <div class="form-row-inline">
+                <input type="number" v-model="editForm.frequency_number" min="1" required />
+                <select v-model="editForm.frequency_unit">
+                  <option value="minutes">Minutes</option>
+                  <option value="hours">Hours</option>
+                  <option value="days">Days</option>
+                  <option value="weeks">Weeks</option>
+                </select>
+              </div>
+            </div>
+          </template>
+
+          <div v-if="showScheduleWarning" class="warning-banner">
+            <strong>Warning:</strong> This job is scheduled less than 1 hour from now. The client may execute the job before this change takes effect.
+          </div>
+
           <div class="form-actions">
             <button type="button" @click="isEditing = false" class="btn-ghost">Cancel</button>
             <button type="submit" class="btn-primary" :disabled="updateMutation.isPending.value">
@@ -204,8 +350,20 @@ const handleUpdate = () => {
             </div>
             <div class="info-item">
               <span class="label">Type</span>
-              <span class="value">{{ job.job_type }}</span>
+              <span class="value">{{ parsedJobType.type }}</span>
             </div>
+            <template v-if="parsedJobType.type !== 'instant'">
+              <div class="info-item">
+                <span class="label">Scheduled</span>
+                <span class="value">{{ parsedJobType.scheduledAt }}</span>
+              </div>
+              <template v-if="parsedJobType.type === 'recurring'">
+                <div class="info-item">
+                  <span class="label">Frequency</span>
+                  <span class="value">Every {{ parsedJobType.frequency_number }} {{ parsedJobType.frequency_unit }}</span>
+                </div>
+              </template>
+            </template>
             <div class="info-item">
               <span class="label">Created At</span>
               <span class="value">{{ formatDate(job.created_at) }}</span>
@@ -215,9 +373,13 @@ const handleUpdate = () => {
               <span class="value">{{ formatDate(job.updated_at) }}</span>
             </div>
           </div>
-          <div class="info-item full-width">
-            <span class="label">Shell Command</span>
+          <div class="info-item">
+            <span class="label">Shell</span>
             <pre class="command-box">{{ job.job_shell }}</pre>
+          </div>
+          <div class="info-item full-width">
+            <span class="label">Command</span>
+            <pre class="command-box">{{ job.job_command }}</pre>
           </div>
         </div>
       </section>
@@ -250,6 +412,10 @@ const handleUpdate = () => {
         <ClientTree :groups="groupsWithClients || []" :job-id="jobId" />
       </section>
     </div>
+
+    <ConfirmationModal v-if="showDeleteModal" title="Delete Job"
+      message="Are you sure you want to delete this job? This action cannot be undone." confirm-text="Delete"
+      variant="danger" @confirm="handleDelete" @cancel="showDeleteModal = false" />
   </div>
 </template>
 
@@ -281,6 +447,11 @@ const handleUpdate = () => {
   justify-content: space-between;
   align-items: flex-start;
   gap: 1rem;
+}
+
+.header-actions {
+  display: flex;
+  gap: 0.75rem;
 }
 
 .title-group {
@@ -418,13 +589,53 @@ const handleUpdate = () => {
   }
 
   input,
+  input[type="datetime-local"],
   select,
   textarea {
     padding: 0.6rem;
     border-radius: 0.4rem;
     border: 1px solid rgba(0, 0, 0, 0.1);
+    background: var(--background-800);
     font-size: 0.95rem;
   }
+}
+
+.form-row-inline {
+  display: flex;
+  gap: 0.5rem;
+
+  input,
+  select {
+    padding: 0.6rem;
+    border-radius: 0.4rem;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    background: var(--background-800);
+    font-size: 0.95rem;
+    color: var(--text-950);
+  }
+
+  input[type="number"] {
+    width: 80px;
+    -webkit-inner-spin-button,
+    -webkit-outer-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+    -moz-appearance: textfield;
+  }
+
+  select {
+    flex: 1;
+  }
+}
+
+input[type="datetime-local"] {
+  padding: 0.6rem;
+  border-radius: 0.4rem;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: var(--background-800);
+  font-size: 0.95rem;
+  color: var(--text-950);
 }
 
 .create-link {
@@ -539,6 +750,21 @@ const handleUpdate = () => {
   border: none;
   padding: 0.6rem 1.25rem;
   cursor: pointer;
+  color: var(--text-800);
+}
+
+.btn-danger {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  border: 1px solid var(--danger-text);
+  padding: 0.6rem 1.25rem;
+  border-radius: 0.5rem;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:hover {
+    opacity: 0.9;
+  }
 }
 
 .spinner {
@@ -585,9 +811,114 @@ const handleUpdate = () => {
   color: var(--text-900);
 }
 
+.loading-state {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem;
+  color: var(--text-500);
+  font-size: 0.9rem;
+}
+
+.empty-text {
+  color: var(--text-500);
+  font-size: 0.9rem;
+  font-style: italic;
+}
+
+.status-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.status-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background: var(--background-200);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 0.5rem;
+
+  .client-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+
+    .client-name {
+      font-weight: 600;
+      color: var(--text-900);
+    }
+
+    .client-id {
+      font-size: 0.75rem;
+      font-family: monospace;
+      opacity: 0.5;
+    }
+  }
+
+  .status-info {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+
+    .execution-count {
+      font-size: 0.8rem;
+      color: var(--text-500);
+    }
+  }
+
+  .status-badge {
+    display: inline-block;
+    width: fit-content;
+    padding: 0.2rem 0.6rem;
+    border-radius: 9999px;
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-transform: capitalize;
+
+    &.pending {
+      background: var(--status-pending-bg);
+      color: var(--status-pending-text);
+    }
+
+    &.running {
+      background: var(--status-running-bg);
+      color: var(--status-running-text);
+    }
+
+    &.completed {
+      background: var(--status-completed-bg);
+      color: var(--status-completed-text);
+    }
+
+    &.failed {
+      background: var(--status-failed-bg);
+      color: var(--status-failed-text);
+    }
+  }
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
   }
+}
+
+.warning-banner {
+  padding: 1rem;
+  background-color: var(--warning-50, #fef3c7);
+  border: 1px solid var(--warning-400, #fbbf24);
+  color: var(--warning-900, #92400e);
+  border-radius: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.field-desc {
+  margin-top: 0.25rem;
+  font-size: 0.8rem;
+  opacity: 0.6;
+  font-style: italic;
 }
 </style>

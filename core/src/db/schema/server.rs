@@ -48,7 +48,6 @@ diesel::table! {
         job_name -> Text,
         job_type -> Text,
         job_status -> Text,
-        job_status_message -> Nullable<Text>,
         job_shell -> Text,
         job_command -> Text,
         created_at -> Timestamp,

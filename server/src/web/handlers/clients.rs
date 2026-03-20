@@ -67,6 +67,8 @@ pub async fn create_client(form: web::Json<CreateClientForm>) -> impl Responder 
     secret: remex_core::utils::generate_secret(true),
     client_name: form.client_name.clone(),
     hardware_hash: form.hardware_hash.clone(),
+    created_at: None,
+    updated_at: None,
   };
 
   let client = diesel::insert_into(clients::table)
@@ -126,10 +128,7 @@ pub async fn get_client_by_id(id: web::Path<String>) -> impl Responder {
       .flatten()
       .collect();
 
-    HttpResponse::Ok().json(ClientWithGroups {
-      client,
-      group_ids,
-    })
+    HttpResponse::Ok().json(ClientWithGroups { client, group_ids })
   } else {
     HttpResponse::NotFound().finish()
   }

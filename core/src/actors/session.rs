@@ -138,6 +138,8 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
                             client_name: name.clone(),
                             secret,
                             hardware_hash: hw_hash,
+                            created_at: None,
+                            updated_at: None,
                           })
                           .on_conflict_do_nothing()
                           .get_result(&mut c)
@@ -249,40 +251,19 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
               for execution in &executions {
                 let new_execution = model::server::executions::NewExecutionSRV {
                   job_id: Some(job_id.clone()),
-                  client_id: execution.client_id.clone(),
-                  executed_at: execution.executed_at.unwrap_or(chrono::Utc::now().naive_utc()),
+                  client_id: Some(execution.client_id.clone()),
+                  executed_at: Some(
+                    execution
+                      .executed_at
+                      .unwrap_or(chrono::Utc::now().naive_utc()),
+                  ),
                   execution_result: execution.execution_result.clone(),
-                  created_at: execution.created_at,
-                  updated_at: execution.updated_at,
+                  created_at: None,
+                  updated_at: None,
                 };
 
                 diesel::insert_into(schema::server::executions::table)
                   .values(&new_execution)
-                  .execute(&mut conn)
-                  .unwrap();
-              }
-
-              let job_client_groups: Vec<String> = schema::server::jobs_groups::table
-                .filter(schema::server::jobs_groups::job_id.eq(&job_id))
-                .select(schema::server::jobs_groups::group_id)
-                .load::<Option<String>>(&mut conn)
-                .unwrap_or_default()
-                .into_iter()
-                .flatten()
-                .collect();
-
-              for group_id in job_client_groups {
-                let (status, _) = crate::db::dal::job_status::get_group_job_status(
-                  &mut conn,
-                  &group_id,
-                  &job_id,
-                ).unwrap_or(("pending".to_string(), Default::default()));
-
-                diesel::update(schema::server::jobs::table.find(&job_id))
-                  .set((
-                    schema::server::jobs::job_status.eq(status),
-                    schema::server::jobs::updated_at.eq(chrono::Utc::now().naive_utc()),
-                  ))
                   .execute(&mut conn)
                   .unwrap();
               }

@@ -29,10 +29,6 @@ pub struct GroupClientsSRV {
 pub struct NewGroupClientsSRV {
   pub group_id: String,
   pub client_id: String,
-  #[serde(rename = "createdAt")]
-  pub created_at: chrono::NaiveDateTime,
-  #[serde(rename = "updatedAt")]
-  pub updated_at: chrono::NaiveDateTime,
 }
 
 #[derive(Deserialize, AsChangeset)]

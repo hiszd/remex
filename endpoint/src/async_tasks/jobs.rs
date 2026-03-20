@@ -68,20 +68,18 @@ pub async fn jobs_exec(
             jobs_to_exec.push(j.clone());
             j.locked = true;
           } else {
-            let (status_str, _) = j.job.job_status.clone().into();
-            tracing::info!("Job {} is in {} state", j.job.job_name, status_str);
+            tracing::info!("Job {} is in {:?} state", j.job.job_name, j.job.job_status);
           }
         }
       }
     }
 
     for mut j in jobs_to_exec {
-      let (status_str, _) = j.job.job_status.into();
       tracing::info!(
-        "Executing command: {}\n for Job {} because job is in {} state",
+        "Executing command: {}\n for Job {} because job is in {:?} state",
         j.job.job_command,
-        status_str,
         j.job.job_name,
+        j.job.job_status,
       );
       let command: Vec<&str> = j.job.job_command.split(' ').collect();
       match crate::utils::run_command(command[0], &command[1..]) {

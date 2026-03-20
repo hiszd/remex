@@ -17,6 +17,7 @@ mod handlers;
     handlers::jobs::get_job_by_id,
     handlers::jobs::create_job,
     handlers::jobs::update_job,
+    handlers::jobs::delete_job,
     handlers::jobs::update_job_groups,
     handlers::jobs::add_clients_to_jobs,
     handlers::jobs::remove_clients_from_jobs,
@@ -47,8 +48,8 @@ mod handlers;
     handlers::groups::GroupPath,
     handlers::groups::GroupJobPath,
     handlers::groups::CreateGroupForm,
-    remex_core::db::dal::job_status::ClientStatusSummary,
-    remex_core::db::dal::job_status::GroupJobStatusMetadata
+    handlers::jobs::data_gathering::ClientStatusSummary,
+    handlers::jobs::data_gathering::GroupJobStatusMetadata
   ))
 )]
 struct ApiDoc;
@@ -87,6 +88,7 @@ pub fn start_web_server() -> actix_web::dev::Server {
       .service(handlers::jobs::get_job_by_id)
       .service(handlers::jobs::create_job)
       .service(handlers::jobs::update_job)
+      .service(handlers::jobs::delete_job)
       .service(handlers::jobs::update_job_groups)
       .service(handlers::jobs::add_clients_to_jobs)
       .service(handlers::jobs::remove_clients_from_jobs)

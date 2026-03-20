@@ -1,23 +1,25 @@
 use actix_web::{
+  delete,
   get,
   post,
   web,
   HttpResponse,
   Responder,
 };
+use data_gathering::ClientJobStatusMetadata;
 use diesel::prelude::*;
 use remex_core::db::{
   dal::{
-    job_status::ClientJobStatusMetadata,
-    jobs::Job,
+    jobs::{
+      Job,
+      JobStatus,
+    },
     SrvDbOperator,
   },
   model::server::{
     clients::ClientSRV,
-    groups::GroupSRV,
     jobs::{
       JobSRV,
-      NewJobSRV,
       UpdateJobSRV,
     },
   },
@@ -28,14 +30,111 @@ use serde::{
 };
 use utoipa::ToSchema;
 
+pub mod data_gathering;
+
 #[derive(Deserialize, ToSchema)]
 pub struct CreateJobForm {
   pub job_name: String,
   pub job_type: String,
-  pub job_status: String,
+  pub job_status: JobStatus,
   pub job_shell: String,
   pub job_command: String,
   pub group_ids: Option<Vec<String>>,
+  #[serde(default)]
+  pub scheduled_at: Option<String>,
+  #[serde(default)]
+  pub frequency: Option<String>,
+}
+
+fn parse_job_type(
+  job_type: &str,
+  scheduled_at: &Option<String>,
+  frequency: &Option<String>,
+) -> remex_core::db::dal::jobs::JobType {
+  match job_type {
+    "instant" => remex_core::db::dal::jobs::JobType::Instant,
+    "scheduled" => {
+      let dt = scheduled_at
+        .as_ref()
+        .and_then(|s| chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S").ok())
+        .expect("Invalid scheduled_at datetime format. Use YYYY-MM-DDTHH:MM:SS");
+      remex_core::db::dal::jobs::JobType::Scheduled(dt)
+    }
+    "recurring" => {
+      let dt = scheduled_at
+        .as_ref()
+        .and_then(|s| chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S").ok())
+        .expect("Invalid scheduled_at datetime format. Use YYYY-MM-DDTHH:MM:SS");
+      let dur_secs: u64 = frequency
+        .as_ref()
+        .and_then(|s| parse_iso8601_duration(s).ok())
+        .expect("Invalid frequency format. Use ISO 8601 duration (e.g., PT1H, P1D)");
+      remex_core::db::dal::jobs::JobType::Recurring(dt, std::time::Duration::from_secs(dur_secs))
+    }
+    _ => panic!("Invalid job_type: {}. Must be 'instant', 'scheduled', or 'recurring'", job_type),
+  }
+}
+
+fn parse_iso8601_duration(s: &str) -> Result<u64, ()> {
+  let s = s.trim();
+  if s.starts_with("PT") || s.starts_with("P") {
+    let mut seconds: u64 = 0;
+    let mut chars = s.chars().peekable();
+    if chars.next() == Some('P') {
+      let mut in_time = false;
+      let mut num_str = String::new();
+      for c in chars {
+        match c {
+          'T' => {
+            in_time = true;
+          }
+          '0'..='9' => {
+            num_str.push(c);
+          }
+          'H' => {
+            if let Ok(n) = num_str.parse::<u64>() {
+              seconds += n * 3600;
+            }
+            num_str.clear();
+          }
+          'M' => {
+            if in_time {
+              if let Ok(n) = num_str.parse::<u64>() {
+                seconds += n * 60;
+              }
+            } else {
+              if let Ok(n) = num_str.parse::<u64>() {
+                seconds += n * 30 * 24 * 3600;
+              }
+            }
+            num_str.clear();
+          }
+          'D' => {
+            if let Ok(n) = num_str.parse::<u64>() {
+              seconds += n * 24 * 3600;
+            }
+            num_str.clear();
+          }
+          'S' => {
+            if let Ok(n) = num_str.parse::<u64>() {
+              seconds += n;
+            }
+            num_str.clear();
+          }
+          _ => return Err(()),
+        }
+      }
+      if seconds > 0 {
+        Ok(seconds)
+      } else {
+        Err(())
+      }
+    } else {
+      Err(())
+    }
+  } else {
+    Err(())
+  }
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -158,11 +257,12 @@ pub async fn create_job(form: web::Json<CreateJobForm>) -> impl Responder {
   let mut pool = remex_core::db::establish_connection_postgres();
 
   let new_job_id = uuid::Uuid::now_v7().to_string();
+  let job_type = parse_job_type(&form.job_type, &form.scheduled_at, &form.frequency);
   let new_job: Job = Job::new(
     new_job_id.clone(),
     form.job_name.clone(),
-    form.job_type.clone(),
-    form.job_status.clone().into(),
+    job_type,
+    form.job_status.clone(),
     form.job_shell.clone(),
     form.job_command.clone(),
   );
@@ -233,7 +333,7 @@ pub struct JobGroupPath {
 #[post("/jobs/{job_id}/groups")]
 pub async fn update_job_groups(
   path: web::Path<JobGroupPath>,
-  form: web::Json<UpdateJobGroupsForm>
+  form: web::Json<UpdateJobGroupsForm>,
 ) -> impl Responder {
   use remex_core::db::{
     model::server::jobs_groups::NewJobGroupSRV,
@@ -331,6 +431,8 @@ pub async fn add_clients_to_jobs(actions: web::Json<Vec<JobClientAction>>) -> im
       let new_group = NewGroupSRV {
         id: new_group_id.clone(),
         group_name: format!("Group for Job {}", action.job_id),
+        created_at: None,
+        updated_at: None,
       };
 
       diesel::insert_into(groups::table)
@@ -355,8 +457,6 @@ pub async fn add_clients_to_jobs(actions: web::Json<Vec<JobClientAction>>) -> im
     let new_assoc = NewGroupClientsSRV {
       group_id: group_id.clone(),
       client_id: action.client_id.clone(),
-      created_at: chrono::Utc::now().naive_utc(),
-      updated_at: chrono::Utc::now().naive_utc(),
     };
 
     diesel::insert_into(groups_clients::table)
@@ -429,7 +529,7 @@ pub struct ClientJobStatusResponse {
 )]
 #[get("/jobs/{job_id}/client-statuses")]
 pub async fn get_job_client_statuses(id: web::Path<String>) -> impl Responder {
-  use remex_core::db::dal::job_status::get_client_job_status;
+  use data_gathering::get_client_job_status;
   let mut pool = remex_core::db::establish_connection_postgres();
 
   let job_id = id.into_inner();
@@ -536,4 +636,48 @@ pub async fn get_job_groups(id: web::Path<String>) -> impl Responder {
     .collect();
 
   HttpResponse::Ok().json(job_groups)
+}
+
+#[utoipa::path(
+  delete,
+  path = "/jobs/{id}",
+  responses(
+    (status = 204, description = "Job deleted successfully"),
+    (status = 404, description = "Job not found"),
+  ),
+  params(
+    ("id" = String, Path, description = "Job ID")
+  )
+)]
+#[delete("/jobs/{id}")]
+pub async fn delete_job(id: web::Path<String>) -> impl Responder {
+  use remex_core::db::schema::server::{
+    jobs,
+    jobs_groups,
+  };
+  let mut pool = remex_core::db::establish_connection_postgres();
+
+  let job_id = id.into_inner();
+
+  let job_exists = jobs::table
+    .filter(jobs::id.eq(&job_id))
+    .select(jobs::id)
+    .first::<String>(&mut pool)
+    .optional()
+    .unwrap()
+    .is_some();
+
+  if !job_exists {
+    return HttpResponse::NotFound().finish();
+  }
+
+  diesel::delete(jobs_groups::table.filter(jobs_groups::job_id.eq(&job_id)))
+    .execute(&mut pool)
+    .unwrap();
+
+  diesel::delete(jobs::table.filter(jobs::id.eq(&job_id)))
+    .execute(&mut pool)
+    .unwrap();
+
+  HttpResponse::NoContent().finish()
 }
