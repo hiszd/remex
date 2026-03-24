@@ -13,6 +13,7 @@ use remex_core::db::{
     jobs::{
       Job,
       JobStatus,
+      JobType,
     },
     SrvDbOperator,
   },
@@ -40,100 +41,19 @@ pub struct CreateJobForm {
   pub job_shell: String,
   pub job_command: String,
   pub group_ids: Option<Vec<String>>,
-  #[serde(default)]
-  pub scheduled_at: Option<String>,
-  #[serde(default)]
-  pub frequency: Option<String>,
 }
 
-fn parse_job_type(
-  job_type: &str,
-  scheduled_at: &Option<String>,
-  frequency: &Option<String>,
-) -> remex_core::db::dal::jobs::JobType {
-  match job_type {
-    "instant" => remex_core::db::dal::jobs::JobType::Instant,
-    "scheduled" => {
-      let dt = scheduled_at
-        .as_ref()
-        .and_then(|s| chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S").ok())
-        .expect("Invalid scheduled_at datetime format. Use YYYY-MM-DDTHH:MM:SS");
-      remex_core::db::dal::jobs::JobType::Scheduled(dt)
+fn parse_job_type(job_type: &str) -> JobType {
+  match serde_json::from_str::<JobType>(job_type) {
+    Ok(jtype) => {
+      tracing::info!("job_type: {:?}", jtype);
+      jtype
     }
-    "recurring" => {
-      let dt = scheduled_at
-        .as_ref()
-        .and_then(|s| chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S").ok())
-        .expect("Invalid scheduled_at datetime format. Use YYYY-MM-DDTHH:MM:SS");
-      let dur_secs: u64 = frequency
-        .as_ref()
-        .and_then(|s| parse_iso8601_duration(s).ok())
-        .expect("Invalid frequency format. Use ISO 8601 duration (e.g., PT1H, P1D)");
-      remex_core::db::dal::jobs::JobType::Recurring(dt, std::time::Duration::from_secs(dur_secs))
+    Err(e) => {
+      tracing::info!("Failed to parse job_type: {}", job_type);
+      tracing::info!("Error: {}", e);
+      panic!("Invalid job_type format. Expected JSON serialized JobType");
     }
-    _ => panic!("Invalid job_type: {}. Must be 'instant', 'scheduled', or 'recurring'", job_type),
-  }
-}
-
-fn parse_iso8601_duration(s: &str) -> Result<u64, ()> {
-  let s = s.trim();
-  if s.starts_with("PT") || s.starts_with("P") {
-    let mut seconds: u64 = 0;
-    let mut chars = s.chars().peekable();
-    if chars.next() == Some('P') {
-      let mut in_time = false;
-      let mut num_str = String::new();
-      for c in chars {
-        match c {
-          'T' => {
-            in_time = true;
-          }
-          '0'..='9' => {
-            num_str.push(c);
-          }
-          'H' => {
-            if let Ok(n) = num_str.parse::<u64>() {
-              seconds += n * 3600;
-            }
-            num_str.clear();
-          }
-          'M' => {
-            if in_time {
-              if let Ok(n) = num_str.parse::<u64>() {
-                seconds += n * 60;
-              }
-            } else {
-              if let Ok(n) = num_str.parse::<u64>() {
-                seconds += n * 30 * 24 * 3600;
-              }
-            }
-            num_str.clear();
-          }
-          'D' => {
-            if let Ok(n) = num_str.parse::<u64>() {
-              seconds += n * 24 * 3600;
-            }
-            num_str.clear();
-          }
-          'S' => {
-            if let Ok(n) = num_str.parse::<u64>() {
-              seconds += n;
-            }
-            num_str.clear();
-          }
-          _ => return Err(()),
-        }
-      }
-      if seconds > 0 {
-        Ok(seconds)
-      } else {
-        Err(())
-      }
-    } else {
-      Err(())
-    }
-  } else {
-    Err(())
   }
 }
 
@@ -257,7 +177,7 @@ pub async fn create_job(form: web::Json<CreateJobForm>) -> impl Responder {
   let mut pool = remex_core::db::establish_connection_postgres();
 
   let new_job_id = uuid::Uuid::now_v7().to_string();
-  let job_type = parse_job_type(&form.job_type, &form.scheduled_at, &form.frequency);
+  let job_type = parse_job_type(&form.job_type);
   let new_job: Job = Job::new(
     new_job_id.clone(),
     form.job_name.clone(),

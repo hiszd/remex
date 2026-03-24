@@ -42,6 +42,7 @@ impl From<Execution> for ExecutionSRV {
 #[derive(Queryable, Insertable, Serialize, Deserialize)]
 #[diesel(table_name = schema::executions)]
 pub struct NewExecutionSRV {
+  pub id: Option<String>,
   pub job_id: Option<String>,
   pub client_id: Option<String>,
   pub executed_at: Option<chrono::NaiveDateTime>,
@@ -53,6 +54,7 @@ pub struct NewExecutionSRV {
 impl From<ExecutionSRV> for NewExecutionSRV {
   fn from(execution: ExecutionSRV) -> Self {
     NewExecutionSRV {
+      id: Some(execution.id),
       job_id: execution.job_id,
       client_id: Some(execution.client_id),
       executed_at: execution.executed_at,
@@ -66,6 +68,7 @@ impl From<ExecutionSRV> for NewExecutionSRV {
 impl From<Execution> for NewExecutionSRV {
   fn from(execution: Execution) -> Self {
     NewExecutionSRV {
+      id: Some(execution.id),
       job_id: execution.job_id,
       client_id: Some(execution.client_id),
       executed_at: execution.executed_at,
@@ -112,6 +115,7 @@ impl From<Execution> for UpdateExecutionSRV {
 #[diesel(table_name = schema::executions)]
 #[diesel(check_for_backend(diesel::postgres::Pg))]
 pub struct UpsertExecutionSRV {
+  id: Option<String>,
   job_id: Option<String>,
   client_id: Option<String>,
   executed_at: Option<chrono::NaiveDateTime>,
@@ -123,6 +127,7 @@ pub struct UpsertExecutionSRV {
 impl From<ExecutionSRV> for UpsertExecutionSRV {
   fn from(execution: ExecutionSRV) -> Self {
     UpsertExecutionSRV {
+      id: Some(execution.id),
       job_id: execution.job_id,
       client_id: Some(execution.client_id),
       executed_at: execution.executed_at,
@@ -136,6 +141,7 @@ impl From<ExecutionSRV> for UpsertExecutionSRV {
 impl From<Execution> for UpsertExecutionSRV {
   fn from(execution: Execution) -> Self {
     UpsertExecutionSRV {
+      id: Some(execution.id),
       job_id: execution.job_id,
       client_id: Some(execution.client_id),
       executed_at: execution.executed_at,

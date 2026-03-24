@@ -19,6 +19,20 @@ pub enum JobType {
   Scheduled(chrono::NaiveDateTime),
   Recurring(chrono::NaiveDateTime, std::time::Duration),
 }
+impl JobType {
+  fn options() -> String {
+    let options = [
+      serde_json::to_string(&JobType::Instant).unwrap(),
+      serde_json::to_string(&JobType::Scheduled(chrono::Utc::now().naive_utc())).unwrap(),
+      serde_json::to_string(&JobType::Recurring(
+        chrono::Utc::now().naive_utc(),
+        std::time::Duration::from_secs(60),
+      ))
+      .unwrap(),
+    ];
+    options.join(", ")
+  }
+}
 
 impl From<String> for JobType {
   fn from(s: String) -> Self {
@@ -26,6 +40,7 @@ impl From<String> for JobType {
       Ok(v) => v,
       Err(e) => {
         tracing::info!("Failed to parse job type: {}", s);
+        tracing::info!("Options: {}", JobType::options());
         panic!("{}", e);
       }
     }
@@ -56,7 +71,15 @@ pub enum JobStatus {
 }
 
 impl From<String> for JobStatus {
-  fn from(status: String) -> Self { serde_json::from_str(&status).unwrap() }
+  fn from(status: String) -> Self {
+    match serde_json::from_str(&status) {
+      Ok(v) => v,
+      Err(e) => {
+        tracing::info!("Failed to parse job status: {}", status);
+        panic!("{}", e);
+      }
+    }
+  }
 }
 impl From<JobStatus> for String {
   fn from(val: JobStatus) -> Self { serde_json::to_string(&val).unwrap() }

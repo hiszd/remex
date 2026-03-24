@@ -249,23 +249,22 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
               let mut conn = db::establish_connection_postgres();
 
               for execution in &executions {
-                let new_execution = model::server::executions::NewExecutionSRV {
-                  job_id: Some(job_id.clone()),
-                  client_id: Some(execution.client_id.clone()),
-                  executed_at: Some(
-                    execution
-                      .executed_at
-                      .unwrap_or(chrono::Utc::now().naive_utc()),
-                  ),
-                  execution_result: execution.execution_result.clone(),
-                  created_at: None,
-                  updated_at: None,
-                };
+                let mut exec = execution.clone();
+                exec.job_id = Some(job_id.clone());
+                if let Err(e) = exec.upsert_srv(&mut conn) {
+                  tracing::error!(
+                    "Failed to upsert execution {}: {}",
+                    exec.id,
+                    e
+                  );
+                  return;
+                }
+              }
 
-                diesel::insert_into(schema::server::executions::table)
-                  .values(&new_execution)
-                  .execute(&mut conn)
-                  .unwrap();
+              for log in &logs {
+                if let Err(e) = log.upsert_srv(&mut conn) {
+                  tracing::error!("Failed to upsert log {}: {}", log.id, e);
+                }
               }
             }
             JobsRequest::UpdateJob(job) => {

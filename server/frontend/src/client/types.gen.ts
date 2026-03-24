@@ -4,6 +4,10 @@ export type ClientOptions = {
     baseUrl: `${string}://${string}` | (string & {});
 };
 
+export type AddClientsToGroupForm = {
+    client_ids: Array<string>;
+};
+
 export type Client = {
     client_name: string;
     created_at: string;
@@ -47,6 +51,7 @@ export type CreateClientForm = {
 };
 
 export type CreateGroupForm = {
+    client_ids?: Array<string> | null;
     group_name: string;
 };
 
@@ -62,6 +67,7 @@ export type CreateJobForm = {
 };
 
 export type Group = {
+    client_count: number;
     created_at: string;
     group_name: string;
     id: string;
@@ -163,19 +169,21 @@ export type JobWithGroups = {
     updated_at: string;
 };
 
+export type RemoveClientsFromGroupForm = {
+    client_ids: Array<string>;
+};
+
 export type UpdateJobGroupsForm = {
     group_ids: Array<string>;
 };
 
 export type UpdateJobSrv = {
-    created_at?: string | null;
     id: string;
     job_command?: string | null;
     job_name?: string | null;
     job_shell?: string | null;
     job_status?: string | null;
     job_type?: string | null;
-    updated_at?: string | null;
 };
 
 export type GetClientsData = {
@@ -325,6 +333,58 @@ export type GetGroupClientsResponses = {
 };
 
 export type GetGroupClientsResponse = GetGroupClientsResponses[keyof GetGroupClientsResponses];
+
+export type AddClientsToGroupData = {
+    body: AddClientsToGroupForm;
+    path: {
+        /**
+         * Group ID
+         */
+        group_id: string;
+    };
+    query?: never;
+    url: '/groups/{group_id}/clients';
+};
+
+export type AddClientsToGroupErrors = {
+    /**
+     * Group not found
+     */
+    404: unknown;
+};
+
+export type AddClientsToGroupResponses = {
+    /**
+     * Clients added to group successfully
+     */
+    200: unknown;
+};
+
+export type RemoveClientsFromGroupData = {
+    body: RemoveClientsFromGroupForm;
+    path: {
+        /**
+         * Group ID
+         */
+        group_id: string;
+    };
+    query?: never;
+    url: '/groups/{group_id}/clients/remove';
+};
+
+export type RemoveClientsFromGroupErrors = {
+    /**
+     * Group not found
+     */
+    404: unknown;
+};
+
+export type RemoveClientsFromGroupResponses = {
+    /**
+     * Clients removed from group successfully
+     */
+    200: unknown;
+};
 
 export type GetGroupJobsData = {
     body?: never;

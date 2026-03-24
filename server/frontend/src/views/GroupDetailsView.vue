@@ -1,12 +1,34 @@
 <script setup lang="ts">
-import { useRoute } from 'vue-router';
-import { useQuery } from '@tanstack/vue-query';
-import { getGroupById, getGroupClients, getGroupJobs, type Group, type ClientSrv, type JobSrv } from '@/client/index';
+import { ref, computed } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query';
+import {
+  getGroupById,
+  getGroupClients,
+  getGroupJobs,
+  getClients,
+  addClientsToGroup,
+  removeClientsFromGroup,
+  type Group,
+  type ClientSrv,
+  type JobSrv
+} from '@/client/index';
 import { formatDate } from '@/utils/date';
+import ConfirmationModal from '@/components/ConfirmationModal.vue';
+
+interface GroupClient {
+  id: string;
+  client_name: string;
+}
 
 const route = useRoute();
+const router = useRouter();
+const queryClient = useQueryClient();
 const groupId = route.params.id as string;
 
+const showDeleteModal = ref(false);
+
+// Fetch Group Details
 const { data: group, isLoading: loadingGroup, isError: groupError } = useQuery({
   queryKey: ['group', groupId],
   queryFn: async () => {
@@ -16,7 +38,8 @@ const { data: group, isLoading: loadingGroup, isError: groupError } = useQuery({
   }
 });
 
-const { data: clients, isLoading: loadingClients } = useQuery({
+// Fetch Clients in Group
+const { data: groupClients, isLoading: loadingClients, refetch: refetchClients } = useQuery({
   queryKey: ['group-clients', groupId],
   queryFn: async () => {
     const { data, error } = await getGroupClients({ path: { group_id: groupId } });
@@ -25,6 +48,7 @@ const { data: clients, isLoading: loadingClients } = useQuery({
   }
 });
 
+// Fetch Jobs in Group
 const { data: jobs, isLoading: loadingJobs } = useQuery({
   queryKey: ['group-jobs', groupId],
   queryFn: async () => {
@@ -33,6 +57,88 @@ const { data: jobs, isLoading: loadingJobs } = useQuery({
     return (data as JobSrv[]) || [];
   }
 });
+
+// Fetch all available clients for selection
+const { data: allClients } = useQuery({
+  queryKey: ['clients'],
+  queryFn: async () => {
+    const { data, error } = await getClients();
+    if (error) throw error;
+    return (data as ClientSrv[]) || [];
+  }
+});
+
+const isEditing = ref(false);
+const editForm = ref({
+  id: '',
+  group_name: ''
+});
+const selectedClientIds = ref<string[]>([]);
+
+const startEditing = () => {
+  if (group.value) {
+    editForm.value = {
+      id: group.value.id,
+      group_name: group.value.group_name
+    };
+    selectedClientIds.value = groupClients.value?.map(c => c.id) || [];
+    isEditing.value = true;
+  }
+};
+
+const addClientsMutation = useMutation({
+  mutationFn: async (clientIds: string[]) => {
+    const { error } = await addClientsToGroup({
+      path: { group_id: groupId },
+      body: { client_ids: clientIds }
+    });
+    if (error) throw error;
+  },
+  onSuccess: () => {
+    refetchClients();
+    queryClient.invalidateQueries({ queryKey: ['group', groupId] });
+  }
+});
+
+const removeClientsMutation = useMutation({
+  mutationFn: async (clientIds: string[]) => {
+    const { error } = await removeClientsFromGroup({
+      path: { group_id: groupId },
+      body: { client_ids: clientIds }
+    });
+    if (error) throw error;
+  },
+  onSuccess: () => {
+    refetchClients();
+    queryClient.invalidateQueries({ queryKey: ['group', groupId] });
+  }
+});
+
+const handleUpdate = () => {
+  // For now, group editing just closes the edit mode
+  // A proper update would need a backend endpoint
+  isEditing.value = false;
+  
+  // Handle client changes
+  const currentClientIds = groupClients.value?.map(c => c.id) || [];
+  const newClientIds = selectedClientIds.value;
+  
+  const clientsToAdd = newClientIds.filter(id => !currentClientIds.includes(id));
+  const clientsToRemove = currentClientIds.filter(id => !newClientIds.includes(id));
+  
+  if (clientsToAdd.length > 0) {
+    addClientsMutation.mutate(clientsToAdd);
+  }
+  if (clientsToRemove.length > 0) {
+    removeClientsMutation.mutate(clientsToRemove);
+  }
+};
+
+const handleDelete = () => {
+  // Would need a delete group endpoint
+  // For now, just redirect
+  router.push('/groups');
+};
 </script>
 
 <template>
@@ -41,8 +147,19 @@ const { data: jobs, isLoading: loadingJobs } = useQuery({
       <router-link to="/groups" class="back-link">← Back to Groups</router-link>
       <div v-if="group" class="header-main">
         <div class="title-group">
-          <h1 class="page-title">{{ group.group_name }}</h1>
+          <h1 v-if="!isEditing" class="page-title">{{ group.group_name }}</h1>
+          <input 
+            v-else
+            v-model="editForm.group_name"
+            type="text"
+            class="edit-title-input"
+            placeholder="Group Name"
+          />
           <p class="group-id">{{ group.id }}</p>
+        </div>
+        <div class="header-actions">
+          <button v-if="!isEditing" @click="startEditing" class="btn-secondary">Edit Group</button>
+          <button v-if="!isEditing" @click="showDeleteModal = true" class="btn-danger">Delete Group</button>
         </div>
       </div>
     </header>
@@ -58,15 +175,28 @@ const { data: jobs, isLoading: loadingJobs } = useQuery({
     </div>
 
     <div v-else class="details-container">
+      <!-- General Info Section -->
       <section class="info-section card">
         <div class="section-header">
           <h2>General Information</h2>
         </div>
 
+        <div v-if="isEditing" class="edit-form-actions">
+          <button type="button" @click="isEditing = false" class="btn-ghost">Cancel</button>
+          <button 
+            type="button" 
+            @click="handleUpdate" 
+            class="btn-primary"
+            :disabled="addClientsMutation.isPending.value || removeClientsMutation.isPending.value"
+          >
+            {{ addClientsMutation.isPending.value || removeClientsMutation.isPending.value ? 'Saving...' : 'Save Changes' }}
+          </button>
+        </div>
+
         <div class="info-grid">
           <div class="info-item">
             <span class="label">Group Name</span>
-            <span class="value">{{ group.group_name }}</span>
+            <span v-if="!isEditing" class="value">{{ group.group_name }}</span>
           </div>
           <div class="info-item">
             <span class="label">ID</span>
@@ -83,10 +213,37 @@ const { data: jobs, isLoading: loadingJobs } = useQuery({
         </div>
       </section>
 
-      <section class="clients-section card">
+      <!-- Client Selection Section (only shown when editing) -->
+      <section v-if="isEditing" class="info-section card">
+        <div class="section-header">
+          <h2>Assigned Clients</h2>
+        </div>
+
+        <div v-if="!allClients || allClients.length === 0" class="empty-text">
+          No clients available. Clients will appear here once they connect.
+        </div>
+
+        <div v-else class="client-selector">
+          <div v-for="client in allClients" :key="client.id" class="client-checkbox">
+            <input 
+              type="checkbox" 
+              :id="client.id" 
+              :value="client.id" 
+              v-model="selectedClientIds" 
+            />
+            <label :for="client.id">
+              <span class="client-name">{{ client.client_name }}</span>
+              <span class="client-id">{{ client.id }}</span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <!-- Clients Section (read-only) -->
+      <section v-if="!isEditing" class="clients-section card">
         <div class="section-header">
           <h2>Clients</h2>
-          <span v-if="clients && clients.length > 0" class="count-badge">{{ clients.length }}</span>
+          <span v-if="groupClients && groupClients.length > 0" class="count-badge">{{ groupClients.length }}</span>
         </div>
 
         <div v-if="loadingClients" class="loading-state">
@@ -94,13 +251,13 @@ const { data: jobs, isLoading: loadingJobs } = useQuery({
           <span>Loading clients...</span>
         </div>
 
-        <div v-else-if="!clients || clients.length === 0" class="empty-text">
+        <div v-else-if="!groupClients || groupClients.length === 0" class="empty-text">
           No clients assigned to this group.
         </div>
 
         <div v-else class="entity-list">
           <router-link
-            v-for="client in clients"
+            v-for="client in groupClients"
             :key="client.id"
             :to="'/clients/' + client.id"
             class="entity-chip"
@@ -111,6 +268,7 @@ const { data: jobs, isLoading: loadingJobs } = useQuery({
         </div>
       </section>
 
+      <!-- Jobs Section -->
       <section class="jobs-section card">
         <div class="section-header">
           <h2>Jobs</h2>
@@ -139,6 +297,16 @@ const { data: jobs, isLoading: loadingJobs } = useQuery({
         </div>
       </section>
     </div>
+
+    <ConfirmationModal 
+      v-if="showDeleteModal" 
+      title="Delete Group"
+      message="Are you sure you want to delete this group? This action cannot be undone." 
+      confirm-text="Delete"
+      variant="danger" 
+      @confirm="handleDelete" 
+      @cancel="showDeleteModal = false" 
+    />
   </div>
 </template>
 
@@ -172,11 +340,27 @@ const { data: jobs, isLoading: loadingJobs } = useQuery({
   gap: 1rem;
 }
 
+.header-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
 .title-group {
   .page-title {
     margin: 0;
     font-size: 2rem;
     font-weight: 800;
+  }
+
+  .edit-title-input {
+    margin: 0;
+    font-size: 2rem;
+    font-weight: 800;
+    padding: 0.25rem 0.5rem;
+    border: 1px solid var(--accent-500);
+    border-radius: 0.25rem;
+    background: var(--background-800);
+    color: var(--text-950);
   }
 
   .group-id {
@@ -258,6 +442,56 @@ const { data: jobs, isLoading: loadingJobs } = useQuery({
       padding: 0.2rem 0.4rem;
       border-radius: 0.25rem;
       word-break: break-all;
+    }
+  }
+}
+
+.client-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 250px;
+  overflow-y: auto;
+  padding: 1rem;
+  background: var(--background-50);
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-border);
+}
+
+.client-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem;
+  border-radius: 0.25rem;
+
+  &:hover {
+    background: var(--background-50);
+  }
+
+  input {
+    width: 1.1rem;
+    height: 1.1rem;
+    cursor: pointer;
+  }
+
+  label {
+    display: flex;
+    flex-direction: column;
+    cursor: pointer;
+    text-transform: none;
+    letter-spacing: normal;
+    opacity: 1;
+
+    .client-name {
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+
+    .client-id {
+      font-size: 0.75rem;
+      opacity: 0.5;
+      font-family: monospace;
     }
   }
 }
@@ -367,5 +601,54 @@ const { data: jobs, isLoading: loadingJobs } = useQuery({
   to {
     transform: rotate(360deg);
   }
+}
+
+.btn-primary {
+  background: var(--accent-500);
+  color: white;
+  padding: 0.6rem 1.25rem;
+  border-radius: 0.5rem;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+}
+
+.btn-secondary {
+  background: transparent;
+  border: 1px solid var(--accent-500);
+  color: var(--accent-500);
+  padding: 0.6rem 1.25rem;
+  border-radius: 0.5rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-ghost {
+  background: transparent;
+  border: none;
+  padding: 0.6rem 1.25rem;
+  cursor: pointer;
+  color: var(--text-800);
+}
+
+.btn-danger {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  border: 1px solid var(--danger-text);
+  padding: 0.6rem 1.25rem;
+  border-radius: 0.5rem;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:hover {
+    opacity: 0.9;
+  }
+}
+
+.edit-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
 }
 </style>

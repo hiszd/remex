@@ -89,11 +89,24 @@ const { data: clientStatuses, isLoading: loadingClientStatuses } = useQuery({
 });
 
 const isEditing = ref(false);
+const isManagingGroups = ref(false);
 const showScheduleWarning = ref(false);
-const editForm = ref<UpdateJobSrv & { 
-  scheduled_at: string | null; 
-  frequency_number: number; 
-  frequency_unit: string 
+const managingGroupsGroupIds = ref<string[]>([]);
+
+const activeGroupIds = computed({
+  get: () => isEditing.value ? selectedGroupIds.value : managingGroupsGroupIds.value,
+  set: (val: string[]) => {
+    if (isEditing.value) {
+      selectedGroupIds.value = val;
+    } else {
+      managingGroupsGroupIds.value = val;
+    }
+  }
+});
+const editForm = ref<UpdateJobSrv & {
+  scheduled_at: string | null;
+  frequency_number: number;
+  frequency_unit: string
 }>({
   id: '',
   job_name: '',
@@ -118,32 +131,49 @@ const parseIso8601ToNumberUnit = (iso: string | null): { frequency_number: numbe
   return null;
 };
 
-const convertToIso8601 = (num: number, unit: string): string => {
-  if (unit === 'minutes') return `PT${num}M`;
-  if (unit === 'hours') return `PT${num}H`;
-  if (unit === 'days') return `P${num}D`;
-  if (unit === 'weeks') return `P${num}W`;
-  return `PT${num}H`;
+const frequencyToSeconds = (num: number, unit: string): number => {
+  if (unit === 'minutes') return num * 60;
+  if (unit === 'hours') return num * 3600;
+  if (unit === 'days') return num * 86400;
+  if (unit === 'weeks') return num * 604800;
+  return num * 3600;
 };
+
+interface JobTypeInstant {
+  instant: null;
+}
+
+interface JobTypeScheduled {
+  scheduled: string;
+}
+
+interface JobTypeRecurring {
+  recurring: [string, number];
+}
+
+type JobTypeJson = JobTypeInstant | JobTypeScheduled | JobTypeRecurring;
 
 const parsedJobType = computed(() => {
   if (!job.value) return { type: 'instant', scheduledAt: null, frequency_number: null as number | null, frequency_unit: null as string | null };
   const typeStr = job.value.job_type;
-  if (typeStr === 'instant') return { type: 'instant', scheduledAt: null, frequency_number: null, frequency_unit: null };
-  if (typeStr.startsWith('scheduled(')) {
-    const match = typeStr.match(/scheduled\("([^"]+)"\)/);
-    return { type: 'scheduled', scheduledAt: match?.[1] || null, frequency_number: null, frequency_unit: null };
-  }
-  if (typeStr.startsWith('recurring(')) {
-    const match = typeStr.match(/recurring\("([^"]+)","([^"]+)"\)/);
-    const freq = match?.[2] || null;
-    const parsedFreq = parseIso8601ToNumberUnit(freq);
-    return { 
-      type: 'recurring', 
-      scheduledAt: match?.[1] || null, 
-      frequency_number: parsedFreq?.frequency_number ?? 1,
-      frequency_unit: parsedFreq?.frequency_unit ?? 'hours'
-    };
+  try {
+    const parsed = JSON.parse(typeStr) as JobTypeJson;
+    if ('instant' in parsed) {
+      return { type: 'instant', scheduledAt: null, frequency_number: null, frequency_unit: null };
+    }
+    if ('scheduled' in parsed) {
+      return { type: 'scheduled', scheduledAt: parsed.scheduled, frequency_number: null, frequency_unit: null };
+    }
+    if ('recurring' in parsed) {
+      const [scheduledAt, durationSecs] = parsed.recurring;
+      return {
+        type: 'recurring',
+        scheduledAt,
+        frequency_number: Math.ceil(durationSecs / 60),
+        frequency_unit: durationSecs < 3600 ? 'minutes' : 'hours'
+      };
+    }
+  } catch {
   }
   return { type: 'instant', scheduledAt: null, frequency_number: null, frequency_unit: null };
 });
@@ -177,6 +207,22 @@ const startEditing = () => {
     checkScheduleWarning(parsed.scheduledAt);
     isEditing.value = true;
   }
+};
+
+const startManagingGroups = () => {
+  managingGroupsGroupIds.value = groups.value?.map(g => g.id) || [];
+  isManagingGroups.value = true;
+};
+
+const cancelManagingGroups = () => {
+  isManagingGroups.value = false;
+  managingGroupsGroupIds.value = [];
+};
+
+const saveManagedGroups = () => {
+  updateGroupsMutation.mutate({ group_ids: managingGroupsGroupIds.value });
+  isManagingGroups.value = false;
+  managingGroupsGroupIds.value = [];
 };
 
 const updateMutation = useMutation({
@@ -220,15 +266,25 @@ const handleDelete = () => {
 
 const handleUpdate = () => {
   checkScheduleWarning(editForm.value.scheduled_at);
-  
-  let finalJobType = editForm.value.job_type;
-  if (editForm.value.job_type === 'scheduled' && editForm.value.scheduled_at) {
-    finalJobType = `scheduled("${editForm.value.scheduled_at}")`;
+
+  let finalJobType: string;
+  if (editForm.value.job_type === 'instant') {
+    finalJobType = '"instant"';
+  } else if (editForm.value.job_type === 'scheduled' && editForm.value.scheduled_at) {
+    const schedWithSeconds = editForm.value.scheduled_at.length === 16
+      ? editForm.value.scheduled_at + ':00'
+      : editForm.value.scheduled_at;
+    finalJobType = JSON.stringify({ scheduled: schedWithSeconds });
   } else if (editForm.value.job_type === 'recurring' && editForm.value.scheduled_at) {
-    const freqIso = convertToIso8601(editForm.value.frequency_number, editForm.value.frequency_unit);
-    finalJobType = `recurring("${editForm.value.scheduled_at}","${freqIso}")`;
+    const frequencySecs = frequencyToSeconds(editForm.value.frequency_number, editForm.value.frequency_unit);
+    const schedWithSeconds = editForm.value.scheduled_at.length === 16
+      ? editForm.value.scheduled_at + ':00'
+      : editForm.value.scheduled_at;
+    finalJobType = JSON.stringify({ recurring: [schedWithSeconds, frequencySecs] });
+  } else {
+    finalJobType = '"instant"';
   }
-  
+
   const { frequency_number, frequency_unit, ...rest } = editForm.value;
   const updatePayload = {
     ...rest,
@@ -250,7 +306,8 @@ const handleUpdate = () => {
           <p class="job-id">{{ job.id }}</p>
         </div>
         <div class="header-actions">
-          <button v-if="job && !isEditing" @click="startEditing" class="btn-secondary">Edit Job</button>
+          <button v-if="job && !isEditing" @click="startEditing" class="btn-secondary">Edit
+            Job</button>
           <button v-if="job && !isEditing" @click="showDeleteModal = true" class="btn-danger">Delete Job</button>
         </div>
       </div>
@@ -290,11 +347,14 @@ const handleUpdate = () => {
             <div class="form-group">
               <label>Status</label>
               <select v-model="editForm.job_status">
-                <option value="Pending">Pending</option>
-                <option value="Running">Running</option>
-                <option value="Paused">Paused</option>
-                <option value="Completed">Completed</option>
-                <option value="Failed">Failed</option>
+                <option value="pending">Pending</option>
+                <option value="running">Running</option>
+                <option value="paused">Paused</option>
+                <option value="completed">Completed</option>
+                <option value="failed">Failed</option>
+                <option value="cancelled">Cancelled</option>
+                <option value="timed_out">Timed Out</option>
+                <option value="disabled">Disabled</option>
               </select>
             </div>
           </div>
@@ -331,7 +391,9 @@ const handleUpdate = () => {
           </template>
 
           <div v-if="showScheduleWarning" class="warning-banner">
-            <strong>Warning:</strong> This job is scheduled less than 1 hour from now. The client may execute the job before this change takes effect.
+            <strong>Warning:</strong> This job is scheduled less than 1 hour from now. The client may execute the job
+            before this
+            change takes effect.
           </div>
 
           <div class="form-actions">
@@ -360,7 +422,8 @@ const handleUpdate = () => {
               <template v-if="parsedJobType.type === 'recurring'">
                 <div class="info-item">
                   <span class="label">Frequency</span>
-                  <span class="value">Every {{ parsedJobType.frequency_number }} {{ parsedJobType.frequency_unit }}</span>
+                  <span class="value">Every {{ parsedJobType.frequency_number }} {{ parsedJobType.frequency_unit
+                    }}</span>
                 </div>
               </template>
             </template>
@@ -384,18 +447,28 @@ const handleUpdate = () => {
         </div>
       </section>
 
-      <!-- Group Assignment Section (only shown when editing) -->
-      <section v-if="isEditing" class="info-section card">
+      <!-- Group Assignment Section (shown when editing or managing groups) -->
+      <section v-if="isEditing || isManagingGroups" class="info-section card">
         <div class="section-header">
-          <h2>Assigned Groups</h2>
-          <a href="/groups/new" target="_blank" class="create-link">+ Create New Group</a>
+          <div>
+            <h2>Assigned Groups</h2>
+            <a href="/groups/new" target="_blank" class="create-link">+ Create New Group</a>
+          </div>
+          <div class="header-actions-group">
+            <div v-if="isManagingGroups" class="header-actions">
+              <button @click="saveManagedGroups" class="btn-primary" :disabled="updateGroupsMutation.isPending.value">
+                {{ updateGroupsMutation.isPending.value ? 'Saving...' : 'Save Groups' }}
+              </button>
+              <button @click="cancelManagingGroups" class="btn-ghost">Cancel</button>
+            </div>
+          </div>
         </div>
         <div class="group-selector">
           <div v-if="!allGroups || allGroups.length === 0" class="no-groups">
             No groups available. <a href="/groups/new" target="_blank">Create a group</a> first.
           </div>
           <div v-else v-for="group in allGroups" :key="group.id" class="group-checkbox">
-            <input type="checkbox" :id="group.id" :value="group.id" v-model="selectedGroupIds" />
+            <input type="checkbox" :id="group.id" :value="group.id" v-model="activeGroupIds" />
             <label :for="group.id">
               <span class="group-name">{{ group.group_name }}</span>
               <span class="group-id">{{ group.id }}</span>
@@ -404,12 +477,18 @@ const handleUpdate = () => {
         </div>
       </section>
 
-      <!-- Client Tree Section -->
-      <section v-if="!isEditing" class="client-tree-section card">
+      <!-- Client Groups Section -->
+      <section v-if="!isManagingGroups" class="client-tree-section card">
         <div class="section-header">
-          <h2>Client Groups</h2>
+          <div>
+            <h2>Client Groups</h2>
+            <a href="/groups/new" target="_blank" class="create-link">+ Create New Group</a>
+          </div>
+          <div v-if="!isManagingGroups" class="header-actions">
+            <button @click="startManagingGroups" class="btn-secondary">Manage Groups</button>
+          </div>
         </div>
-        <ClientTree :groups="groupsWithClients || []" :job-id="jobId" />
+        <ClientTree v-if="!isEditing && !isManagingGroups" :groups="groupsWithClients || []" :job-id="jobId" />
       </section>
     </div>
 
@@ -452,6 +531,11 @@ const handleUpdate = () => {
 .header-actions {
   display: flex;
   gap: 0.75rem;
+}
+
+.header-actions-group {
+  display: flex;
+  flex-direction: row;
 }
 
 .title-group {
@@ -616,11 +700,13 @@ const handleUpdate = () => {
 
   input[type="number"] {
     width: 80px;
+
     -webkit-inner-spin-button,
     -webkit-outer-spin-button {
       -webkit-appearance: none;
       margin: 0;
     }
+
     -moz-appearance: textfield;
   }
 

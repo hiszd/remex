@@ -30,7 +30,11 @@ diesel::table! {
         id -> Text,
         client_id -> Text,
         execution_id -> Text,
-        log -> Text,
+        command -> Text,
+        output -> Text,
+        exit_code -> Text,
+        start_time -> Timestamp,
+        end_time -> Timestamp,
         created_at -> Timestamp,
         updated_at -> Timestamp,
     }

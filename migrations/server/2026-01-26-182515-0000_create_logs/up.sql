@@ -5,7 +5,11 @@ CREATE TABLE logs (
     client_id TEXT NOT NULL,
     execution_id TEXT NOT NULL,
     FOREIGN KEY (execution_id) REFERENCES executions (id) ON DELETE CASCADE,
-    log TEXT NOT NULL,
+    output TEXT NOT NULL,
+    command TEXT NOT NULL,
+    exit_code TEXT NOT NULL,
+    start_time TIMESTAMP NOT NULL,
+    end_time TIMESTAMP NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

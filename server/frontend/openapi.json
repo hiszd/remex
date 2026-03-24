@@ -222,6 +222,78 @@
             "description": "Group not found"
           }
         }
+      },
+      "post": {
+        "tags": [
+          "handlers::groups"
+        ],
+        "operationId": "add_clients_to_group",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "description": "Group ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddClientsToGroupForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Clients added to group successfully"
+          },
+          "404": {
+            "description": "Group not found"
+          }
+        }
+      }
+    },
+    "/groups/{group_id}/clients/remove": {
+      "post": {
+        "tags": [
+          "handlers::groups"
+        ],
+        "operationId": "remove_clients_from_group",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "description": "Group ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveClientsFromGroupForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Clients removed from group successfully"
+          },
+          "404": {
+            "description": "Group not found"
+          }
+        }
       }
     },
     "/groups/{group_id}/jobs": {
@@ -615,6 +687,20 @@
   },
   "components": {
     "schemas": {
+      "AddClientsToGroupForm": {
+        "type": "object",
+        "required": [
+          "client_ids"
+        ],
+        "properties": {
+          "client_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "Client": {
         "type": "object",
         "required": [
@@ -779,6 +865,15 @@
           "group_name"
         ],
         "properties": {
+          "client_ids": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
           "group_name": {
             "type": "string"
           }
@@ -838,9 +933,14 @@
           "id",
           "group_name",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "client_count"
         ],
         "properties": {
+          "client_count": {
+            "type": "integer",
+            "format": "int64"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"
@@ -1229,6 +1329,20 @@
           "updated_at": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "RemoveClientsFromGroupForm": {
+        "type": "object",
+        "required": [
+          "client_ids"
+        ],
+        "properties": {
+          "client_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },

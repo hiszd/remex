@@ -1,10 +1,16 @@
 use std::sync::Arc;
 
+use chrono::Utc;
 use remex_core::{
   codec,
-  db::dal::jobs::JobStatus,
+  db::dal::{
+    executions::Execution,
+    jobs::JobStatus,
+    logs::Log,
+  },
 };
 use tokio::sync::Mutex;
+use uuid::Uuid;
 
 pub async fn jobs_check(
   ctx: Arc<Mutex<crate::Context>>,
@@ -74,45 +80,85 @@ pub async fn jobs_exec(
       }
     }
 
-    for mut j in jobs_to_exec {
+    for j in jobs_to_exec {
+      let execution_id = Uuid::new_v4().to_string();
+      let log_id = Uuid::new_v4().to_string();
+      let start_time = Utc::now().naive_utc();
+
       tracing::info!(
         "Executing command: {}\n for Job {} because job is in {:?} state",
         j.job.job_command,
         j.job.job_name,
         j.job.job_status,
       );
+
       let command: Vec<&str> = j.job.job_command.split(' ').collect();
-      match crate::utils::run_command(command[0], &command[1..]) {
+      let (output, exit_code) = match crate::utils::run_command(command[0], &command[1..]) {
         Ok(output) => {
           tracing::info!("Command {} output: {}", command[0], output);
-          j.job.job_status = JobStatus::Completed;
-          {
-            let mut ctx_lock = ctx.lock().await;
-            ctx_lock.cache.jobs = ctx_lock
-              .cache
-              .jobs
-              .iter()
-              .map(|n| {
-                let mut nj = n.clone();
-                if n.job.id == j.job.id {
-                  nj.job.job_status = "completed".to_string().into();
-                }
-                nj
-              })
-              .collect();
-          }
-          if tx
-            .send(codec::ClientRequest::JobsRequest(codec::JobsRequest::UpdateJob(j.job)))
-            .await
-            .is_err()
-          {
-            // Channel closed, graceful exit
-            return;
-          }
+          (output, 0)
         }
         Err(e) => {
           tracing::error!("Failed to execute command: {}", e);
+          (e.to_string(), -1)
         }
+      };
+
+      let end_time = Utc::now().naive_utc();
+      let client_id = {
+        let ctx_lock = ctx.lock().await;
+        ctx_lock.id.clone().unwrap_or_else(|| "unknown".to_string())
+      };
+
+      let execution = Execution {
+        id: execution_id.clone(),
+        job_id: Some(j.job.id.clone()),
+        client_id: client_id.clone(),
+        executed_at: Some(start_time),
+        execution_result: Some(output.clone()),
+        created_at: start_time,
+        updated_at: end_time,
+      };
+
+      let log = Log {
+        id: log_id,
+        client_id: client_id.clone(),
+        execution_id: execution_id.clone(),
+        output: output.clone(),
+        command: j.job.job_command.clone(),
+        exit_code: exit_code.to_string(),
+        start_time,
+        end_time,
+        created_at: end_time,
+        updated_at: end_time,
+      };
+
+      {
+        let mut ctx_lock = ctx.lock().await;
+        ctx_lock.cache.jobs = ctx_lock
+          .cache
+          .jobs
+          .iter()
+          .map(|n| {
+            let mut nj = n.clone();
+            if n.job.id == j.job.id {
+              nj.job.job_status = JobStatus::Completed;
+            }
+            nj
+          })
+          .collect();
+      }
+
+      if tx
+        .send(codec::ClientRequest::JobsRequest(codec::JobsRequest::SendExecutions(
+          j.job.id.clone(),
+          vec![execution],
+          vec![log],
+        )))
+        .await
+        .is_err()
+      {
+        return;
       }
     }
   }

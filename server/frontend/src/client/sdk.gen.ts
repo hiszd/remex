@@ -2,7 +2,7 @@
 
 import type { Client, Options as Options2, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AddClientsToJobsData, AddClientsToJobsResponses, CreateClientData, CreateClientResponses, CreateGroupData, CreateGroupResponses, CreateJobData, CreateJobResponses, DeleteJobData, DeleteJobErrors, DeleteJobResponses, GetClientByIdData, GetClientByIdErrors, GetClientByIdResponses, GetClientsData, GetClientsResponses, GetGroupByIdData, GetGroupByIdErrors, GetGroupByIdResponses, GetGroupClientsData, GetGroupClientsErrors, GetGroupClientsResponses, GetGroupJobsData, GetGroupJobsErrors, GetGroupJobsResponses, GetGroupJobStatusHandlerData, GetGroupJobStatusHandlerErrors, GetGroupJobStatusHandlerResponses, GetGroupsData, GetGroupsResponses, GetJobByIdData, GetJobByIdErrors, GetJobByIdResponses, GetJobClientStatusesData, GetJobClientStatusesErrors, GetJobClientStatusesResponses, GetJobGroupsData, GetJobGroupsErrors, GetJobGroupsResponses, GetJobsData, GetJobsResponses, RemoveClientsFromJobsData, RemoveClientsFromJobsResponses, UpdateJobData, UpdateJobErrors, UpdateJobGroupsData, UpdateJobGroupsErrors, UpdateJobGroupsResponses, UpdateJobResponses } from './types.gen';
+import type { AddClientsToGroupData, AddClientsToGroupErrors, AddClientsToGroupResponses, AddClientsToJobsData, AddClientsToJobsResponses, CreateClientData, CreateClientResponses, CreateGroupData, CreateGroupResponses, CreateJobData, CreateJobResponses, DeleteJobData, DeleteJobErrors, DeleteJobResponses, GetClientByIdData, GetClientByIdErrors, GetClientByIdResponses, GetClientsData, GetClientsResponses, GetGroupByIdData, GetGroupByIdErrors, GetGroupByIdResponses, GetGroupClientsData, GetGroupClientsErrors, GetGroupClientsResponses, GetGroupJobsData, GetGroupJobsErrors, GetGroupJobsResponses, GetGroupJobStatusHandlerData, GetGroupJobStatusHandlerErrors, GetGroupJobStatusHandlerResponses, GetGroupsData, GetGroupsResponses, GetJobByIdData, GetJobByIdErrors, GetJobByIdResponses, GetJobClientStatusesData, GetJobClientStatusesErrors, GetJobClientStatusesResponses, GetJobGroupsData, GetJobGroupsErrors, GetJobGroupsResponses, GetJobsData, GetJobsResponses, RemoveClientsFromGroupData, RemoveClientsFromGroupErrors, RemoveClientsFromGroupResponses, RemoveClientsFromJobsData, RemoveClientsFromJobsResponses, UpdateJobData, UpdateJobErrors, UpdateJobGroupsData, UpdateJobGroupsErrors, UpdateJobGroupsResponses, UpdateJobResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean> = Options2<TData, ThrowOnError> & {
     /**
@@ -45,6 +45,24 @@ export const createGroup = <ThrowOnError extends boolean = false>(options: Optio
 export const getGroupById = <ThrowOnError extends boolean = false>(options: Options<GetGroupByIdData, ThrowOnError>) => (options.client ?? client).get<GetGroupByIdResponses, GetGroupByIdErrors, ThrowOnError>({ url: '/groups/{group_id}', ...options });
 
 export const getGroupClients = <ThrowOnError extends boolean = false>(options: Options<GetGroupClientsData, ThrowOnError>) => (options.client ?? client).get<GetGroupClientsResponses, GetGroupClientsErrors, ThrowOnError>({ url: '/groups/{group_id}/clients', ...options });
+
+export const addClientsToGroup = <ThrowOnError extends boolean = false>(options: Options<AddClientsToGroupData, ThrowOnError>) => (options.client ?? client).post<AddClientsToGroupResponses, AddClientsToGroupErrors, ThrowOnError>({
+    url: '/groups/{group_id}/clients',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const removeClientsFromGroup = <ThrowOnError extends boolean = false>(options: Options<RemoveClientsFromGroupData, ThrowOnError>) => (options.client ?? client).post<RemoveClientsFromGroupResponses, RemoveClientsFromGroupErrors, ThrowOnError>({
+    url: '/groups/{group_id}/clients/remove',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
 
 export const getGroupJobs = <ThrowOnError extends boolean = false>(options: Options<GetGroupJobsData, ThrowOnError>) => (options.client ?? client).get<GetGroupJobsResponses, GetGroupJobsErrors, ThrowOnError>({ url: '/groups/{group_id}/jobs', ...options });
 

@@ -1,28 +1,41 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { useMutation, useQueryClient } from '@tanstack/vue-query';
-import { createGroup } from '@/client/index';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query';
+import { getClients, createGroup } from '@/client/index';
+import type { Client, CreateGroupForm } from '@/client/types.gen';
 
 const router = useRouter();
 const queryClient = useQueryClient();
 
+const { data: clients, isLoading: loadingClients } = useQuery({
+  queryKey: ['clients'],
+  queryFn: async () => {
+    const { data, error } = await getClients();
+    if (error) throw error;
+    return data as Client[];
+  }
+});
+
 const form = ref({
-  group_name: ''
+  group_name: '',
+  client_ids: [] as string[]
 });
 
 const isSubmitting = ref(false);
 const submitError = ref<string | null>(null);
 
 const mutation = useMutation({
-  mutationFn: async () => {
-    const { error } = await createGroup({
-      body: form.value
+  mutationFn: async (newGroup: CreateGroupForm) => {
+    const { data, error } = await createGroup({
+      body: newGroup
     });
     if (error) throw error;
+    return data;
   },
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: ['groups'] });
+    queryClient.invalidateQueries({ queryKey: ['clients'] });
     router.push('/groups');
   },
   onError: (err: Error) => {
@@ -34,7 +47,11 @@ const mutation = useMutation({
 const handleSubmit = async () => {
   isSubmitting.value = true;
   submitError.value = null;
-  mutation.mutate();
+  const payload: CreateGroupForm = {
+    group_name: form.value.group_name,
+    client_ids: form.value.client_ids.length > 0 ? form.value.client_ids : null
+  };
+  mutation.mutate(payload);
 };
 </script>
 
@@ -62,6 +79,26 @@ const handleSubmit = async () => {
         />
       </div>
 
+      <div class="form-section">
+        <div class="label-row">
+          <label>Assign Clients</label>
+        </div>
+
+        <div v-if="loadingClients" class="loading-inline">Loading clients...</div>
+        <div v-else class="client-selector">
+          <div v-for="client in clients" :key="client.id" class="client-checkbox">
+            <input type="checkbox" :id="client.id" :value="client.id" v-model="form.client_ids" />
+            <label :for="client.id">
+              <span class="client-name">{{ client.client_name }}</span>
+              <span class="client-id">{{ client.id }}</span>
+            </label>
+          </div>
+          <div v-if="!clients || clients.length === 0" class="no-clients">
+            No clients available. Clients will appear here once they connect.
+          </div>
+        </div>
+      </div>
+
       <div class="form-actions">
         <button type="button" @click="router.push('/groups')" class="btn-secondary" :disabled="isSubmitting">
           Cancel
@@ -79,7 +116,7 @@ const handleSubmit = async () => {
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-width: 600px;
+  max-width: 800px;
   margin: 0 auto;
   padding: 2rem 1.5rem;
   gap: 2rem;
@@ -91,6 +128,7 @@ const handleSubmit = async () => {
   font-size: 0.9rem;
   color: var(--accent-500);
   text-decoration: none;
+
   &:hover {
     text-decoration: underline;
   }
@@ -102,6 +140,7 @@ const handleSubmit = async () => {
     font-size: 1.75rem;
     font-weight: 800;
   }
+
   .page-subtitle {
     margin: 0.25rem 0 0;
     font-size: 0.95rem;
@@ -146,10 +185,10 @@ const handleSubmit = async () => {
     padding: 0.75rem 1rem;
     border-radius: 0.5rem;
     border: 1px solid var(--color-border);
-    background: var(--background-200);
+    background: var(--background-50);
     font-size: 1rem;
     color: var(--text-950);
-    
+
     &:focus {
       outline: none;
       border-color: var(--accent-500);
@@ -158,13 +197,91 @@ const handleSubmit = async () => {
   }
 }
 
+.label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  label {
+    font-size: 0.85rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.025em;
+    opacity: 0.8;
+  }
+}
+
+.loading-inline {
+  padding: 1rem;
+  font-size: 0.9rem;
+  color: var(--text-500);
+  text-align: center;
+}
+
+.client-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 250px;
+  overflow-y: auto;
+  padding: 1rem;
+  background: var(--background-50);
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-border);
+}
+
+.client-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem;
+  border-radius: 0.25rem;
+
+  &:hover {
+    background: var(--background-50);
+  }
+
+  input {
+    width: 1.1rem;
+    height: 1.1rem;
+    cursor: pointer;
+  }
+
+  label {
+    display: flex;
+    flex-direction: column;
+    cursor: pointer;
+    text-transform: none;
+    letter-spacing: normal;
+    opacity: 1;
+
+    .client-name {
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+
+    .client-id {
+      font-size: 0.75rem;
+      opacity: 0.5;
+      font-family: monospace;
+    }
+  }
+}
+
+.no-clients {
+  font-size: 0.9rem;
+  color: var(--text-500);
+  text-align: center;
+  padding: 1rem;
+}
+
 .form-actions {
   display: flex;
   justify-content: flex-end;
   gap: 1rem;
   margin-top: 1rem;
   padding-top: 1.5rem;
-  border-top: 1px solid rgba(0,0,0,0.1);
+  border-top: 1px solid rgba(0, 0, 0, 0.1);
 }
 
 .btn-primary {
@@ -180,6 +297,7 @@ const handleSubmit = async () => {
   &:hover:not(:disabled) {
     background-color: var(--accent-600);
   }
+
   &:disabled {
     opacity: 0.5;
     cursor: not-allowed;
@@ -192,11 +310,11 @@ const handleSubmit = async () => {
   background-color: transparent;
   color: var(--text-950);
   font-weight: 600;
-  border: 1px solid rgba(0,0,0,0.1);
+  border: 1px solid rgba(0, 0, 0, 0.1);
   cursor: pointer;
 
   &:hover:not(:disabled) {
-    background-color: rgba(0,0,0,0.05);
+    background-color: rgba(0, 0, 0, 0.05);
   }
 }
 </style>

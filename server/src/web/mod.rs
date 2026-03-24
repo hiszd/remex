@@ -28,7 +28,9 @@ mod handlers;
     handlers::groups::get_group_by_id,
     handlers::groups::get_group_clients,
     handlers::groups::get_group_jobs,
-    handlers::groups::get_group_job_status_handler
+    handlers::groups::get_group_job_status_handler,
+    handlers::groups::add_clients_to_group,
+    handlers::groups::remove_clients_from_group
   ),
   components(schemas(
     remex_core::db::model::server::clients::ClientSRV,
@@ -48,6 +50,8 @@ mod handlers;
     handlers::groups::GroupPath,
     handlers::groups::GroupJobPath,
     handlers::groups::CreateGroupForm,
+    handlers::groups::AddClientsToGroupForm,
+    handlers::groups::RemoveClientsFromGroupForm,
     handlers::jobs::data_gathering::ClientStatusSummary,
     handlers::jobs::data_gathering::GroupJobStatusMetadata
   ))
@@ -58,12 +62,12 @@ struct ApiDoc;
 pub fn generate_api() {
   tracing::info!("Generating openapi json");
   // ensure frontend directory exists
-  if let Err(e) = std::fs::create_dir_all("./frontend") {
+  if let Err(e) = std::fs::create_dir_all("./server/frontend") {
     tracing::error!("Failed to create frontend directory: {}", e);
   }
   // export openapi json
   std::fs::write(
-    "./frontend/openapi.json",
+    "./server/frontend/openapi.json",
     serde_json::to_string_pretty(&ApiDoc::openapi()).unwrap(),
   )
   .unwrap();
@@ -100,6 +104,8 @@ pub fn start_web_server() -> actix_web::dev::Server {
       .service(handlers::groups::get_group_clients)
       .service(handlers::groups::get_group_jobs)
       .service(handlers::groups::get_group_job_status_handler)
+      .service(handlers::groups::add_clients_to_group)
+      .service(handlers::groups::remove_clients_from_group)
       .wrap(
         Cors::default()
           .allowed_origin("http://localhost:5173") // Your Vue dev URL

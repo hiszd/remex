@@ -29,17 +29,6 @@ const form = ref({
   frequency_unit: 'hours'
 });
 
-const frequencyIso8601 = computed(() => {
-  if (form.value.job_type !== 'recurring') return null;
-  const num = form.value.frequency_number;
-  const unit = form.value.frequency_unit;
-  if (unit === 'minutes') return `PT${num}M`;
-  if (unit === 'hours') return `PT${num}H`;
-  if (unit === 'days') return `P${num}D`;
-  if (unit === 'weeks') return `P${num}W`;
-  return null;
-});
-
 const isSubmitting = ref(false);
 const submitError = ref<string | null>(null);
 
@@ -61,18 +50,49 @@ const mutation = useMutation({
   }
 });
 
+const frequencyToSeconds = (num: number, unit: string): number => {
+  if (unit === 'minutes') return num * 60;
+  if (unit === 'hours') return num * 3600;
+  if (unit === 'days') return num * 86400;
+  if (unit === 'weeks') return num * 604800;
+  return num * 3600;
+};
+
 const handleSubmit = async () => {
   isSubmitting.value = true;
   submitError.value = null;
+
+  let jobTypeJson: string;
+  if (form.value.job_type === 'instant') {
+    jobTypeJson = '"instant"';
+  } else if (form.value.job_type === 'scheduled') {
+    const scheduledAt = form.value.scheduled_at ? form.value.scheduled_at + ':00' : null;
+    if (!scheduledAt) {
+      submitError.value = 'Scheduled time is required for scheduled jobs';
+      isSubmitting.value = false;
+      return;
+    }
+    jobTypeJson = JSON.stringify({ scheduled: scheduledAt });
+  } else {
+    const scheduledAt = form.value.scheduled_at ? form.value.scheduled_at + ':00' : null;
+    if (!scheduledAt) {
+      submitError.value = 'Scheduled time is required for recurring jobs';
+      isSubmitting.value = false;
+      return;
+    }
+    const frequencySecs = frequencyToSeconds(form.value.frequency_number, form.value.frequency_unit);
+    jobTypeJson = JSON.stringify({ recurring: [scheduledAt, frequencySecs] });
+  }
+
   const payload: CreateJobForm = {
     job_name: form.value.job_name,
-    job_type: form.value.job_type,
+    job_type: jobTypeJson,
     job_status: form.value.job_status as 'pending' | 'running' | 'completed' | 'cancelled' | 'timed_out' | 'disabled',
     job_shell: form.value.job_shell,
     job_command: form.value.job_command,
     group_ids: form.value.group_ids,
-    scheduled_at: (form.value.job_type === 'scheduled' || form.value.job_type === 'recurring') ? form.value.scheduled_at : null,
-    frequency: frequencyIso8601.value
+    scheduled_at: null,
+    frequency: null
   };
   mutation.mutate(payload);
 };

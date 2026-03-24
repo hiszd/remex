@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { getGroups, type Group } from '@/client/index';
-import { useQuery } from '@tanstack/vue-query';
+import { computed } from 'vue';
+import { getGroups, getGroupClients, type Group, type ClientSrv } from '@/client/index';
+import { useQuery, useQueries } from '@tanstack/vue-query';
 import GroupComponent from '@/components/Group.vue';
 
 const { data: groups, isLoading, isError, error } = useQuery({
@@ -11,12 +12,38 @@ const { data: groups, isLoading, isError, error } = useQuery({
     return data as Group[];
   },
 });
+
+const clientQueries = useQueries({
+  queries: (groups.value ?? []).map((group: Group) => ({
+    queryKey: ['groups', group.id, 'clients'],
+    queryFn: async () => {
+      const { data, error } = await getGroupClients({ path: { group_id: group.id } });
+      if (error) throw error;
+      return { groupId: group.id, clients: (data as ClientSrv[]).slice(0, 5) };
+    },
+    enabled: group.client_count > 0,
+  })),
+});
+
+const groupClientsMap = computed(() => {
+  const map = new Map<string, ClientSrv[]>();
+  const queries = clientQueries.value;
+  for (const query of queries) {
+    if (query.data) {
+      map.set(query.data.groupId, query.data.clients);
+    }
+  }
+  return map;
+});
 </script>
 
 <template>
   <div class="page">
     <header class="page-header">
-      <h1 class="page-title">Groups</h1>
+      <div class="header-top">
+        <h1 class="page-title">Groups</h1>
+        <router-link to="/groups/new" class="btn-primary">Create Group</router-link>
+      </div>
       <p class="page-subtitle" v-if="groups && groups.length > 0">
         {{ groups.length }} {{ groups.length === 1 ? 'group' : 'groups' }}
       </p>
@@ -41,6 +68,7 @@ const { data: groups, isLoading, isError, error } = useQuery({
       <GroupComponent
         v-for="group in groups"
         :group="group"
+        :clients="groupClientsMap.get(group.id)"
         :key="group.id"
       />
     </div>
@@ -59,6 +87,12 @@ const { data: groups, isLoading, isError, error } = useQuery({
 }
 
 .page-header {
+  .header-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
   .page-title {
     margin: 0;
     font-size: 1.75rem;
@@ -127,6 +161,23 @@ const { data: groups, isLoading, isError, error } = useQuery({
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.btn-primary {
+  padding: 0.6rem 1.25rem;
+  border-radius: 0.5rem;
+  background-color: var(--accent-500);
+  color: white;
+  font-weight: 700;
+  text-decoration: none;
+  font-size: 0.9rem;
+  transition: background 0.2s;
+
+  &:hover {
+    background-color: var(--accent-600);
+  }
 }
 </style>
