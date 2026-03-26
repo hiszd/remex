@@ -1,7 +1,6 @@
 //ENDPOINT
 
 use clap::Parser;
-use diesel::RunQueryDsl;
 use futures_util::{
   SinkExt as _,
   StreamExt as _,
@@ -15,7 +14,6 @@ use remex_core::{
     DisconnectReason,
     ServerResponse,
   },
-  db::dal::CltDbOperator,
 };
 use tokio::{
   net::TcpStream,
@@ -43,7 +41,7 @@ struct Args {
 #[derive(Debug, Clone)]
 struct CacheJob {
   locked: bool,
-  job: remex_core::db::dal::jobs::Job,
+  job_name: String,
 }
 
 #[derive(Debug, Clone)]
@@ -84,21 +82,7 @@ async fn main() -> anyhow::Result<()> {
     auth_type: None,
     authentication_used: None,
     jobs_last_requested: None,
-    cache: Cache {
-      jobs: {
-        let mut dbconn = remex_core::db::establish_connection_sqlite();
-        use remex_core::db::schema::endpoint::jobs;
-        jobs::table
-          .load::<remex_core::db::model::endpoint::jobs::JobCLT>(&mut dbconn)
-          .unwrap()
-          .iter()
-          .map(|j| CacheJob {
-            locked: false,
-            job: j.clone().into(),
-          })
-          .collect()
-      },
-    },
+    cache: Cache { jobs: vec![] },
   };
   ctx_data.auth_type = match (id_result, secret_result, args.secret.clone()) {
     // if using the server secret for auth, ensure that the ID and secret are removed first
@@ -150,12 +134,6 @@ async fn main() -> anyhow::Result<()> {
     } else {
       let stream = st.unwrap();
       let mut framed = actix_codec::Framed::new(stream, codec::ServerCodec);
-
-      // initialize Sqlite Db
-      remex_core::db::migrate(remex_core::db::ConnectionType::Sqlite)
-        .await
-        .unwrap();
-      let mut dbconn = remex_core::db::establish_connection_sqlite();
 
       // Flush pending request from a previous failed send before entering the main loop
       if let Some(req) = pending_request.take() {
@@ -231,28 +209,13 @@ async fn main() -> anyhow::Result<()> {
                   }
                   (ServerResponse::JobsResponse(j), true) => {
                     use codec::JobsResponse;
-                    use remex_core::db::{schema::endpoint::jobs, model::endpoint::jobs::{JobCLT} };
                     tracing::info!("Received jobs response");
                     match j {
-                      JobsResponse::ReceiveJobs(jobs) => {
-                        // FIXME: Cache these for the life of the program and update them when a new
+                      JobsResponse::ReceiveJobs(_jobs) => {
+                        // TODO: Cache these for the life of the program and update them when a new
                         // one is added.
-                        tracing::info!("Received {} jobs", jobs.len());
-                        for job in jobs {
-                          job.upsert_clt(&mut dbconn).unwrap();
-                          tracing::info!("Job: {} \n Inserted/Updated in database", job.job_name);
-                        }
-                        let jbs: Vec<JobCLT> = jobs::table.load::<JobCLT>(&mut dbconn).unwrap();
-                        ctx_lock.cache.jobs = jbs
-                          .iter()
-                          .map(|j| {
-                            tracing::info!("Job: {}, status: {}", j.job_name, j.job_status);
-                            CacheJob {
-                              locked: false,
-                              job: j.clone().into(),
-                            }
-                          })
-                          .collect();
+                        tracing::info!("Received jobs (placeholder)");
+                        ctx_lock.cache.jobs = vec![];
                       }
                       j => {
                         tracing::info!("Ignored jobs response: {:#?}", &j);

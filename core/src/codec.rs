@@ -27,8 +27,6 @@ use serde::{
 use serde_json as json;
 use tracing::error;
 
-use crate::db::dal;
-
 // const KEY: &str = "tZs3U%hqY^o$&*y%4HcF8&RyAKevUbZnkTsrjCzPGxfare3Yn9c7shVZETfPDPUc8xR%N38a!TL%2$WbkFhZqmH#jvw&d3^mryPD8Y8TqHoJHwyKSTJeQB7vK7QkW#&B";
 const KEY: &str = "tZs3U%hqY^o$&*y%4HcF8&RyAKevUbZn";
 
@@ -133,9 +131,9 @@ pub enum JobsRequest {
   /// Request all jobs
   All,
   /// Send executions to the server (Job_Id, Executions, Logs)
-  SendExecutions(String, Vec<dal::executions::Execution>, Vec<dal::logs::Log>),
+  SendExecutions(String, (), ()),
   /// Send executions to the server (Job_Id, Executions, Logs)
-  UpdateJob(crate::db::dal::jobs::Job),
+  UpdateJob(()),
 }
 
 /// Client request - come from client
@@ -165,8 +163,8 @@ pub enum ConnectionResponse {
 #[rtype(result = "()")]
 #[serde(tag = "jobs", content = "data")]
 pub enum JobsResponse {
-  All(Vec<dal::jobs::Job>),
-  ReceiveJobs(Vec<dal::jobs::Job>),
+  All(Vec<()>),
+  ReceiveJobs(Vec<()>),
 }
 
 /// Server response - respond to client requests

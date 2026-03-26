@@ -1,8 +1,0 @@
--- Your SQL goes here
-CREATE OR REPLACE FUNCTION update_modified_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = now(); -- Or CURRENT_TIMESTAMP
-    RETURN NEW;
-END;
-$$ language 'plpgsql';

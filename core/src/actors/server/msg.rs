@@ -32,29 +32,30 @@ impl Handler<ClientDisconnect> for super::RemexServer {
 #[derive(Message)]
 #[rtype(result = "Result<(), crate::codec::DisconnectReason>")]
 pub struct ClientConnect {
-  pub client: crate::db::model::server::clients::ClientSRV,
+  pub id: String,
+  pub client_name: String,
   pub addr: actix::Addr<session::RemexSession>,
 }
 /// Handler for Connect message.
 impl Handler<ClientConnect> for super::RemexServer {
   type Result = Result<(), crate::codec::DisconnectReason>;
   fn handle(&mut self, msg: ClientConnect, _: &mut Context<Self>) -> Self::Result {
-    if self.sessions.exists(&msg.client.id) {
+    if self.sessions.exists(&msg.id) {
       tracing::warn!(
-        client_id = %msg.client.id,
-        client_name = %msg.client.client_name,
+        client_id = %msg.id,
+        client_name = %msg.client_name,
         "DUPLICATE CLIENT CONNECTION DENIED: a client with id '{}' (name: '{}') attempted to \
          connect while another session with the same id is already active. \
          This may indicate a misconfiguration or unauthorized access attempt. \
          Review client credentials and endpoint deployments.",
-        &msg.client.id,
-        &msg.client.client_name,
+        &msg.id,
+        &msg.client_name,
       );
       return Err(crate::codec::DisconnectReason::DuplicateClient);
     }
 
-    tracing::info!("New client connected: {}", &msg.client.id);
-    match self.sessions.insert(msg.client.id, msg.addr.clone()) {
+    tracing::info!("New client connected: {}", &msg.id);
+    match self.sessions.insert(msg.id, msg.addr.clone()) {
       Ok(_) => Ok(()),
       Err(e) => {
         let err = format!("Session insert error: {}", e);

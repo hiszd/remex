@@ -33,10 +33,9 @@ mod handlers;
     handlers::groups::remove_clients_from_group
   ),
   components(schemas(
-    remex_core::db::model::server::clients::ClientSRV,
+    handlers::clients::Client,
     handlers::clients::CreateClientForm,
-    remex_core::db::model::server::jobs::JobSRV,
-    remex_core::db::model::server::jobs::UpdateJobSRV,
+    handlers::jobs::Job,
     handlers::jobs::JobWithClients,
     handlers::jobs::CreateJobForm,
     handlers::jobs::JobClientAction,

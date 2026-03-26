@@ -1,27 +1,11 @@
 [tasks.setup]
-command = "diesel"
-args = [
-  "database",
-  "setup",
-  "--database-url",
-  "postgresql://postgres:H%40ck3r345@192.168.10.132:5432/remex",
-  "--migration-dir",
-  "../migrations/server",
-]
+script = "echo TODO: Set up database migration"
 
 [tasks.reset]
-command = "diesel"
-args = [
-  "database",
-  "reset",
-  "--database-url",
-  "postgresql://postgres:H%40ck3r345@192.168.10.132:5432/remex",
-  "--migration-dir",
-  "../migrations/server",
-]
+script = "echo TODO: Reset database"
 
 [tasks.schema]
-script = "diesel print-schema --database-url postgresql://postgres:H%40ck3r345@192.168.10.132:5432/remex &> ../core/src/db/schema/server.rs"
+script = "echo TODO: Generate schema"
 
 [tasks.openapigen]
 script = "cargo run --bin api"

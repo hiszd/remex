@@ -21,14 +21,8 @@ impl Actor for RemexServer {
   /// with other actors.
   type Context = Context<Self>;
   fn started(&mut self, _ctx: &mut Context<Self>) {
-    self.migrated = false;
-    // migrate the database and panic if migration fails
-    futures::executor::block_on(async {
-      crate::db::migrate(crate::db::ConnectionType::Postgres)
-        .await
-        .unwrap();
-      self.migrated = true;
-      tracing::info!("Database migrated");
-    });
+    // TODO: Implement database migration when new ORM is added
+    self.migrated = true;
+    tracing::info!("Server started (database migration placeholder)");
   }
 }

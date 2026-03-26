@@ -1,24 +1,8 @@
 [tasks.setup]
-command = "diesel"
-args = [
-  "database",
-  "setup",
-  "--database-url",
-  "sqlite://endpoint.db",
-  "--migration-dir",
-  "../migrations/endpoint",
-]
+script = "echo TODO: Set up database migration"
 
 [tasks.reset]
-command = "diesel"
-args = [
-  "database",
-  "reset",
-  "--database-url",
-  "sqlite://endpoint.db",
-  "--migration-dir",
-  "../migrations/endpoint",
-]
+script = "echo TODO: Reset database"
 
 [tasks.schema]
-script = "diesel print-schema --database-url sqlite://endpoint.db &> ../core/src/db/schema/endpoint.rs"
+script = "echo TODO: Generate schema"
