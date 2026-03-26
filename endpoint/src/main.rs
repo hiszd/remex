@@ -1,7 +1,6 @@
 //ENDPOINT
 
 use clap::Parser;
-use diesel::RunQueryDsl;
 use futures_util::{
   SinkExt as _,
   StreamExt as _,
@@ -15,7 +14,6 @@ use remex_core::{
     DisconnectReason,
     ServerResponse,
   },
-  db::dal::CltDbOperator,
 };
 use tokio::{
   net::TcpStream,
@@ -23,6 +21,7 @@ use tokio::{
 };
 
 mod async_tasks;
+mod db;
 mod fs;
 mod utils;
 
@@ -38,12 +37,21 @@ struct Args {
   /// Server IP to connect to
   #[clap(long, env = "REMEX_PORT", default_value = "4269")]
   port: String,
+  /// SurrealDB URL
+  #[clap(long, env = "SURREALDB_URL", default_value = "ws://192.168.10.87:8090")]
+  surrealdb_url: String,
+  /// SurrealDB Namespace
+  #[clap(long, env = "SURREALDB_NAMESPACE", default_value = "remex")]
+  surrealdb_namespace: String,
+  /// SurrealDB Database
+  #[clap(long, env = "SURREALDB_DATABASE", default_value = "remex")]
+  surrealdb_database: String,
 }
 
 #[derive(Debug, Clone)]
 struct CacheJob {
   locked: bool,
-  job: remex_core::db::dal::jobs::Job,
+  job: remex_core::db::surreal::models::Job,
 }
 
 #[derive(Debug, Clone)]
@@ -55,6 +63,8 @@ struct Cache {
 struct Context {
   id: Option<String>,
   secret: Option<String>,
+  jwt_token: Option<String>,
+  db: Option<db::Db>,
   name: String,
   authenticated: bool,
   auth_type: Option<codec::IdentifyType>,
@@ -70,45 +80,29 @@ async fn main() -> anyhow::Result<()> {
 
   /* ********** VARIABLE INITIALIZATION ********** */
 
-  // Check if both ID and secret are saved
   let id_result = fs::id::get_id()?;
   let secret_result = fs::secret::get_secret()?;
-  // Get the machine's hardware hash
   let hw_hash = machine_uid::get().unwrap();
   let args = Args::parse();
   let mut ctx_data = Context {
     id: None,
     secret: None,
+    jwt_token: None,
+    db: None,
     name: gethostname().to_string_lossy().to_string(),
     authenticated: false,
     auth_type: None,
     authentication_used: None,
     jobs_last_requested: None,
-    cache: Cache {
-      jobs: {
-        let mut dbconn = remex_core::db::establish_connection_sqlite();
-        use remex_core::db::schema::endpoint::jobs;
-        jobs::table
-          .load::<remex_core::db::model::endpoint::jobs::JobCLT>(&mut dbconn)
-          .unwrap()
-          .iter()
-          .map(|j| CacheJob {
-            locked: false,
-            job: j.clone().into(),
-          })
-          .collect()
-      },
-    },
+    cache: Cache { jobs: Vec::new() },
   };
   ctx_data.auth_type = match (id_result, secret_result, args.secret.clone()) {
-    // if using the server secret for auth, ensure that the ID and secret are removed first
     (_, _, Some(secret)) => {
       fs::id::remove_id().unwrap();
       fs::secret::remove_secret().unwrap();
       Some(codec::IdentifyType::Secret(secret, ctx_data.name.clone(), hw_hash))
     }
     (Some(id), Some(secret), _) => {
-      // Both ID and secret are found, continue normally
       Some(codec::IdentifyType::ClientSecret(secret, ctx_data.name.clone(), id, hw_hash))
     }
     (_, _, None) => {
@@ -119,7 +113,6 @@ async fn main() -> anyhow::Result<()> {
 
   /* ********** INPUT VALIDATION ********** */
 
-  // Validate secret length
   if let Some(sec) = args.secret.clone() {
     if sec.len() < 64 {
       panic!("Secret must be at least 64 characters long");
@@ -128,21 +121,20 @@ async fn main() -> anyhow::Result<()> {
 
   /* ********** MAIN LOOP ********** */
 
-  // Create bounded channel for outgoing requests with backpressure
   let (client_request_tx, mut client_request_rx) =
     tokio::sync::mpsc::channel::<codec::ClientRequest>(1000);
 
-  // Buffer to hold a message that was popped but failed to send due to disconnect
   let mut pending_request: Option<codec::ClientRequest> = None;
 
-  // spawn threads to request new jobs and execute them outside of the reconnection loop
-  // so they keep generating messages even when the connection is down.
   tokio::spawn(async_tasks::jobs::jobs_check(ctx.clone(), client_request_tx.clone()));
   tokio::spawn(async_tasks::jobs::jobs_exec(ctx.clone(), client_request_tx.clone()));
+  tokio::spawn(async_tasks::server_monitor::server_monitor(ctx.clone()));
+
+  let (jwt_response_tx, jwt_response_rx) = tokio::sync::mpsc::channel::<codec::ServerResponse>(10);
+  let jwt_response_tx_for_loop = jwt_response_tx.clone();
+  tokio::spawn(async_tasks::jwt::jwt_refresh(ctx.clone(), client_request_tx.clone(), jwt_response_rx));
 
   loop {
-    // continually try and connect to the server every 5 seconds until we succeed
-    // TODO: Maybe handle errors that aren't "Connection Refused" differently in the future
     let st = TcpStream::connect(format!("{}:{}", args.server, args.port)).await;
     if st.is_err() {
       tracing::warn!("Failed to connect to server. Trying again in 5 seconds 1");
@@ -151,13 +143,6 @@ async fn main() -> anyhow::Result<()> {
       let stream = st.unwrap();
       let mut framed = actix_codec::Framed::new(stream, codec::ServerCodec);
 
-      // initialize Sqlite Db
-      remex_core::db::migrate(remex_core::db::ConnectionType::Sqlite)
-        .await
-        .unwrap();
-      let mut dbconn = remex_core::db::establish_connection_sqlite();
-
-      // Flush pending request from a previous failed send before entering the main loop
       if let Some(req) = pending_request.take() {
         if let Err(e) = framed.send(req.clone()).await {
           tracing::error!("Failed to send pending request: {}\n Trying again in 5 seconds", e);
@@ -198,6 +183,11 @@ async fn main() -> anyhow::Result<()> {
                       ctx_lock.authentication_used = Some(iden);
                     }
                   }
+                  (ServerResponse::JwtRefreshed(token), _) => {
+                    if let Err(e) = jwt_response_tx_for_loop.send(ServerResponse::JwtRefreshed(token.clone())).await {
+                      tracing::error!("Failed to send JWT refresh to handler: {}", e);
+                    }
+                  }
                   (ServerResponse::ConnectionResponse(ConnectionResponse::Disconnect(reason)), _) => {
                     match reason {
                       DisconnectReason::AuthFailed => {
@@ -231,25 +221,17 @@ async fn main() -> anyhow::Result<()> {
                   }
                   (ServerResponse::JobsResponse(j), true) => {
                     use codec::JobsResponse;
-                    use remex_core::db::{schema::endpoint::jobs, model::endpoint::jobs::{JobCLT} };
                     tracing::info!("Received jobs response");
                     match j {
                       JobsResponse::ReceiveJobs(jobs) => {
-                        // FIXME: Cache these for the life of the program and update them when a new
-                        // one is added.
                         tracing::info!("Received {} jobs", jobs.len());
-                        for job in jobs {
-                          job.upsert_clt(&mut dbconn).unwrap();
-                          tracing::info!("Job: {} \n Inserted/Updated in database", job.job_name);
-                        }
-                        let jbs: Vec<JobCLT> = jobs::table.load::<JobCLT>(&mut dbconn).unwrap();
-                        ctx_lock.cache.jobs = jbs
+                        ctx_lock.cache.jobs = jobs
                           .iter()
                           .map(|j| {
-                            tracing::info!("Job: {}, status: {}", j.job_name, j.job_status);
+                            tracing::info!("Job: {}, status: {:?}", j.job_name, j.job_status);
                             CacheJob {
                               locked: false,
-                              job: j.clone().into(),
+                              job: j.clone(),
                             }
                           })
                           .collect();
@@ -260,15 +242,36 @@ async fn main() -> anyhow::Result<()> {
                     }
                   }
                   (
-                    ServerResponse::ConnectionResponse(ConnectionResponse::Authenticated(id, secret)),
+                    ServerResponse::ConnectionResponse(ConnectionResponse::Authenticated(id, secret, jwt_token)),
                     _,
                   ) => {
-                    tracing::info!("Authenticated with id: {}, secret: {}", &id, &secret);
+                    tracing::info!("Authenticated with id: {}, secret: {}, jwt_token: {}", &id, &secret, &jwt_token);
                     ctx_lock.id = Some(id.clone());
                     ctx_lock.secret = Some(secret.clone());
+                    ctx_lock.jwt_token = Some(jwt_token.clone());
                     ctx_lock.authenticated = true;
                     fs::id::save_id(id).unwrap();
                     fs::secret::save_secret(secret).unwrap();
+                    
+                    let db_url = args.surrealdb_url.clone();
+                    let db_namespace = args.surrealdb_namespace.clone();
+                    let db_database = args.surrealdb_database.clone();
+                    let jwt = jwt_token.clone();
+                    let db_clone = ctx.clone();
+                    
+                    tokio::spawn(async move {
+                      match db::connect(&db_url, &db_namespace, &db_database, &jwt).await {
+                        Ok(database) => {
+                          tracing::info!("Connected to SurrealDB");
+                          let mut ctx_write = db_clone.lock().await;
+                          ctx_write.db = Some(database);
+                        }
+                        Err(e) => {
+                          tracing::error!("Failed to connect to SurrealDB: {}", e);
+                        }
+                      }
+                    });
+                    
                     if let Err(e) = client_request_tx.try_send(
                       codec::ClientRequest::JobsRequest(codec::JobsRequest::All),
                     ) {

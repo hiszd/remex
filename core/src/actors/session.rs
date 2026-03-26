@@ -12,13 +12,6 @@ use std::{
 };
 
 use actix::prelude::*;
-use diesel::{
-  ExpressionMethods,
-  JoinOnDsl,
-  QueryDsl,
-  RunQueryDsl,
-  SelectableHelper,
-};
 use tokio::{
   io::{
     split,
@@ -46,10 +39,22 @@ use crate::{
   },
   db::{
     self,
-    dal::SrvDbOperator,
-    model,
-    schema,
+    surreal::{
+      dal::{
+        ClientDal,
+        ExecutionDal,
+        JobDal,
+        LogDal,
+      },
+      models::{
+        Client,
+        Execution,
+        Job,
+        Log,
+      },
+    },
   },
+  jwt,
   utils,
 };
 
@@ -108,44 +113,28 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
       Ok(m) => match (m, self.authenticated) {
         (ClientRequest::ConnectionRequest(codec::ConnectionRequest::Identify(iden)), _) => {
           use codec::IdentifyType;
-          let client: anyhow::Result<model::server::clients::ClientSRV> = match iden {
+          let client: anyhow::Result<Client> = match iden {
             IdentifyType::Secret(sec, name, hw_hash) => {
               info!("Client attempting to connect with server secret: {}", &sec);
               if sec == self.server_secret {
                 info!("Secret match for client: {}, {}", &name, &hw_hash);
                 let secret = utils::generate_secret(false);
-                // create a new client or pull existing
+                let dal = ClientDal::new();
+                let db = db::get_db();
                 futures::executor::block_on(async {
-                  let mut c = db::establish_connection_postgres();
-                  use model::server::clients::{
-                    ClientSRV,
-                    NewClientSRV,
-                  };
-                  use schema::server::clients;
-                  match clients::table
-                    .select(ClientSRV::as_select())
-                    .filter(clients::client_name.eq(&name))
-                    .filter(clients::hardware_hash.eq(&hw_hash))
-                    .get_result(&mut c)
-                  {
-                    Ok(c) => Ok(c),
-                    Err(_) => {
-                      info!("Existing Client not found");
-                      Ok(
-                        diesel::insert_into(clients::table)
-                          .values(&NewClientSRV {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            client_name: name.clone(),
-                            secret,
-                            hardware_hash: hw_hash,
-                            created_at: None,
-                            updated_at: None,
-                          })
-                          .on_conflict_do_nothing()
-                          .get_result(&mut c)
-                          .unwrap(),
-                      )
+                  let db = db.read().await;
+                  match dal.find_by_hardware_hash(&db, &hw_hash).await {
+                    Ok(Some(c)) => Ok(c),
+                    Ok(None) => {
+                      info!("Existing Client not found, creating new one");
+                      let new_client = Client::new(
+                        secret,
+                        name.clone(),
+                        hw_hash,
+                      );
+                      dal.create(&db, &new_client).await.map_err(|e| anyhow::anyhow!("{}", e))
                     }
+                    Err(e) => Err(anyhow::anyhow!("Database error: {}", e)),
                   }
                 })
               } else {
@@ -158,25 +147,18 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
                 "Client attempting to connect with client secret: {}, name: {}, id: {}",
                 &sec, &name, &id
               );
-              // TODO: At some point it makes sense to have this be an in-memory cache of the 4 most
-              // recent client queries
-              // TESTING: need to decide wither or not I want to check the database for the client
-              // that matches the name, hw hash, secret, and ID, or if I just want to pull the
-              // match for the hw hash(or id maybe) and then compare the others after the fact.
+              let dal = ClientDal::new();
+              let db = db::get_db();
               let c = futures::executor::block_on(async {
-                let mut c = db::establish_connection_postgres();
-                use model::server::clients::ClientSRV;
-                use schema::server::clients;
-                clients::table
-                  .select(ClientSRV::as_select())
-                  .filter(clients::client_name.eq(&name))
-                  .filter(clients::hardware_hash.eq(&hw_hash))
-                  .filter(clients::secret.eq(&sec))
-                  .filter(clients::id.eq(&id))
-                  .get_result(&mut c)
+                let db = db.read().await;
+                dal.read(&db, &id).await
               });
               if let Ok(clnt) = c {
-                Ok(clnt)
+                if clnt.client_name == name && clnt.hardware_hash == hw_hash && clnt.secret == sec {
+                  Ok(clnt)
+                } else {
+                  Err(anyhow::anyhow!("Client data mismatch"))
+                }
               } else {
                 Err(anyhow::anyhow!("Client not found"))
               }
@@ -184,13 +166,29 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
           };
           match client {
             Ok(clnt) => {
-              self.client_id = Some(clnt.id.clone());
-              self.name = Some(clnt.client_name.clone());
-              self.authenticated = true;
-              tracing::info!("Client {} authenticated.", &clnt.client_name);
-              self.framed.write(codec::ServerResponse::ConnectionResponse(
-                codec::ConnectionResponse::Authenticated(clnt.id, clnt.secret),
-              ));
+              if let Some(client_id_str) = &clnt.id {
+                self.client_id = Some(client_id_str.clone());
+                self.name = Some(clnt.client_name.clone());
+                self.authenticated = true;
+                tracing::info!("Client {} authenticated.", &clnt.client_name);
+                
+                let jwt_claims = jwt::EndpointClaims::new(
+                  client_id_str.clone(),
+                  clnt.client_name.clone(),
+                  clnt.hardware_hash.clone(),
+                );
+                let jwt_token = jwt::generate_token(&jwt_claims).unwrap_or_default();
+                
+                self.framed.write(codec::ServerResponse::ConnectionResponse(
+                  codec::ConnectionResponse::Authenticated(client_id_str.clone(), clnt.secret, jwt_token),
+                ));
+              } else {
+                tracing::error!("Client ID not found");
+                self.framed.write(codec::ServerResponse::ConnectionResponse(
+                  codec::ConnectionResponse::Disconnect(codec::DisconnectReason::AuthFailed),
+                ));
+                self.framed.close();
+              }
             }
             Err(e) => {
               tracing::error!("Client creation error: {}", e);
@@ -204,38 +202,38 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
         (ClientRequest::Ping, _) => {
           self.hb = Instant::now();
         }
+        (ClientRequest::RefreshJwt, true) => {
+          tracing::info!("Received JWT refresh request");
+          if let Some(client_id) = &self.client_id {
+            if let Some(name) = &self.name {
+              let hw_hash = "refresh".to_string();
+              let jwt_claims = jwt::EndpointClaims::new(
+                client_id.clone(),
+                name.clone(),
+                hw_hash,
+              );
+              if let Ok(jwt_token) = jwt::generate_token(&jwt_claims) {
+                self.framed.write(codec::ServerResponse::JwtRefreshed(jwt_token));
+                tracing::info!("JWT refreshed for client: {}", client_id);
+              } else {
+                tracing::error!("Failed to generate JWT token for refresh");
+              }
+            }
+          }
+        }
         (ClientRequest::JobsRequest(j), true) => {
           use codec::JobsRequest;
           match j {
             JobsRequest::All => {
               tracing::info!("Received request to send along all related jobs");
-              let mut conn = db::establish_connection_postgres();
-              use crate::db::{
-                model::server::jobs::JobSRV,
-                schema::server::{
-                  groups_clients,
-                  jobs,
-                  jobs_groups,
-                },
-              };
-              let assigned_jobs: Vec<JobSRV> = jobs::table
-                // Implicitly joins `jobs` and `jobs_groups` utilizing `diesel::joinable!`
-                .inner_join(jobs_groups::table)
-                // Explicitly joins `groups_clients` utilizing the shared `group_id`
-                .inner_join(
-                  groups_clients::table.on(jobs_groups::group_id.eq(groups_clients::group_id)),
-                )
-                .filter(groups_clients::client_id.eq(&self.client_id.clone().unwrap()))
-                .select(JobSRV::as_select())
-                .get_results(&mut conn)
-                .unwrap();
+              let job_dal = JobDal::new();
+              let db = db::get_db();
+              let jobs: Vec<Job> = futures::executor::block_on(async {
+                let db = db.read().await;
+                job_dal.list(&db).await.unwrap_or_default()
+              });
               self.framed.write(codec::ServerResponse::JobsResponse(
-                codec::JobsResponse::ReceiveJobs(
-                  assigned_jobs
-                    .iter()
-                    .map(|j| crate::db::dal::jobs::Job::from(j.clone()))
-                    .collect(),
-                ),
+                codec::JobsResponse::ReceiveJobs(jobs),
               ));
             }
             JobsRequest::SendExecutions(job_id, executions, logs) => {
@@ -246,32 +244,38 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
                 &logs
               );
 
-              let mut conn = db::establish_connection_postgres();
+              let db = db::get_db();
+              let exec_dal = ExecutionDal::new();
+              let log_dal = LogDal::new();
 
-              for execution in &executions {
-                let mut exec = execution.clone();
-                exec.job_id = Some(job_id.clone());
-                if let Err(e) = exec.upsert_srv(&mut conn) {
-                  tracing::error!(
-                    "Failed to upsert execution {}: {}",
-                    exec.id,
-                    e
-                  );
-                  return;
+              futures::executor::block_on(async {
+                let db = db.read().await;
+                for execution in &executions {
+                  let mut exec = execution.clone();
+                  exec.job_id = Some(job_id.clone());
+                  if let Err(e) = exec_dal.upsert(&db, &exec).await {
+                    tracing::error!(
+                      "Failed to upsert execution: {}",
+                      e
+                    );
+                  }
                 }
-              }
 
-              for log in &logs {
-                if let Err(e) = log.upsert_srv(&mut conn) {
-                  tracing::error!("Failed to upsert log {}: {}", log.id, e);
+                for log in &logs {
+                  if let Err(e) = log_dal.upsert(&db, log).await {
+                    tracing::error!("Failed to upsert log: {}", e);
+                  }
                 }
-              }
+              });
             }
             JobsRequest::UpdateJob(job) => {
               tracing::info!("Received update for job: {}", &job.job_name,);
-              job
-                .upsert_srv(&mut db::establish_connection_postgres())
-                .unwrap();
+              let job_dal = JobDal::new();
+              let db = db::get_db();
+              futures::executor::block_on(async {
+                let db = db.read().await;
+                let _ = job_dal.upsert(&db, &job).await;
+              });
             }
           }
         }

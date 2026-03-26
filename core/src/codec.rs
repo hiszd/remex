@@ -27,7 +27,10 @@ use serde::{
 use serde_json as json;
 use tracing::error;
 
-use crate::db::dal;
+use crate::db::surreal::{
+  dal,
+  models,
+};
 
 // const KEY: &str = "tZs3U%hqY^o$&*y%4HcF8&RyAKevUbZnkTsrjCzPGxfare3Yn9c7shVZETfPDPUc8xR%N38a!TL%2$WbkFhZqmH#jvw&d3^mryPD8Y8TqHoJHwyKSTJeQB7vK7QkW#&B";
 const KEY: &str = "tZs3U%hqY^o$&*y%4HcF8&RyAKevUbZn";
@@ -133,9 +136,9 @@ pub enum JobsRequest {
   /// Request all jobs
   All,
   /// Send executions to the server (Job_Id, Executions, Logs)
-  SendExecutions(String, Vec<dal::executions::Execution>, Vec<dal::logs::Log>),
+  SendExecutions(String, Vec<models::Execution>, Vec<models::Log>),
   /// Send executions to the server (Job_Id, Executions, Logs)
-  UpdateJob(crate::db::dal::jobs::Job),
+  UpdateJob(models::Job),
 }
 
 /// Client request - come from client
@@ -149,14 +152,16 @@ pub enum ClientRequest {
   JobsRequest(JobsRequest),
   /// Ping
   Ping,
+  /// Refresh JWT token
+  RefreshJwt,
 }
 
 #[derive(Serialize, Deserialize, Debug, Message, Clone)]
 #[rtype(result = "()")]
 pub enum ConnectionResponse {
   // TODO: send server name with authenticated response
-  /// Authenticated (Id, Secret)
-  Authenticated(String, String),
+  /// Authenticated (Id, Secret, JwtToken)
+  Authenticated(String, String, String),
   /// Disconnect (Reason)
   Disconnect(DisconnectReason),
 }
@@ -165,8 +170,8 @@ pub enum ConnectionResponse {
 #[rtype(result = "()")]
 #[serde(tag = "jobs", content = "data")]
 pub enum JobsResponse {
-  All(Vec<dal::jobs::Job>),
-  ReceiveJobs(Vec<dal::jobs::Job>),
+  All(Vec<models::Job>),
+  ReceiveJobs(Vec<models::Job>),
 }
 
 /// Server response - respond to client requests
@@ -180,6 +185,8 @@ pub enum ServerResponse {
   JobsResponse(JobsResponse),
   /// Ping
   Ping,
+  /// JWT token refreshed (new token)
+  JwtRefreshed(String),
 }
 
 /// Codec for Client -> Server transport

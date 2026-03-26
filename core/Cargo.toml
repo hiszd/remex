@@ -25,12 +25,8 @@ rand = "0.10"
 derive_more = { version = "2", features = ["full"] }
 dotenvy = "0.15"
 futures = "0.3.31"
-diesel = { version = "2.3.6", features = [
-  "sqlite",
-  "postgres",
-  "returning_clauses_for_sqlite_3_35",
-  "chrono",
-  "uuid",
-] }
-diesel_migrations = { version = "2.3.1", features = ["sqlite", "postgres"] }
+surrealdb = { version = "3.0", features = ["protocol-ws"] }
+surrealdb-types = "3.0"
+surrealdb-types-derive = "3.0"
 utoipa = { version = "5", features = ["actix_extras", "chrono"] }
+jsonwebtoken = "9.3"

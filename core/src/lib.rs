@@ -3,6 +3,7 @@ use heapless::Vec as StackVec;
 pub mod actors;
 pub mod codec;
 pub mod db;
+pub mod jwt;
 pub mod sessionmap;
 pub mod utils;
 

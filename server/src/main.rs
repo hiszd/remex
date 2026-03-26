@@ -1,6 +1,7 @@
 use actix::Actor;
 use remex_core::{
   actors::server::RemexServer,
+  db,
   utils::generate_secret,
 };
 
@@ -43,6 +44,7 @@ async fn main() {
   // Get or generate the secret before starting the server
   let secret_string = get_or_generate_secret();
   println!("Full secret (for copying to endpoint): {}", secret_string);
+  db::connect().await.expect("Failed to connect to database");
 
   let server = RemexServer {
     sessions: remex_core::sessionmap::SessionMap::default(),

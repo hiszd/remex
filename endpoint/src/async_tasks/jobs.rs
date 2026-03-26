@@ -3,10 +3,11 @@ use std::sync::Arc;
 use chrono::Utc;
 use remex_core::{
   codec,
-  db::dal::{
-    executions::Execution,
-    jobs::JobStatus,
-    logs::Log,
+  db::surreal::models::{
+    Execution,
+    Job,
+    JobStatus,
+    Log,
   },
 };
 use tokio::sync::Mutex;
@@ -16,14 +17,11 @@ pub async fn jobs_check(
   ctx: Arc<Mutex<crate::Context>>,
   tx: tokio::sync::mpsc::Sender<codec::ClientRequest>,
 ) {
-  // spawn a new thread that will monitor the ctx variable and check for new jobs every 5
-  // minutes
   let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
   loop {
     interval.tick().await;
     let mut should_request = false;
 
-    // Scoped lock to avoid holding the Mutex across an await point
     {
       let mut ctx_lock = ctx.lock().await;
       if ctx_lock.authenticated {
@@ -47,7 +45,6 @@ pub async fn jobs_check(
         .await
         .is_err()
     {
-      // Channel closed, graceful exit
       break;
     }
   }
@@ -57,15 +54,12 @@ pub async fn jobs_exec(
   ctx: Arc<Mutex<crate::Context>>,
   tx: tokio::sync::mpsc::Sender<codec::ClientRequest>,
 ) {
-  // spawn a new thread that will monitor the ctx variable and check for new jobs every 5
-  // minutes
   tracing::info!("Starting jobs executor");
   let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
   loop {
     interval.tick().await;
     let mut jobs_to_exec = Vec::new();
 
-    // Scoped lock to avoid holding the Mutex across an await point
     {
       let mut ctx_lock = ctx.lock().await;
       if ctx_lock.authenticated {
@@ -83,7 +77,7 @@ pub async fn jobs_exec(
     for j in jobs_to_exec {
       let execution_id = Uuid::new_v4().to_string();
       let log_id = Uuid::new_v4().to_string();
-      let start_time = Utc::now().naive_utc();
+      let start_time = Utc::now().to_rfc3339();
 
       tracing::info!(
         "Executing command: {}\n for Job {} because job is in {:?} state",
@@ -104,33 +98,35 @@ pub async fn jobs_exec(
         }
       };
 
-      let end_time = Utc::now().naive_utc();
+      let end_time = Utc::now().to_rfc3339();
       let client_id = {
         let ctx_lock = ctx.lock().await;
         ctx_lock.id.clone().unwrap_or_else(|| "unknown".to_string())
       };
 
+      let job_id = j.job.id.clone().unwrap_or_default();
+
       let execution = Execution {
-        id: execution_id.clone(),
-        job_id: Some(j.job.id.clone()),
+        id: Some(execution_id.clone()),
+        job_id: Some(job_id.clone()),
         client_id: client_id.clone(),
-        executed_at: Some(start_time),
+        executed_at: Some(start_time.clone()),
         execution_result: Some(output.clone()),
-        created_at: start_time,
-        updated_at: end_time,
+        created_at: Some(start_time.clone()),
+        updated_at: Some(end_time.clone()),
       };
 
       let log = Log {
-        id: log_id,
+        id: Some(log_id),
         client_id: client_id.clone(),
         execution_id: execution_id.clone(),
         output: output.clone(),
         command: j.job.job_command.clone(),
         exit_code: exit_code.to_string(),
-        start_time,
-        end_time,
-        created_at: end_time,
-        updated_at: end_time,
+        start_time: start_time.clone(),
+        end_time: end_time.clone(),
+        created_at: Some(end_time.clone()),
+        updated_at: Some(end_time),
       };
 
       {
@@ -151,7 +147,7 @@ pub async fn jobs_exec(
 
       if tx
         .send(codec::ClientRequest::JobsRequest(codec::JobsRequest::SendExecutions(
-          j.job.id.clone(),
+          job_id,
           vec![execution],
           vec![log],
         )))
