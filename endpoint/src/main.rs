@@ -134,8 +134,19 @@ async fn main() -> anyhow::Result<()> {
   let (client_request_tx, mut client_request_rx) =
     tokio::sync::mpsc::channel::<codec::ClientRequest>(1000);
 
+  // Create channel for server messages to be processed by async task
+  let (server_msg_tx, server_msg_rx) = tokio::sync::mpsc::channel::<codec::ServerResponse>(1000);
+
   // Buffer to hold a message that was popped but failed to send due to disconnect
   let mut pending_request: Option<codec::ClientRequest> = None;
+
+  // Spawn task to process server messages
+  tokio::spawn(async_tasks::server_msg::process_server_msg(
+    ctx.clone(),
+    args.secret.clone(),
+    client_request_tx.clone(),
+    server_msg_rx,
+  ));
 
   // spawn threads to request new jobs and execute them outside of the reconnection loop
   // so they keep generating messages even when the connection is down.
@@ -168,88 +179,14 @@ async fn main() -> anyhow::Result<()> {
       loop {
         tokio::select! {
           msg = framed.next() => {
-            let Some(msg) = msg else {
+            let Some(m) = msg else {
               tracing::info!("Server disconnected");
               break;
             };
-            match msg {
+            match m {
               Ok(m) => {
-                let mut ctx_lock = ctx.lock().await;
-                let authenticated = ctx_lock.tkn.is_some();
-                match (m, authenticated) {
-                  (ServerResponse::Ping, _) => {
-                    if let Err(e) = client_request_tx.try_send(ClientRequest::Ping) {
-                      tracing::error!("Failed to queue Ping reply: {}", e);
-                    }
-                    if !authenticated {
-                      tracing::info!("Attempting to authenticate");
-                      let iden = match utils::derive_auth(ctx_lock.secret.as_ref(), args.secret.as_ref()) {
-                        Ok(1) => codec::IdentifyType::ClientSecret(ctx_lock.secret.clone().unwrap(), ctx_lock.client_name.clone(), surrealdb::types::RecordId::parse_simple(&ctx_lock.client_id.clone().unwrap()).unwrap(), ctx_lock.hardware_hash.clone()),
-                        Ok(2) => codec::IdentifyType::Secret(args.secret.clone().unwrap().clone(), ctx_lock.client_name.clone(), ctx_lock.hardware_hash.clone()),
-                        Ok(k) => {
-                          tracing::error!("Invalid auth derivation: {}", k);
-                          std::process::exit(1);
-                        }
-                        Err(e) => {
-                          tracing::error!("{}", e);
-                          std::process::exit(1);
-                        }
-                      };
-                      if let Err(e) = client_request_tx.try_send(
-                        codec::ClientRequest::ConnectionRequest(
-                          codec::ConnectionRequest::Identify(iden.clone()),
-                        ),
-                      ) {
-                        tracing::error!("Failed to queue Identify request: {}", e);
-                      }
-                    }
-                  }
-                  (ServerResponse::ConnectionResponse(ConnectionResponse::Disconnect(reason)), _) => {
-                    match reason {
-                      DisconnectReason::AuthFailed => {
-                        tracing::error!("Authentication failed. Removing stored credentials and quitting. Please restart with a valid --secret.");
-                        let _ = fs::id::remove_id();
-                        let _ = fs::secret::remove_secret();
-                        std::process::exit(1);
-                      }
-                      DisconnectReason::InvalidClientId => {
-                        tracing::error!("Invalid client ID. Removing stored credentials and quitting. Please restart with a valid --secret.");
-                        let _ = fs::id::remove_id();
-                        let _ = fs::secret::remove_secret();
-                        std::process::exit(1);
-                      }
-                      DisconnectReason::DuplicateClient => {
-                        tracing::error!("Duplicate client ID\n Trying again in 5 seconds");
-                        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                        break;
-                      }
-                      DisconnectReason::HeartbeatFailed => {
-                        tracing::error!("Heartbeat failed\n Trying again in 5 seconds");
-                        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                        break;
-                      }
-                      DisconnectReason::Unknown(e) => {
-                        tracing::error!("Unknown disconnect reason: {}\n Trying again in 5 seconds", e);
-                        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                        break;
-                      }
-                    }
-                  }
-                  (ServerResponse::JobsResponse(j), true) => {
-                    tracing::error!("Received jobs response");
-                  }
-                  (
-                    ServerResponse::ConnectionResponse(ConnectionResponse::Authenticated(client_id, token)),
-                    _,
-                  ) => {
-                    tracing::info!("Authenticated and received token: {}", &token.grant.key);
-                    ctx_lock.client_id = Some(client_id.to_sql());
-                    ctx_lock.tkn = Some(token.clone());
-                    ctx_lock.push(&LOCAL_DB).await.unwrap();
-                  }
-                  s => {
-                    tracing::info!("Ignored server response: {:#?}", &s);
-                  }
+                if let Err(e) = server_msg_tx.send(m).await {
+                  tracing::error!("Failed to send server message to processing task: {}", e);
                 }
               }
               Err(e) => {
@@ -259,10 +196,10 @@ async fn main() -> anyhow::Result<()> {
             }
           },
           req = client_request_rx.recv() => {
-            if let Some(req) = req {
-              if let Err(e) = framed.send(req.clone()).await {
-                tracing::error!("Failed to send request: {:?}\n Error: {}", &req, &e);
-                pending_request = Some(req);
+            if let Some(r) = req {
+              if let Err(e) = framed.send(r.clone()).await {
+                tracing::error!("Failed to send request: {:?}\n Error: {}", &r, &e);
+                pending_request = Some(r);
                 break;
               }
             }
