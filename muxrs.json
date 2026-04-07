@@ -20,8 +20,8 @@
       "starting_dir": "%selected_directory%/server"
     },
     {
-      "name": "frontend",
-      "starting_dir": "%selected_directory%/server/frontend",
+      "name": "configurator",
+      "starting_dir": "%selected_directory%/configurator",
       "panes": [
         {
           "command": "nvim",

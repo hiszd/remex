@@ -32,7 +32,7 @@ impl Handler<ClientDisconnect> for super::RemexServer {
 #[derive(Message)]
 #[rtype(result = "Result<(), crate::codec::DisconnectReason>")]
 pub struct ClientConnect {
-  pub id: String,
+  pub client_id: String,
   pub client_name: String,
   pub addr: actix::Addr<session::RemexSession>,
 }
@@ -40,22 +40,23 @@ pub struct ClientConnect {
 impl Handler<ClientConnect> for super::RemexServer {
   type Result = Result<(), crate::codec::DisconnectReason>;
   fn handle(&mut self, msg: ClientConnect, _: &mut Context<Self>) -> Self::Result {
-    if self.sessions.exists(&msg.id) {
+    if self.sessions.exists(&msg.client_id) {
       tracing::warn!(
-        client_id = %msg.id,
+        client_id = %msg.client_id,
         client_name = %msg.client_name,
         "DUPLICATE CLIENT CONNECTION DENIED: a client with id '{}' (name: '{}') attempted to \
          connect while another session with the same id is already active. \
          This may indicate a misconfiguration or unauthorized access attempt. \
          Review client credentials and endpoint deployments.",
-        &msg.id,
+        &msg.client_id,
         &msg.client_name,
       );
       return Err(crate::codec::DisconnectReason::DuplicateClient);
     }
 
-    tracing::info!("New client connected: {}", &msg.id);
-    match self.sessions.insert(msg.id, msg.addr.clone()) {
+    // TODO: Implement JWT pull from the database and sending back to the client
+    tracing::info!("New client connected: {}", &msg.client_id);
+    match self.sessions.insert(msg.client_id, msg.addr.clone()) {
       Ok(_) => Ok(()),
       Err(e) => {
         let err = format!("Session insert error: {}", e);
@@ -66,15 +67,14 @@ impl Handler<ClientConnect> for super::RemexServer {
   }
 }
 
-/// Connect a new client
-#[derive(Message)]
-#[rtype(result = "anyhow::Result<String>")]
-pub struct GetSecret {}
-/// Handler for Connect message.
-impl Handler<GetSecret> for super::RemexServer {
-  type Result = anyhow::Result<String>;
-  fn handle(&mut self, _msg: GetSecret, _: &mut Context<Self>) -> Self::Result {
-    // FIXME: handle empyy value
-    return Ok(self.secret.clone().unwrap());
-  }
-}
+// TODO: Implement a JWT refresh message that the client can initiate
+// Some ideas for this might include using the existing, still vaild JWT to authenticate with the
+// database, then pulling the new JWT and sending that along.
+// Or maybe store the JWT for each client in the self.sessions HashMap and compare the JWT with
+// that. The benefit of this approach is that you could use the expired JWT from the client to
+// request a new one from the server.
+//
+// Acually scratch that. I think once the client has a valid JWT it can just pull a new one from the
+// Database server itself without interacting with the server. The server will just be the method
+// for extablishing the initial connection with the Database server and restoring connection should
+// the endpoint let it's JWT expire.

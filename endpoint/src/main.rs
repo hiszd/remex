@@ -1,5 +1,7 @@
 //ENDPOINT
 
+use std::sync::LazyLock;
+
 use clap::Parser;
 use futures_util::{
   SinkExt as _,
@@ -14,6 +16,20 @@ use remex_core::{
     DisconnectReason,
     ServerResponse,
   },
+  db::{
+    BearerGrantResponse,
+    DbOperator,
+  },
+};
+use surrealdb::{
+  engine::{
+    local::{
+      Db,
+      SurrealKv,
+    },
+    remote::ws::Client,
+  },
+  types::ToSql,
 };
 use tokio::{
   net::TcpStream,
@@ -21,6 +37,7 @@ use tokio::{
 };
 
 mod async_tasks;
+mod db;
 mod fs;
 mod utils;
 
@@ -39,64 +56,65 @@ struct Args {
 }
 
 #[derive(Debug, Clone)]
-struct CacheJob {
-  locked: bool,
-  job_name: String,
-}
-
-#[derive(Debug, Clone)]
-struct Cache {
-  jobs: Vec<CacheJob>,
-}
-
-#[derive(Debug, Clone)]
 struct Context {
-  id: Option<String>,
-  secret: Option<String>,
+  id: Option<surrealdb::types::RecordId>,
   name: String,
+  hardware_hash: String,
   authenticated: bool,
-  auth_type: Option<codec::IdentifyType>,
-  authentication_used: Option<codec::IdentifyType>,
-  jobs_last_requested: Option<std::time::Instant>,
-  cache: Cache,
+  token: Option<BearerGrantResponse>,
+  secret: Option<String>,
 }
+
+// #[derive(Debug, Clone)]
+// enum State {
+//     Initializing;
+// }
+
+static LOCAL_DB: LazyLock<surrealdb::Surreal<Db>> = LazyLock::new(surrealdb::Surreal::init);
+static REMOTE_DB: LazyLock<surrealdb::Surreal<Client>> = LazyLock::new(surrealdb::Surreal::init);
 
 #[actix_web::main]
 async fn main() -> anyhow::Result<()> {
   tracing_subscriber::fmt::init();
   tracing::info!("Running client");
 
+  // WARN: NEW CODE
+
+  LOCAL_DB.connect::<SurrealKv>("endpoint.db").await?;
+  db::endpoint::Session::migrate(&LOCAL_DB).await?;
+
+  tracing::info!("Pulling most recent session");
+  let session: Option<db::endpoint::Session> = LOCAL_DB
+    .query("USE NS remex DB endpoint; SELECT * FROM session ORDER BY updated_at DESC LIMIT 1;")
+    .await?
+    .check()?
+    .take(1)?;
+
   /* ********** VARIABLE INITIALIZATION ********** */
 
-  // Check if both ID and secret are saved
-  let id_result = fs::id::get_id()?;
-  let secret_result = fs::secret::get_secret()?;
-  // Get the machine's hardware hash
-  let hw_hash = machine_uid::get().unwrap();
+  let hardware_hash = machine_uid::get().unwrap();
   let args = Args::parse();
-  let mut ctx_data = Context {
-    id: None,
-    secret: None,
-    name: gethostname().to_string_lossy().to_string(),
-    authenticated: false,
-    auth_type: None,
-    authentication_used: None,
-    jobs_last_requested: None,
-    cache: Cache { jobs: vec![] },
-  };
-  ctx_data.auth_type = match (id_result, secret_result, args.secret.clone()) {
-    // if using the server secret for auth, ensure that the ID and secret are removed first
-    (_, _, Some(secret)) => {
-      fs::id::remove_id().unwrap();
-      fs::secret::remove_secret().unwrap();
-      Some(codec::IdentifyType::Secret(secret, ctx_data.name.clone(), hw_hash))
+  let ctx_data = match session {
+    Some(session) => {
+      tracing::info!("Using existing session");
+      session
     }
-    (Some(id), Some(secret), _) => {
-      // Both ID and secret are found, continue normally
-      Some(codec::IdentifyType::ClientSecret(secret, ctx_data.name.clone(), id, hw_hash))
-    }
-    (_, _, None) => {
-      panic!("Neither ID nor secret found. Please provide a secret using the --secret flag");
+    None => {
+      let s = db::endpoint::Session::create(
+        db::endpoint::SessionData {
+          client_id: None,
+          hardware_hash: Some(hardware_hash.clone()),
+          client_name: Some(gethostname().to_string_lossy().to_string()),
+          db_addr: None,
+          tkn: None,
+          secret: None,
+        },
+        &LOCAL_DB,
+      )
+      .await?
+      .unwrap();
+      tracing::info!("New session created: {:#?}", &s);
+      s
     }
   };
   let ctx = std::sync::Arc::new(Mutex::new(ctx_data));
@@ -121,8 +139,8 @@ async fn main() -> anyhow::Result<()> {
 
   // spawn threads to request new jobs and execute them outside of the reconnection loop
   // so they keep generating messages even when the connection is down.
-  tokio::spawn(async_tasks::jobs::jobs_check(ctx.clone(), client_request_tx.clone()));
-  tokio::spawn(async_tasks::jobs::jobs_exec(ctx.clone(), client_request_tx.clone()));
+  // tokio::spawn(async_tasks::jobs::jobs_check(ctx.clone(), client_request_tx.clone()));
+  // tokio::spawn(async_tasks::jobs::jobs_exec(ctx.clone(), client_request_tx.clone()));
 
   loop {
     // continually try and connect to the server every 5 seconds until we succeed
@@ -157,15 +175,26 @@ async fn main() -> anyhow::Result<()> {
             match msg {
               Ok(m) => {
                 let mut ctx_lock = ctx.lock().await;
-                let authenticated = ctx_lock.authenticated;
+                let authenticated = ctx_lock.tkn.is_some();
                 match (m, authenticated) {
                   (ServerResponse::Ping, _) => {
                     if let Err(e) = client_request_tx.try_send(ClientRequest::Ping) {
                       tracing::error!("Failed to queue Ping reply: {}", e);
                     }
-                    if !ctx_lock.authenticated {
+                    if !authenticated {
                       tracing::info!("Attempting to authenticate");
-                      let iden = ctx_lock.auth_type.clone().unwrap();
+                      let iden = match utils::derive_auth(ctx_lock.secret.as_ref(), args.secret.as_ref()) {
+                        Ok(1) => codec::IdentifyType::ClientSecret(ctx_lock.secret.clone().unwrap(), ctx_lock.client_name.clone(), surrealdb::types::RecordId::parse_simple(&ctx_lock.client_id.clone().unwrap()).unwrap(), ctx_lock.hardware_hash.clone()),
+                        Ok(2) => codec::IdentifyType::Secret(args.secret.clone().unwrap().clone(), ctx_lock.client_name.clone(), ctx_lock.hardware_hash.clone()),
+                        Ok(k) => {
+                          tracing::error!("Invalid auth derivation: {}", k);
+                          std::process::exit(1);
+                        }
+                        Err(e) => {
+                          tracing::error!("{}", e);
+                          std::process::exit(1);
+                        }
+                      };
                       if let Err(e) = client_request_tx.try_send(
                         codec::ClientRequest::ConnectionRequest(
                           codec::ConnectionRequest::Identify(iden.clone()),
@@ -173,7 +202,6 @@ async fn main() -> anyhow::Result<()> {
                       ) {
                         tracing::error!("Failed to queue Identify request: {}", e);
                       }
-                      ctx_lock.authentication_used = Some(iden);
                     }
                   }
                   (ServerResponse::ConnectionResponse(ConnectionResponse::Disconnect(reason)), _) => {
@@ -208,36 +236,16 @@ async fn main() -> anyhow::Result<()> {
                     }
                   }
                   (ServerResponse::JobsResponse(j), true) => {
-                    use codec::JobsResponse;
-                    tracing::info!("Received jobs response");
-                    match j {
-                      JobsResponse::ReceiveJobs(_jobs) => {
-                        // TODO: Cache these for the life of the program and update them when a new
-                        // one is added.
-                        tracing::info!("Received jobs (placeholder)");
-                        ctx_lock.cache.jobs = vec![];
-                      }
-                      j => {
-                        tracing::info!("Ignored jobs response: {:#?}", &j);
-                      }
-                    }
+                    tracing::error!("Received jobs response");
                   }
                   (
-                    ServerResponse::ConnectionResponse(ConnectionResponse::Authenticated(id, secret)),
+                    ServerResponse::ConnectionResponse(ConnectionResponse::Authenticated(client_id, token)),
                     _,
                   ) => {
-                    tracing::info!("Authenticated with id: {}, secret: {}", &id, &secret);
-                    ctx_lock.id = Some(id.clone());
-                    ctx_lock.secret = Some(secret.clone());
-                    ctx_lock.authenticated = true;
-                    fs::id::save_id(id).unwrap();
-                    fs::secret::save_secret(secret).unwrap();
-                    if let Err(e) = client_request_tx.try_send(
-                      codec::ClientRequest::JobsRequest(codec::JobsRequest::All),
-                    ) {
-                      tracing::error!("Failed to queue JobsRequest: {}", e);
-                    }
-                    ctx_lock.jobs_last_requested = Some(std::time::Instant::now());
+                    tracing::info!("Authenticated and received token: {}", &token.grant.key);
+                    ctx_lock.client_id = Some(client_id.to_sql());
+                    ctx_lock.tkn = Some(token.clone());
+                    ctx_lock.push(&LOCAL_DB).await.unwrap();
                   }
                   s => {
                     tracing::info!("Ignored server response: {:#?}", &s);
@@ -261,7 +269,9 @@ async fn main() -> anyhow::Result<()> {
           }
         }
       }
-      ctx.lock().await.authenticated = false;
+      let mut c = ctx.lock().await;
+      c.tkn = None;
+      c.push(&LOCAL_DB).await?;
     }
   }
 }

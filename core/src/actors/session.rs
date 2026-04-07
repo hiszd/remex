@@ -3,8 +3,6 @@
 
 use std::{
   io,
-  net,
-  str::FromStr,
   time::{
     Duration,
     Instant,
@@ -12,6 +10,11 @@ use std::{
 };
 
 use actix::prelude::*;
+use surrealdb::{
+  engine::any::Any,
+  opt::auth::Record,
+  Surreal,
+};
 use tokio::{
   io::{
     split,
@@ -36,8 +39,10 @@ use crate::{
   codec::{
     self,
     ClientRequest,
+    EndpointSigninCreds,
+    EndpointSignupCreds,
   },
-  utils,
+  utils::generate_secret,
 };
 
 pub mod msg;
@@ -48,17 +53,23 @@ pub struct RemexSession {
   /// unique session id
   id: String,
   /// unique client id
-  client_id: Option<String>,
+  client_id: Option<surrealdb::types::RecordId>,
   /// machine name
   name: Option<String>,
   /// server secret
   server_secret: String,
+  /// credential for SurrealDB auth (stored for JWT refresh)
+  credential: Option<String>,
+  /// current JWT ID (for refresh tracking)
+  current_jwt_id: Option<String>,
   /// is client authenticated
   authenticated: bool,
   /// is client identified
   identified: bool,
   /// this is address of Remex server
   addr: Addr<RemexServer>,
+  /// SurrealDB connection for auth
+  db: Option<Surreal<Any>>,
   /// Client must send ping at least once per 10 seconds, otherwise we drop
   /// connection.
   hb: Instant,
@@ -90,84 +101,28 @@ impl actix::io::WriteHandler<io::Error> for RemexSession {
 }
 
 impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
-  fn handle(&mut self, msg: Result<ClientRequest, io::Error>, _ctx: &mut Context<Self>) {
+  fn handle(&mut self, msg: Result<ClientRequest, io::Error>, ctx: &mut Context<Self>) {
     match msg {
-      Ok(m) => match (m, self.authenticated) {
-        (ClientRequest::ConnectionRequest(codec::ConnectionRequest::Identify(iden)), _) => {
-          use codec::IdentifyType;
-          let client: anyhow::Result<()> = match iden {
-            IdentifyType::Secret(sec, name, hw_hash) => {
-              info!("Client attempting to connect with server secret: {}", &sec);
-              if sec == self.server_secret {
-                info!("Secret match for client: {}, {}", &name, &hw_hash);
-                let secret = utils::generate_secret(false);
-                // TODO: create a new client or pull existing
-                Ok(())
-              } else {
-                info!("Secret mismatch");
-                Err(anyhow::anyhow!("Secret mismatch"))
-              }
-            }
-            IdentifyType::ClientSecret(sec, name, id, hw_hash) => {
-              info!(
-                "Client attempting to connect with client secret: {}, name: {}, id: {}",
-                &sec, &name, &id
-              );
-              // TODO: Implement client lookup
-              Err(anyhow::anyhow!("Client not found"))
-            }
-          };
-          match client {
-            Ok(_) => {
-              self.client_id = Some("TODO".to_string());
-              self.name = Some("TODO".to_string());
-              self.authenticated = true;
-              tracing::info!("Client authenticated.");
-              self.framed.write(codec::ServerResponse::ConnectionResponse(
-                codec::ConnectionResponse::Authenticated("TODO".to_string(), "TODO".to_string()),
-              ));
-            }
-            Err(e) => {
-              tracing::error!("Client creation error: {}", e);
-              self.framed.write(codec::ServerResponse::ConnectionResponse(
-                codec::ConnectionResponse::Disconnect(codec::DisconnectReason::AuthFailed),
-              ));
-              self.framed.close();
-            }
-          }
+      Ok(ClientRequest::ConnectionRequest(codec::ConnectionRequest::Identify(iden))) => {
+        ctx.notify(msg::Authenticate {
+          iden,
+          db: self.db.clone(),
+          server_secret: self.server_secret.clone(),
+        });
+      }
+      Ok(ClientRequest::Ping) => {
+        self.hb = Instant::now();
+      }
+      Ok(ClientRequest::JwtRefreshAck { jwt_id }) => {
+        tracing::info!("JWT refresh acknowledged for JWT: {}", jwt_id);
+        if let Some(old_jwt_id) = self.current_jwt_id.take() {
+          tracing::info!("JWT refresh: old JWT {} invalidated", old_jwt_id);
         }
-        (ClientRequest::Ping, _) => {
-          self.hb = Instant::now();
-        }
-        (ClientRequest::JobsRequest(j), true) => {
-          use codec::JobsRequest;
-          match j {
-            JobsRequest::All => {
-              tracing::info!("Received request to send along all related jobs");
-              // TODO: Implement job retrieval
-              self.framed.write(codec::ServerResponse::JobsResponse(
-                codec::JobsResponse::ReceiveJobs(vec![]),
-              ));
-            }
-            JobsRequest::SendExecutions(job_id, executions, logs) => {
-              tracing::info!(
-                "Received executions for job: {}, executions: {:?}, logs: {:?}",
-                &job_id,
-                &executions,
-                &logs
-              );
-              // TODO: Implement execution/log storage
-            }
-            JobsRequest::UpdateJob(_job) => {
-              tracing::info!("Received update for job");
-              // TODO: Implement job update
-            }
-          }
-        }
-        s => {
-          tracing::info!("Ignored Client request: {:#?}", &s);
-        }
-      },
+        self.current_jwt_id = Some(jwt_id);
+      }
+      Ok(s) => {
+        tracing::info!("Ignored Client request: {:#?}", &s);
+      }
       Err(e) => info!("Client error: {}", e),
     }
   }
@@ -178,13 +133,17 @@ impl RemexSession {
     secret: String,
     server: Addr<actors::server::RemexServer>,
     framed: actix::io::FramedWrite<codec::ServerResponse, WriteHalf<TcpStream>, codec::ClientCodec>,
+    db: Option<Surreal<Any>>,
   ) -> RemexSession {
     RemexSession {
       id: uuid::Uuid::new_v4().to_string(),
       client_id: None,
       name: None,
       server_secret: secret,
+      credential: None,
+      current_jwt_id: None,
       addr: server,
+      db,
       hb: Instant::now(),
       authenticated: false,
       identified: false,
@@ -220,14 +179,18 @@ impl RemexSession {
 
 /// Define TCP server that will accept incoming TCP connection and create
 /// Client actors.
-pub async fn tcp_server(s: &str, secret: &str, server: Addr<RemexServer>) {
-  // Create server listener
-  let addr = net::SocketAddr::from_str(s).unwrap();
-
+pub async fn tcp_server(
+  s: &str,
+  secret: &str,
+  server: Addr<RemexServer>,
+  db: Option<Surreal<Any>>,
+) {
+  let addr = s.to_string();
   let listener = TcpListener::bind(&addr).await.unwrap();
 
   while let Ok((stream, _)) = listener.accept().await {
     let server = server.clone();
+    let db_clone = db.clone();
     RemexSession::create(|ctx| {
       let (r, w) = split(stream);
       RemexSession::add_stream(FramedRead::new(r, codec::ClientCodec), ctx);
@@ -235,6 +198,7 @@ pub async fn tcp_server(s: &str, secret: &str, server: Addr<RemexServer>) {
         secret.into(),
         server,
         actix::io::FramedWrite::new(w, codec::ClientCodec, ctx),
+        db_clone.clone(),
       )
     });
   }

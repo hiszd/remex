@@ -1,20 +1,23 @@
+use std::sync::{
+  Arc,
+  LazyLock,
+};
+
 use actix::Actor;
 use remex_core::{
   actors::server::RemexServer,
   utils::generate_secret,
 };
+use surrealdb::engine::any::Any;
+use tokio::sync::Mutex;
 
-mod pnpm;
 mod secret;
 
 use remex_server::web;
 
-//SERVER
-
 const ADDRESS: &str = "127.0.0.1:4269";
 
 fn get_or_generate_secret() -> String {
-  // Try to get existing secret
   match secret::get_secret("server") {
     Ok(Some(secret_val)) => {
       println!("Using existing secret from file");
@@ -27,7 +30,6 @@ fn get_or_generate_secret() -> String {
       secret_val
     }
     _ => {
-      // Generate a new secret
       println!("No secret found, generating new secret");
       let secret_val = generate_secret(true);
       secret::save_secret("server", secret_val.clone()).expect("Failed to save secret");
@@ -36,27 +38,51 @@ fn get_or_generate_secret() -> String {
   }
 }
 
+static REMOTE_DB: LazyLock<surrealdb::Surreal<Any>> = LazyLock::new(surrealdb::Surreal::init);
+
 #[actix_web::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
   tracing_subscriber::fmt::init();
 
-  // Get or generate the secret before starting the server
   let secret_string = get_or_generate_secret();
   println!("Full secret (for copying to endpoint): {}", secret_string);
+
+  let endpoint = std::env::var("DB_ENDPOINT").unwrap_or_else(|_| "mem://".to_owned());
+  REMOTE_DB.connect(endpoint).await?;
+  REMOTE_DB
+    .signin(surrealdb::opt::auth::Root {
+      username: "root".to_string(),
+      password: std::env::var("DB_PASSWORD").unwrap_or_else(|_| "remex".to_owned()),
+    })
+    .await?;
+
+  tracing::info!("Connected to SurrealDB");
+  match remex_core::db::migrate(&REMOTE_DB).await {
+    Ok(()) => {
+      tracing::info!("SurrealDB migrated");
+    }
+    Err(e) => {
+      tracing::error!("Failed to migrate SurrealDB: {}", e);
+    }
+  }
+
+  let client_sessions = Arc::new(Mutex::new(std::collections::HashMap::new()));
 
   let server = RemexServer {
     sessions: remex_core::sessionmap::SessionMap::default(),
     migrated: false,
     secret: Some(secret_string.clone()),
+    client_sessions,
+    db: Some(REMOTE_DB.clone()),
   }
   .start();
-  let web_server = web::start_web_server();
-  let web_handle = web_server.handle();
-  tokio::spawn(web_server);
 
-  tokio::spawn(pnpm::start_server());
-
-  let tcp_fut = remex_core::actors::session::tcp_server(ADDRESS, &secret_string, server);
+  let tcp_fut = remex_core::actors::session::tcp_server(
+    ADDRESS,
+    &secret_string,
+    server,
+    Some(REMOTE_DB.clone()),
+  );
 
   tokio::select! {
     _ = tokio::signal::ctrl_c() => {
@@ -66,7 +92,5 @@ async fn main() {
       println!("TCP server exited unexpectedly.");
     }
   }
-
-  // Stop the web server properly
-  web_handle.stop(true).await;
+  Ok(())
 }

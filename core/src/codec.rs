@@ -25,9 +25,26 @@ use serde::{
   Serialize,
 };
 use serde_json as json;
+use surrealdb::types::SurrealValue;
 use tracing::error;
 
-// const KEY: &str = "tZs3U%hqY^o$&*y%4HcF8&RyAKevUbZnkTsrjCzPGxfare3Yn9c7shVZETfPDPUc8xR%N38a!TL%2$WbkFhZqmH#jvw&d3^mryPD8Y8TqHoJHwyKSTJeQB7vK7QkW#&B";
+#[derive(Serialize, Deserialize, SurrealValue)]
+pub struct EndpointSignupCreds {
+  pub client_name: String,
+  pub hardware_hash: String,
+  pub secret: String,
+}
+#[derive(Serialize, Deserialize, SurrealValue)]
+pub struct EndpointSigninCreds {
+  pub client_name: String,
+  pub client_id: surrealdb::types::RecordId,
+  pub hardware_hash: String,
+  pub secret: String,
+}
+
+// const KEY: &str = "tZs3U%hqY^o$&*y%4HcF8&RyAKevUbZnkTsrjCzPGxfare3Yn9c7shVZETfPDPUc8xR%N38a!TL%$WbkFhZqmH#jvw&d3^mryPD8Y8TqHoJHwyKSTJeQB7vK7QkW#&B";
+
+// FIXME: This should not be hardcoded
 const KEY: &str = "tZs3U%hqY^o$&*y%4HcF8&RyAKevUbZn";
 
 fn decrypt(encrypted_data: Vec<u8>) -> Result<String, String> {
@@ -112,7 +129,7 @@ pub enum IdentifyType {
   /// Secret (Secret, Client_Name, Hardware_Hash)
   Secret(String, String, String),
   /// ClientSecret (Secret, Client_Name, Client_Id, Hardware_Hash)
-  ClientSecret(String, String, String, String),
+  ClientSecret(String, String, surrealdb::types::RecordId, String),
 }
 
 /// Requests related to the connection
@@ -147,14 +164,17 @@ pub enum ClientRequest {
   JobsRequest(JobsRequest),
   /// Ping
   Ping,
+  /// JwtRefreshAck (jwt_id) - endpoint acknowledges JWT refresh
+  JwtRefreshAck { jwt_id: String },
 }
 
 #[derive(Serialize, Deserialize, Debug, Message, Clone)]
 #[rtype(result = "()")]
 pub enum ConnectionResponse {
-  // TODO: send server name with authenticated response
-  /// Authenticated (Id, Secret)
-  Authenticated(String, String),
+  /// Authenticated (client_id, jwt)
+  Authenticated(surrealdb::types::RecordId, crate::db::BearerGrantResponse),
+  /// RefreshJwt (new_jwt, jwt_id) - server pushes new JWT to endpoint
+  RefreshJwt { new_jwt: String, jwt_id: String },
   /// Disconnect (Reason)
   Disconnect(DisconnectReason),
 }

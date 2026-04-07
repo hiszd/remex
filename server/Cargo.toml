@@ -24,12 +24,11 @@ uuid = { version = "1.6", features = ["v4", "v7", "serde"] }
 tokio-util = "0.7.4"
 futures-util = "0.3.31"
 anyhow = "1.0.97"
-# clap = { version = "4.5.9", features = ["derive"] }
 rand = "0.10"
 derive_more = { version = "2", features = ["full"] }
 dotenvy = "0.15"
 futures = "0.3.31"
-# Utoipa core and Actix integration
-utoipa = { version = "5", features = ["chrono", "actix_extras"] }
-utoipa-swagger-ui = { version = "9", features = ["actix-web"] }
-actix-cors = "0.7.1"
+surrealdb = { version = "3", default-features = false, features = [
+  "kv-surrealkv",
+  "protocol-ws",
+] }

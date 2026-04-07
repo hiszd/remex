@@ -26,3 +26,9 @@ derive_more = { version = "2", features = ["full"] }
 dotenvy = "0.15"
 futures = "0.3.31"
 utoipa = { version = "5", features = ["actix_extras", "chrono"] }
+surrealdb = { version = "3", default-features = false, features = [
+  "kv-surrealkv",
+  "protocol-ws",
+] }
+tokio-stream = "0.1"
+thiserror = "2.0.18"
