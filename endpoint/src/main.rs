@@ -57,18 +57,24 @@ struct Args {
 
 #[derive(Debug, Clone)]
 struct Context {
-  id: Option<surrealdb::types::RecordId>,
-  name: String,
-  hardware_hash: String,
-  authenticated: bool,
-  token: Option<BearerGrantResponse>,
-  secret: Option<String>,
+  session: db::endpoint::Session,
+  state: State,
 }
 
-// #[derive(Debug, Clone)]
-// enum State {
-//     Initializing;
-// }
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+enum State {
+  /// Setting up database, connecting to the TCP socket.
+  Initializing,
+  /// Attempting TCP connection to server
+  Connecting,
+  /// Sent authentication request, waiting for response
+  Authenticating,
+  /// Connected to server and authenticated
+  Connected,
+  /// Connection lost, attempting to reconnect
+  Reconnecting,
+}
 
 static LOCAL_DB: LazyLock<surrealdb::Surreal<Db>> = LazyLock::new(surrealdb::Surreal::init);
 static REMOTE_DB: LazyLock<surrealdb::Surreal<Client>> = LazyLock::new(surrealdb::Surreal::init);
@@ -94,28 +100,31 @@ async fn main() -> anyhow::Result<()> {
 
   let hardware_hash = machine_uid::get().unwrap();
   let args = Args::parse();
-  let ctx_data = match session {
-    Some(session) => {
-      tracing::info!("Using existing session");
-      session
-    }
-    None => {
-      let s = db::endpoint::Session::create(
-        db::endpoint::SessionData {
-          client_id: None,
-          hardware_hash: Some(hardware_hash.clone()),
-          client_name: Some(gethostname().to_string_lossy().to_string()),
-          db_addr: None,
-          tkn: None,
-          secret: None,
-        },
-        &LOCAL_DB,
-      )
-      .await?
-      .unwrap();
-      tracing::info!("New session created: {:#?}", &s);
-      s
-    }
+  let ctx_data = Context {
+    state: State::Initializing,
+    session: match session {
+      Some(session) => {
+        tracing::info!("Using existing session");
+        session
+      }
+      None => {
+        let s = db::endpoint::Session::create(
+          db::endpoint::SessionData {
+            client_id: None,
+            hardware_hash: Some(hardware_hash.clone()),
+            client_name: Some(gethostname().to_string_lossy().to_string()),
+            db_addr: None,
+            tkn: None,
+            secret: None,
+          },
+          &LOCAL_DB,
+        )
+        .await?
+        .unwrap();
+        tracing::info!("New session created: {:#?}", &s);
+        s
+      }
+    },
   };
   let ctx = std::sync::Arc::new(Mutex::new(ctx_data));
 
@@ -207,8 +216,8 @@ async fn main() -> anyhow::Result<()> {
         }
       }
       let mut c = ctx.lock().await;
-      c.tkn = None;
-      c.push(&LOCAL_DB).await?;
+      c.session.tkn = None;
+      c.session.push(&LOCAL_DB).await?;
     }
   }
 }

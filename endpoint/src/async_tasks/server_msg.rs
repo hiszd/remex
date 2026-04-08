@@ -18,7 +18,7 @@ use tokio::sync::Mutex;
 use crate::utils;
 
 pub async fn process_server_msg(
-  ctx: Arc<Mutex<crate::db::endpoint::Session>>,
+  ctx: Arc<Mutex<crate::Context>>,
   args_secret: Option<String>,
   client_request_tx: tokio::sync::mpsc::Sender<ClientRequest>,
   mut server_msg_rx: tokio::sync::mpsc::Receiver<ServerResponse>,
@@ -32,26 +32,27 @@ pub async fn process_server_msg(
         };
 
         let mut ctx_lock = ctx.lock().await;
-        let authenticated = ctx_lock.tkn.is_some();
+        let authenticated = ctx_lock.session.tkn.is_some();
 
         match (msg, authenticated) {
           (ServerResponse::Ping, _) => {
+            tracing::info!("Received Ping");
             if let Err(e) = client_request_tx.try_send(ClientRequest::Ping) {
               tracing::error!("Failed to queue Ping reply: {}", e);
             }
             if !authenticated {
               tracing::info!("Attempting to authenticate");
-              let iden = match utils::derive_auth(ctx_lock.secret.as_ref(), args_secret.as_ref()) {
+              let iden = match utils::derive_auth(ctx_lock.session.secret.as_ref(), args_secret.as_ref()) {
                 Ok(1) => remex_core::codec::IdentifyType::ClientSecret(
-                  ctx_lock.secret.clone().unwrap(),
-                  ctx_lock.client_name.clone(),
-                  surrealdb::types::RecordId::parse_simple(&ctx_lock.client_id.clone().unwrap()).unwrap(),
-                  ctx_lock.hardware_hash.clone(),
+                  ctx_lock.session.secret.clone().unwrap(),
+                  ctx_lock.session.client_name.clone(),
+                  surrealdb::types::RecordId::parse_simple(&ctx_lock.session.client_id.clone().unwrap()).unwrap(),
+                  ctx_lock.session.hardware_hash.clone(),
                 ),
                 Ok(2) => remex_core::codec::IdentifyType::Secret(
                   args_secret.clone().unwrap().clone(),
-                  ctx_lock.client_name.clone(),
-                  ctx_lock.hardware_hash.clone(),
+                  ctx_lock.session.client_name.clone(),
+                  ctx_lock.session.hardware_hash.clone(),
                 ),
                 Ok(k) => {
                   tracing::error!("Invalid auth derivation: {}", k);
@@ -104,9 +105,9 @@ pub async fn process_server_msg(
             _,
           ) => {
             tracing::info!("Authenticated and received token: {}", &token.grant.key);
-            ctx_lock.client_id = Some(client_id.to_sql());
-            ctx_lock.tkn = Some(token.clone());
-            ctx_lock.push(&crate::LOCAL_DB).await.unwrap();
+            ctx_lock.session.client_id = Some(client_id.to_sql());
+            ctx_lock.session.tkn = Some(token.clone());
+            ctx_lock.session.push(&crate::LOCAL_DB).await.unwrap();
           }
           s => {
             tracing::info!("Ignored server response: {:#?}", &s);

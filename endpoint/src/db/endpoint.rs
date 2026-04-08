@@ -122,35 +122,3 @@ impl remex_core::db::DbOperator<Session, SessionData> for Session {
     Ok(())
   }
 }
-
-impl From<crate::Context> for SessionData {
-  fn from(ctx: crate::Context) -> Self {
-    SessionData {
-      client_id: match ctx.id {
-        Some(id) => Some(id.to_sql()),
-        None => None,
-      },
-      client_name: Some(ctx.name),
-      hardware_hash: Some(ctx.hardware_hash),
-      db_addr: None,
-      tkn: None,
-      secret: None,
-    }
-  }
-}
-
-impl From<Session> for crate::Context {
-  fn from(ses: Session) -> Self {
-    crate::Context {
-      id: match ses.client_id {
-        Some(id) => Some(surrealdb::types::RecordId::parse_simple(&id).unwrap()),
-        None => None,
-      },
-      name: ses.client_name.clone(),
-      hardware_hash: ses.hardware_hash.clone(),
-      authenticated: false,
-      token: ses.tkn,
-      secret: ses.secret,
-    }
-  }
-}
