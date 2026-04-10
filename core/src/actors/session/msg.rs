@@ -140,7 +140,7 @@ impl Handler<SigninClient> for super::RemexSession {
         .ok_or_else(|| anyhow::anyhow!("database not available"))?;
 
       // WARN: This might throw an error if the client doesn't exist instead of returning None
-      let client: Option<Client> = d.query("USE NS remex DB remex; SELECT * FROM client WHERE id = $id AND secret = crypto::argon2::compare($secret, secret) AND hardware_hash = $hardware_hash;")
+      let client: Option<Client> = d.query("USE NS remex DB remex; SELECT * FROM client WHERE id = $id AND crypto::argon2::compare(secret, $secret) AND hardware_hash = $hardware_hash;")
         .bind(("id", client_id))
         .bind(("secret", client_secret.clone()))
         .bind(("hardware_hash", hardware_hash))
@@ -172,10 +172,10 @@ impl Handler<SigninClient> for super::RemexSession {
             None::<String>,
           ))
         } else {
-          Err(anyhow::anyhow!("Client not found"))
+          Err(anyhow::anyhow!("Client not found 2"))
         }
       } else {
-        Err(anyhow::anyhow!("Client not found"))
+        Err(anyhow::anyhow!("Client not found 3"))
       }
     }
       .into_actor(self)

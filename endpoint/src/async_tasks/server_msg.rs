@@ -59,13 +59,12 @@ pub async fn server_msg_loop(
 
             if let Some(msg) = msg {
               let mut ctx_lock = ctx.lock().await;
-              let authenticated = ctx_lock.session.tkn.is_some();
+              let authenticated = ctx_lock.authenticated;
 
               match msg {
                 Ok(msg) => {
                   match (msg, authenticated) {
                     (ServerResponse::Ping, _) => {
-                      tracing::info!("Received Ping");
                       if let Err(e) = framed.send(ClientRequest::Ping).await {
                         tracing::error!("Failed to queue Ping reply: {}", e);
                       }
@@ -115,6 +114,7 @@ pub async fn server_msg_loop(
                         DisconnectReason::AuthFailed => {
                           tracing::error!("Authentication failed. Removing stored credentials and quitting. Please restart with a valid --secret.");
                           crate::LOCAL_DB.query("USE NS remex DB endpoint; DELETE session;").await.unwrap();
+                          ctx_lock.authenticated = false;
                           if ctx_lock.server_secret.is_none() {
                             std::process::exit(1);
                           }
@@ -122,6 +122,7 @@ pub async fn server_msg_loop(
                         DisconnectReason::InvalidClientId => {
                           tracing::error!("Invalid client ID. Removing stored credentials and quitting. Please restart with a valid --secret.");
                           crate::LOCAL_DB.query("USE NS remex DB endpoint; DELETE session;").await.unwrap();
+                          ctx_lock.authenticated = false;
                           if ctx_lock.server_secret.is_none() {
                             std::process::exit(1);
                           }
@@ -147,6 +148,7 @@ pub async fn server_msg_loop(
                       }
                       ctx_lock.session.tkn = Some(token.clone());
                       ctx_lock.state.server_connected = ConnState::Connected;
+                      ctx_lock.authenticated = true;
                       ctx_lock.session.push(&crate::LOCAL_DB).await.unwrap();
                     }
                     (
@@ -158,6 +160,7 @@ pub async fn server_msg_loop(
                       ctx_lock.session.tkn = Some(token.clone());
                       ctx_lock.session.client_id = Some(client_id.to_sql());
                       ctx_lock.state.server_connected = ConnState::Connected;
+                      ctx_lock.authenticated = true;
                       ctx_lock.session.push(&crate::LOCAL_DB).await.unwrap();
                     }
                     #[allow(unreachable_patterns)]
@@ -192,7 +195,6 @@ pub async fn server_msg_loop(
           }
           let mut c = ctx.lock().await;
           c.state.server_connected = ConnState::Reconnecting;
-          c.session.tkn = None;
         }
       }
     }

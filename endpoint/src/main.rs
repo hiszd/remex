@@ -40,6 +40,7 @@ struct Context {
   session: db::endpoint::Session,
   state: State,
   server_secret: Option<String>,
+  authenticated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -126,10 +127,9 @@ async fn main() -> Result<(), Error> {
       remote_db_connected: ConnState::Initializing,
     },
     server_secret: args.secret.clone(),
+    authenticated: false,
   };
   let ctx = std::sync::Arc::new(Mutex::new(ctx_data));
-
-  // DOING:
 
   // Create bounded channel for outgoing requests with backpressure
   let (_client_request_tx, client_request_rx) =
