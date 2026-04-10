@@ -74,7 +74,7 @@ impl remex_core::db::DbOperator<Job, JobData> for Job {
     )
   }
   async fn push(&mut self, db: &Surreal<Db>) -> Result<(), DbError> {
-    tracing::info!("Pushing job: {}", serde_json::to_string_pretty(self).unwrap());
+    tracing::debug!("Pushing job: {}", serde_json::to_string_pretty(self).unwrap());
     let s: Option<Job> = db
       .query(format!("USE NS remex DB remex; UPSERT job:{} CONTENT $data;", self.id.key.to_sql()))
       .bind(("data", self.clone()))

@@ -4,8 +4,6 @@ use actix_web::{
 };
 
 pub fn start_web_server() -> actix_web::dev::Server {
-  tracing::info!("Starting web server on 0.0.0.0:8989");
-
   HttpServer::new(App::new)
     .disable_signals()
     .shutdown_timeout(5)

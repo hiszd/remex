@@ -23,15 +23,15 @@ pub fn save_secret(name: &str, secret: String) -> anyhow::Result<()> {
 pub fn get_secret(name: &str) -> anyhow::Result<Option<String>, std::io::Error> {
   let usr = env::var("USER").expect("No $USER env var found");
   let cdir = "/home/".to_owned() + &usr + "/.config/remex/";
-  tracing::info!("Reading secret from: {}secret", &cdir);
+  tracing::debug!("Reading secret from: {}secret", &cdir);
   match std::fs::read_to_string(cdir + format!("{}secret", name).as_str()) {
     Ok(s) => {
-      tracing::info!("Read secret: {}", &s);
+      tracing::debug!("Read secret: {}", &s);
       Ok(Some(s))
     }
     Err(e) => {
       if e.kind() == std::io::ErrorKind::NotFound {
-        tracing::error!("secret file not found");
+        tracing::debug!("secret file not found");
         return Ok(None);
       }
       tracing::error!("could not get secret: {}", e);

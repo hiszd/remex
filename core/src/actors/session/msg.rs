@@ -88,7 +88,7 @@ impl Handler<SignupClient> for super::RemexSession {
           client_secret,
         ))
       } else {
-        Err(anyhow::anyhow!("Client not found 1"))
+        Err(anyhow::anyhow!("Client not found"))
       }
     }
     .into_actor(self)
@@ -98,9 +98,12 @@ impl Handler<SignupClient> for super::RemexSession {
         act.name = Some(name.clone());
         act.authenticated = true;
         tracing::info!("client {} authenticated. sent token {}", &name, &token.grant.key);
-        act
-          .framed
-          .write(ServerResponse::SignedUp(client_id, token, secret));
+        act.framed.write(ServerResponse::SignedUp(
+          client_id,
+          token,
+          secret,
+          "ws://192.168.10.87:8090".into(),
+        ));
       }
       Err(e) => {
         tracing::error!("client authentication error: {}", e);
@@ -172,10 +175,10 @@ impl Handler<SigninClient> for super::RemexSession {
             None::<String>,
           ))
         } else {
-          Err(anyhow::anyhow!("Client not found 2"))
+          Err(anyhow::anyhow!("Client not found"))
         }
       } else {
-        Err(anyhow::anyhow!("Client not found 3"))
+        Err(anyhow::anyhow!("Client not found"))
       }
     }
       .into_actor(self)
@@ -187,7 +190,7 @@ impl Handler<SigninClient> for super::RemexSession {
           tracing::info!("client {} authenticated. sent token {}", &name, &t.grant.key);
           act
             .framed
-            .write(ServerResponse::SignedIn(t, secret));
+            .write(ServerResponse::SignedIn(t, secret, "ws://192.168.10.87:8090".into()));
         }
         Err(e) => {
           tracing::error!("client authentication error: {}", e);

@@ -33,6 +33,9 @@ struct Args {
   /// Server IP to connect to
   #[clap(long, env = "REMEX_PORT", default_value = "4269")]
   port: String,
+  /// Enable debug logging
+  #[clap(short, long, env = "REMEX_DEBUG")]
+  debug: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -62,6 +65,16 @@ pub struct State {
 static LOCAL_DB: LazyLock<surrealdb::Surreal<Db>> = LazyLock::new(surrealdb::Surreal::init);
 static REMOTE_DB: LazyLock<surrealdb::Surreal<Client>> = LazyLock::new(surrealdb::Surreal::init);
 
+fn init_logging(debug: bool) {
+  if debug {
+    tracing_subscriber::fmt()
+      .with_max_level(tracing::Level::DEBUG)
+      .init();
+  } else {
+    tracing_subscriber::fmt::init();
+  }
+}
+
 #[derive(thiserror::Error, Debug)]
 enum Error {
   #[error(transparent)]
@@ -72,10 +85,9 @@ enum Error {
 
 #[actix_web::main]
 async fn main() -> Result<(), Error> {
-  tracing_subscriber::fmt::init();
-  tracing::info!("Running client");
-
   let args = Args::parse();
+  init_logging(args.debug);
+  println!("Running client");
 
   LOCAL_DB.connect::<SurrealKv>("endpoint.db").await.unwrap();
   db::migrate(&LOCAL_DB).await.unwrap();
@@ -144,6 +156,7 @@ async fn main() -> Result<(), Error> {
     client_request_rx,
   ));
 
+  tracing::info!("Spawning jobs monitor task");
   // Spawn task to process server messages
   tokio::spawn(async_tasks::jobs::monitor_jobs(ctx.clone()));
 
@@ -159,13 +172,15 @@ async fn main() -> Result<(), Error> {
       && ctx_lock.session.db_addr.is_some()
       && !(ctx_lock.state.remote_db_connected == ConnState::Connected)
     {
-      ctx_lock.state.server_connected = ConnState::Connecting;
+      tracing::info!("Connecting to remote database");
+      ctx_lock.state.remote_db_connected = ConnState::Connecting;
       REMOTE_DB
         .connect::<surrealdb::engine::remote::ws::Ws>(ctx_lock.session.db_addr.clone().unwrap())
         .await
         .unwrap();
       REMOTE_DB.use_ns("remex").use_db("remex").await.unwrap();
-      ctx_lock.state.server_connected = ConnState::Connected;
+      println!("Connected to remote database");
+      ctx_lock.state.remote_db_connected = ConnState::Connected;
     }
   }
 }

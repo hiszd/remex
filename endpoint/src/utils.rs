@@ -25,7 +25,7 @@ pub fn run_command(program: &str, args: &[&str]) -> Result<String, std::io::Erro
 /// 1: ClientSecret
 /// 2: Secret
 pub fn derive_auth(secret: Option<&String>, args_secret: Option<&String>) -> anyhow::Result<u8> {
-  tracing::info!(
+  tracing::debug!(
     "Deriving authentication type from client_secret: {:?}, server_secret: {:?}",
     &secret,
     &args_secret
@@ -35,11 +35,11 @@ pub fn derive_auth(secret: Option<&String>, args_secret: Option<&String>) -> any
   // In other words, revisit the logic involved in determining what would cause the client to fail
   match (secret, args_secret) {
     (Some(_), _) => {
-      tracing::info!("Using client secret");
+      tracing::debug!("Using client secret");
       Ok(1)
     }
     (None, Some(_)) => {
-      tracing::info!("Using server secret");
+      tracing::debug!("Using server secret");
       Ok(2)
     }
     _ => Err(anyhow::anyhow!("No viable authentication provided to connect to the server. Restart client with a valid --secret.")),

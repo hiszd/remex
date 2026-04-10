@@ -35,6 +35,7 @@ pub async fn server_msg_loop(
   let mut pending_request: Option<codec::ClientRequest> = None;
 
   loop {
+    println!("Connecting to server");
     let st = TcpStream::connect(format!("{}:{}", args_server, args_port)).await;
     match st {
       Err(e) => {
@@ -69,7 +70,7 @@ pub async fn server_msg_loop(
                         tracing::error!("Failed to queue Ping reply: {}", e);
                       }
                       if !authenticated {
-                        tracing::info!("Attempting to authenticate");
+                        tracing::debug!("Attempting to authenticate");
                         match utils::derive_auth(ctx_lock.session.secret.as_ref(), args_secret.as_ref()) {
                           Ok(1) => {
                             if let Err(e) = framed.send(
@@ -139,33 +140,35 @@ pub async fn server_msg_loop(
                       }
                     }
                     (
-                      ServerResponse::SignedIn(token, secret),
+                      ServerResponse::SignedIn(token, secret, server_url),
                       _,
                     ) => {
-                      tracing::info!("Authenticated and received token: {}", &token.grant.key);
+                      println!("Authenticated and received token: {}", &token.grant.key);
                       if let Some(s) = secret {
                         ctx_lock.session.secret = Some(s);
                       }
                       ctx_lock.session.tkn = Some(token.clone());
                       ctx_lock.state.server_connected = ConnState::Connected;
+                      ctx_lock.session.db_addr = Some(server_url);
                       ctx_lock.authenticated = true;
                       ctx_lock.session.push(&crate::LOCAL_DB).await.unwrap();
                     }
                     (
-                      ServerResponse::SignedUp(client_id, token, secret),
+                      ServerResponse::SignedUp(client_id, token, secret, server_url),
                       _,
                     ) => {
-                      tracing::info!("Authenticated and received token: {}", &token.grant.key);
+                      println!("Authenticated and received token: {}", &token.grant.key);
                       ctx_lock.session.secret = Some(secret);
                       ctx_lock.session.tkn = Some(token.clone());
                       ctx_lock.session.client_id = Some(client_id.to_sql());
                       ctx_lock.state.server_connected = ConnState::Connected;
+                      ctx_lock.session.db_addr = Some(server_url);
                       ctx_lock.authenticated = true;
                       ctx_lock.session.push(&crate::LOCAL_DB).await.unwrap();
                     }
                     #[allow(unreachable_patterns)]
                     s => {
-                      tracing::info!("Ignored server response: {:#?}", &s);
+                      tracing::debug!("Ignored server response: {:#?}", &s);
                     }
                   }
 
@@ -175,7 +178,7 @@ pub async fn server_msg_loop(
                 }
               }
             } else {
-              tracing::info!("Server message channel closed");
+              println!("Server disconnected");
               tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
               continue;
             }
@@ -188,7 +191,7 @@ pub async fn server_msg_loop(
                   break;
                 }
               } else {
-                tracing::info!("Server message channel closed");
+                tracing::debug!("Server message channel closed");
                 break;
               };
             }

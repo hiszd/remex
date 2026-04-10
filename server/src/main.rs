@@ -4,6 +4,7 @@ use std::sync::{
 };
 
 use actix::Actor;
+use clap::Parser;
 use remex_core::{
   actors::server::RemexServer,
   utils::generate_secret,
@@ -15,12 +16,17 @@ mod secret;
 
 const ADDRESS: &str = "127.0.0.1:4269";
 
+#[derive(Parser, Debug)]
+#[clap(author, version, about, long_about = None)]
+struct Args {
+  /// Enable debug logging
+  #[clap(short, long, env = "REMEX_DEBUG")]
+  debug: bool,
+}
+
 fn get_or_generate_secret() -> String {
   match secret::get_secret("server") {
-    Ok(Some(secret_val)) => {
-      println!("Using existing secret from file");
-      secret_val
-    }
+    Ok(Some(secret_val)) => secret_val,
     Err(e) => {
       tracing::error!("Failed to get secret: {}", e);
       let secret_val = generate_secret(true);
@@ -28,7 +34,6 @@ fn get_or_generate_secret() -> String {
       secret_val
     }
     _ => {
-      println!("No secret found, generating new secret");
       let secret_val = generate_secret(true);
       secret::save_secret("server", secret_val.clone()).expect("Failed to save secret");
       secret_val
@@ -38,9 +43,20 @@ fn get_or_generate_secret() -> String {
 
 static REMOTE_DB: LazyLock<surrealdb::Surreal<Any>> = LazyLock::new(surrealdb::Surreal::init);
 
+fn init_logging(debug: bool) {
+  if debug {
+    tracing_subscriber::fmt()
+      .with_max_level(tracing::Level::DEBUG)
+      .init();
+  } else {
+    tracing_subscriber::fmt::init();
+  }
+}
+
 #[actix_web::main]
 async fn main() -> anyhow::Result<()> {
-  tracing_subscriber::fmt::init();
+  let args = Args::parse();
+  init_logging(args.debug);
 
   let secret_string = get_or_generate_secret();
   println!("Full secret (for copying to endpoint): {}", secret_string);

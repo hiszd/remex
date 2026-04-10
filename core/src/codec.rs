@@ -152,10 +152,10 @@ pub enum ClientRequest {
 #[rtype(result = "()")]
 #[serde(tag = "cmd", content = "data")]
 pub enum ServerResponse {
-  /// SignedIn (Bearer Token, Optional New Client Secret)
-  SignedIn(crate::db::BearerGrantResponse, Option<String>),
-  /// SignedUp (Client Id, Bearer Token, Client Secret)
-  SignedUp(surrealdb::types::RecordId, crate::db::BearerGrantResponse, String),
+  /// SignedIn (Bearer Token, Optional New Client Secret, Database URL)
+  SignedIn(crate::db::BearerGrantResponse, Option<String>, String),
+  /// SignedUp (Client Id, Bearer Token, Client Secret, Database URL)
+  SignedUp(surrealdb::types::RecordId, crate::db::BearerGrantResponse, String, String),
   /// Disconnect (Reason)
   Disconnect(DisconnectReason),
   /// Ping

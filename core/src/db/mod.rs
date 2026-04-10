@@ -80,7 +80,6 @@ pub async fn get_endpoint_bearer_token(
     .query(format!("USE NS remex DB remex; ACCESS endpoint GRANT FOR RECORD {};", id.to_sql()))
     .await?;
   let token: Option<BearerGrantResponse> = res.take(1)?;
-  tracing::info!("token: {:?}", token);
   Ok(token)
 }
 

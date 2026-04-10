@@ -86,7 +86,7 @@ impl remex_core::db::DbOperator<Session, SessionData> for Session {
     )
   }
   async fn push(&mut self, db: &Surreal<Db>) -> Result<(), DbError> {
-    tracing::info!("Pushing session: {}", serde_json::to_string_pretty(self).unwrap());
+    tracing::debug!("Pushing session: {}", serde_json::to_string_pretty(self).unwrap());
     let s: Option<Session> = db
       .query(format!(
         "USE NS remex DB endpoint; UPSERT session:{} CONTENT $data;",
