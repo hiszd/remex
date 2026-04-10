@@ -13,8 +13,6 @@ use tokio::sync::Mutex;
 
 mod secret;
 
-use remex_server::web;
-
 const ADDRESS: &str = "127.0.0.1:4269";
 
 fn get_or_generate_secret() -> String {

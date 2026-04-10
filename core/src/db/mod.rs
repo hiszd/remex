@@ -1,3 +1,4 @@
+use actix::MessageResponse;
 use serde::{
   Deserialize,
   Serialize,
@@ -83,7 +84,7 @@ pub async fn get_endpoint_bearer_token(
   Ok(token)
 }
 
-#[derive(Serialize, Deserialize, Debug, SurrealValue, Clone)]
+#[derive(Serialize, Deserialize, Debug, SurrealValue, Clone, MessageResponse)]
 pub struct BearerGrantResponse {
   pub ac: String,
   pub creation: Datetime,

@@ -5,30 +5,27 @@ authors = ["Zion Koyl<hiszd1@gmail.com>"]
 edition = "2021"
 
 [dependencies]
-heapless = "0.9.2"
-chrono = { version = "0.4.38", features = ["serde"] }
-tokio = { version = "1.38.1", features = ["full"] }
-tracing = { version = "0.1.40", features = ["async-await"] }
-actix = "0.13"
-actix-codec = "0.5.2"
-actix-web = "4.9"
-actix-rt = "2.10.0"
-byteorder = "1.2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-aes-gcm = { version = "0.10.3", features = ["heapless"] }
-uuid = { version = "1.6", features = ["v4", "v7", "serde"] }
-tokio-util = "0.7.4"
-futures-util = "0.3.31"
-anyhow = "1.0.97"
-rand = "0.10"
-derive_more = { version = "2", features = ["full"] }
-dotenvy = "0.15"
-futures = "0.3.31"
+heapless = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+actix = { workspace = true }
+actix-codec = { workspace = true }
+actix-web = { workspace = true }
+actix-rt = { workspace = true }
+byteorder = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+aes-gcm = { workspace = true }
+uuid = { workspace = true }
+tokio-util = { workspace = true }
+futures-util = { workspace = true }
+anyhow = { workspace = true }
+rand = { workspace = true }
+derive_more = { workspace = true }
+dotenvy = { workspace = true }
+futures = { workspace = true }
 utoipa = { version = "5", features = ["actix_extras", "chrono"] }
-surrealdb = { version = "3", default-features = false, features = [
-  "kv-surrealkv",
-  "protocol-ws",
-] }
-tokio-stream = "0.1"
-thiserror = "2.0.18"
+surrealdb = { workspace = true }
+tokio-stream = { workspace = true }
+thiserror = { workspace = true }

@@ -132,59 +132,18 @@ pub enum IdentifyType {
   ClientSecret(String, String, surrealdb::types::RecordId, String),
 }
 
-/// Requests related to the connection
-#[derive(Serialize, Deserialize, Debug, Message, Clone)]
-#[rtype(result = "()")]
-pub enum ConnectionRequest {
-  /// Identify (Type, Data)
-  Identify(IdentifyType),
-}
-
-/// Requests related to the connection
-#[derive(Serialize, Deserialize, Debug, Message, Clone)]
-#[rtype(result = "()")]
-#[serde(tag = "jobs", content = "data")]
-pub enum JobsRequest {
-  /// Request all jobs
-  All,
-  /// Send executions to the server (Job_Id, Executions, Logs)
-  SendExecutions(String, (), ()),
-  /// Send executions to the server (Job_Id, Executions, Logs)
-  UpdateJob(()),
-}
-
 /// Client request - come from client
 #[derive(Serialize, Deserialize, Debug, Message, Clone)]
 #[rtype(result = "()")]
 #[serde(tag = "cmd", content = "data")]
 pub enum ClientRequest {
-  /// Connection Request
-  ConnectionRequest(ConnectionRequest),
-  /// Requesting jobs from the server
-  JobsRequest(JobsRequest),
+  /// SignupClient (Server Secret, Client_Name, Hardware_Hash)
+  SignupClient(String, String, String),
+  /// This request should trigger the server to return a BearerGrantResponse
+  /// SigninClient (Client_Secret, Client_Name, Client_Id, Hardware_Hash)
+  SigninClient(String, String, surrealdb::types::RecordId, String),
   /// Ping
   Ping,
-  /// JwtRefreshAck (jwt_id) - endpoint acknowledges JWT refresh
-  JwtRefreshAck { jwt_id: String },
-}
-
-#[derive(Serialize, Deserialize, Debug, Message, Clone)]
-#[rtype(result = "()")]
-pub enum ConnectionResponse {
-  /// Authenticated (client_id, jwt)
-  Authenticated(surrealdb::types::RecordId, crate::db::BearerGrantResponse),
-  /// RefreshJwt (new_jwt, jwt_id) - server pushes new JWT to endpoint
-  RefreshJwt { new_jwt: String, jwt_id: String },
-  /// Disconnect (Reason)
-  Disconnect(DisconnectReason),
-}
-
-#[derive(Serialize, Deserialize, Debug, Message, Clone)]
-#[rtype(result = "()")]
-#[serde(tag = "jobs", content = "data")]
-pub enum JobsResponse {
-  All(Vec<()>),
-  ReceiveJobs(Vec<()>),
 }
 
 /// Server response - respond to client requests
@@ -192,10 +151,12 @@ pub enum JobsResponse {
 #[rtype(result = "()")]
 #[serde(tag = "cmd", content = "data")]
 pub enum ServerResponse {
-  /// Connection Response
-  ConnectionResponse(ConnectionResponse),
-  /// Recieve Jobs from the Session manager
-  JobsResponse(JobsResponse),
+  /// SignedIn (Bearer Token, Optional New Client Secret)
+  SignedIn(crate::db::BearerGrantResponse, Option<String>),
+  /// SignedUp (Client Id, Bearer Token, Client Secret)
+  SignedUp(surrealdb::types::RecordId, crate::db::BearerGrantResponse, String),
+  /// Disconnect (Reason)
+  Disconnect(DisconnectReason),
   /// Ping
   Ping,
 }

@@ -12,7 +12,6 @@ use std::{
 use actix::prelude::*;
 use surrealdb::{
   engine::any::Any,
-  opt::auth::Record,
   Surreal,
 };
 use tokio::{
@@ -39,10 +38,7 @@ use crate::{
   codec::{
     self,
     ClientRequest,
-    EndpointSigninCreds,
-    EndpointSignupCreds,
   },
-  utils::generate_secret,
 };
 
 pub mod msg;
@@ -103,9 +99,15 @@ impl actix::io::WriteHandler<io::Error> for RemexSession {
 impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
   fn handle(&mut self, msg: Result<ClientRequest, io::Error>, ctx: &mut Context<Self>) {
     match msg {
-      Ok(ClientRequest::ConnectionRequest(codec::ConnectionRequest::Identify(iden))) => {
-        ctx.notify(msg::Authenticate {
-          iden,
+      Ok(ClientRequest::SigninClient(client_secret, client_name, client_id, hardware_hash)) => {
+        ctx.notify(msg::SigninClient {
+          iden: (client_secret, client_name, client_id, hardware_hash),
+          db: self.db.clone(),
+        });
+      }
+      Ok(ClientRequest::SignupClient(client_secret, client_name, hardware_hash)) => {
+        ctx.notify(msg::SignupClient {
+          iden: (client_secret, client_name, hardware_hash),
           db: self.db.clone(),
           server_secret: self.server_secret.clone(),
         });
@@ -113,13 +115,7 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
       Ok(ClientRequest::Ping) => {
         self.hb = Instant::now();
       }
-      Ok(ClientRequest::JwtRefreshAck { jwt_id }) => {
-        tracing::info!("JWT refresh acknowledged for JWT: {}", jwt_id);
-        if let Some(old_jwt_id) = self.current_jwt_id.take() {
-          tracing::info!("JWT refresh: old JWT {} invalidated", old_jwt_id);
-        }
-        self.current_jwt_id = Some(jwt_id);
-      }
+      #[allow(unreachable_patterns)]
       Ok(s) => {
         tracing::info!("Ignored Client request: {:#?}", &s);
       }
@@ -127,7 +123,7 @@ impl StreamHandler<Result<ClientRequest, io::Error>> for RemexSession {
     }
   }
 }
-/// Helper methods
+
 impl RemexSession {
   pub fn new(
     secret: String,

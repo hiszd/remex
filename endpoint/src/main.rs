@@ -3,38 +3,19 @@
 use std::sync::LazyLock;
 
 use clap::Parser;
-use futures_util::{
-  SinkExt as _,
-  StreamExt as _,
-};
 use gethostname::gethostname;
 use remex_core::{
-  codec::{
-    self,
-    ClientRequest,
-    ConnectionResponse,
-    DisconnectReason,
-    ServerResponse,
-  },
-  db::{
-    BearerGrantResponse,
-    DbOperator,
-  },
+  codec,
+  db::DbOperator,
 };
-use surrealdb::{
-  engine::{
-    local::{
-      Db,
-      SurrealKv,
-    },
-    remote::ws::Client,
+use surrealdb::engine::{
+  local::{
+    Db,
+    SurrealKv,
   },
-  types::ToSql,
+  remote::ws::Client,
 };
-use tokio::{
-  net::TcpStream,
-  sync::Mutex,
-};
+use tokio::sync::Mutex;
 
 mod async_tasks;
 mod db;
@@ -61,57 +42,62 @@ struct Context {
   state: State,
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-enum State {
-  /// Setting up database, connecting to the TCP socket.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConnState<T> {
   Initializing,
-  /// Attempting TCP connection to server
   Connecting,
-  /// Sent authentication request, waiting for response
-  Authenticating,
-  /// Connected to server and authenticated
-  Connected,
-  /// Connection lost, attempting to reconnect
+  Connected(T),
+  Disconnected,
   Reconnecting,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct State {
+  pub server_connected: ConnState,
+  pub remote_db_connected: ConnState,
 }
 
 static LOCAL_DB: LazyLock<surrealdb::Surreal<Db>> = LazyLock::new(surrealdb::Surreal::init);
 static REMOTE_DB: LazyLock<surrealdb::Surreal<Client>> = LazyLock::new(surrealdb::Surreal::init);
 
+#[derive(thiserror::Error, Debug)]
+enum Error {
+  #[error(transparent)]
+  Surreal(#[from] surrealdb::Error),
+  #[error(transparent)]
+  DbError(#[from] remex_core::db::DbError),
+}
+
 #[actix_web::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<(), Error> {
   tracing_subscriber::fmt::init();
   tracing::info!("Running client");
 
-  // WARN: NEW CODE
-
-  LOCAL_DB.connect::<SurrealKv>("endpoint.db").await?;
-  db::endpoint::Session::migrate(&LOCAL_DB).await?;
-
-  tracing::info!("Pulling most recent session");
-  let session: Option<db::endpoint::Session> = LOCAL_DB
-    .query("USE NS remex DB endpoint; SELECT * FROM session ORDER BY updated_at DESC LIMIT 1;")
-    .await?
-    .check()?
-    .take(1)?;
-
-  /* ********** VARIABLE INITIALIZATION ********** */
-
-  let hardware_hash = machine_uid::get().unwrap();
   let args = Args::parse();
+
+  LOCAL_DB.connect::<SurrealKv>("endpoint.db").await.unwrap();
+  db::migrate(&LOCAL_DB).await.unwrap();
+
+  // Setup the initial context for the application
   let ctx_data = Context {
-    state: State::Initializing,
-    session: match session {
-      Some(session) => {
-        tracing::info!("Using existing session");
-        session
-      }
-      None => {
-        let s = db::endpoint::Session::create(
+    session: match LOCAL_DB
+      .query("USE NS remex DB endpoint; SELECT * FROM session ORDER BY updated_at DESC LIMIT 1;")
+      .await
+    {
+      Ok(s) => match s.check() {
+        Ok(mut s) => match s.take(1)? {
+          Some(s) => s,
+          None => panic!("No session found"),
+        },
+        Err(e) => panic!("Failed to check session: {}", e),
+      },
+      Err(e) => {
+        tracing::error!("Failed to query session: {}\n Creating a new one instead", e);
+        db::endpoint::Session::create(
           db::endpoint::SessionData {
             client_id: None,
-            hardware_hash: Some(hardware_hash.clone()),
+            hardware_hash: Some(machine_uid::get().unwrap()),
             client_name: Some(gethostname().to_string_lossy().to_string()),
             db_addr: None,
             tkn: None,
@@ -120,42 +106,33 @@ async fn main() -> anyhow::Result<()> {
           &LOCAL_DB,
         )
         .await?
-        .unwrap();
-        tracing::info!("New session created: {:#?}", &s);
-        s
+        .unwrap()
       }
+    },
+    state: State {
+      server_connected: ConnState::Initializing,
+      remote_db_connected: ConnState::Initializing,
     },
   };
   let ctx = std::sync::Arc::new(Mutex::new(ctx_data));
 
-  /* ********** INPUT VALIDATION ********** */
-
-  // Validate secret length
-  if let Some(sec) = args.secret.clone() {
-    if sec.len() < 64 {
-      panic!("Secret must be at least 64 characters long");
-    }
-  }
-
-  /* ********** MAIN LOOP ********** */
+  // DOING:
 
   // Create bounded channel for outgoing requests with backpressure
-  let (client_request_tx, mut client_request_rx) =
+  let (_client_request_tx, client_request_rx) =
     tokio::sync::mpsc::channel::<codec::ClientRequest>(1000);
 
-  // Create channel for server messages to be processed by async task
-  let (server_msg_tx, server_msg_rx) = tokio::sync::mpsc::channel::<codec::ServerResponse>(1000);
-
-  // Buffer to hold a message that was popped but failed to send due to disconnect
-  let mut pending_request: Option<codec::ClientRequest> = None;
-
   // Spawn task to process server messages
-  tokio::spawn(async_tasks::server_msg::process_server_msg(
+  tokio::spawn(async_tasks::server_msg::server_msg_loop(
     ctx.clone(),
     args.secret.clone(),
-    client_request_tx.clone(),
-    server_msg_rx,
+    args.server.clone(),
+    args.port.clone(),
+    client_request_rx,
   ));
+
+  // Spawn task to process server messages
+  tokio::spawn(async_tasks::jobs::monitor_jobs(ctx.clone(), client_id.clone()));
 
   // spawn threads to request new jobs and execute them outside of the reconnection loop
   // so they keep generating messages even when the connection is down.
@@ -163,61 +140,19 @@ async fn main() -> anyhow::Result<()> {
   // tokio::spawn(async_tasks::jobs::jobs_exec(ctx.clone(), client_request_tx.clone()));
 
   loop {
-    // continually try and connect to the server every 5 seconds until we succeed
-    // TODO: Maybe handle errors that aren't "Connection Refused" differently in the future
-    let st = TcpStream::connect(format!("{}:{}", args.server, args.port)).await;
-    if st.is_err() {
-      tracing::warn!("Failed to connect to server. Trying again in 5 seconds 1");
-      tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-    } else {
-      let stream = st.unwrap();
-      let mut framed = actix_codec::Framed::new(stream, codec::ServerCodec);
-
-      // Flush pending request from a previous failed send before entering the main loop
-      if let Some(req) = pending_request.take() {
-        if let Err(e) = framed.send(req.clone()).await {
-          tracing::error!("Failed to send pending request: {}\n Trying again in 5 seconds", e);
-          pending_request = Some(req);
-          tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-          continue;
-        }
-      }
-
-      /* ********** SERVER MESSAGE LOOP ********** */
-
-      loop {
-        tokio::select! {
-          msg = framed.next() => {
-            let Some(m) = msg else {
-              tracing::info!("Server disconnected");
-              break;
-            };
-            match m {
-              Ok(m) => {
-                if let Err(e) = server_msg_tx.send(m).await {
-                  tracing::error!("Failed to send server message to processing task: {}", e);
-                }
-              }
-              Err(e) => {
-                tracing::info!("Client error: {}", e);
-                break;
-              }
-            }
-          },
-          req = client_request_rx.recv() => {
-            if let Some(r) = req {
-              if let Err(e) = framed.send(r.clone()).await {
-                tracing::error!("Failed to send request: {:?}\n Error: {}", &r, &e);
-                pending_request = Some(r);
-                break;
-              }
-            }
-          }
-        }
-      }
-      let mut c = ctx.lock().await;
-      c.session.tkn = None;
-      c.session.push(&LOCAL_DB).await?;
+    let mut ctx_lock = ctx.lock().await;
+    // if the server is connected and has provided the URL for the remote database, setup the connection and start processing messages
+    if (ctx_lock.state.server_connected == ConnState::Connected)
+      && ctx_lock.session.db_addr.is_some()
+      && !(ctx_lock.state.remote_db_connected == ConnState::Connected)
+    {
+      ctx_lock.state.server_connected = ConnState::Connecting;
+      REMOTE_DB
+        .connect::<surrealdb::engine::remote::ws::Ws>(ctx_lock.session.db_addr.clone().unwrap())
+        .await
+        .unwrap();
+      REMOTE_DB.use_ns("remex").use_db("remex").await.unwrap();
+      ctx_lock.state.server_connected = ConnState::Connected;
     }
   }
 }

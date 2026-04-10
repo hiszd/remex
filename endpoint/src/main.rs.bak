@@ -1,0 +1,230 @@
+//ENDPOINT
+
+use std::sync::LazyLock;
+
+use clap::Parser;
+use futures_util::{
+  SinkExt as _,
+  StreamExt as _,
+};
+use gethostname::gethostname;
+use remex_core::{
+  codec::{
+    self,
+    ClientRequest,
+    ConnectionResponse,
+    DisconnectReason,
+    ServerResponse,
+  },
+  db::{
+    BearerGrantResponse,
+    DbOperator,
+  },
+};
+use surrealdb::{
+  engine::{
+    local::{
+      Db,
+      SurrealKv,
+    },
+    remote::ws::Client,
+  },
+  types::ToSql,
+};
+use tokio::{
+  net::TcpStream,
+  sync::Mutex,
+};
+
+mod async_tasks;
+mod db;
+mod fs;
+mod utils;
+
+#[derive(Parser, Debug)]
+#[clap(author, version, about, long_about = None)]
+struct Args {
+  /// Secret to use for authentication
+  #[clap(long, env = "REMEX_SECRET")]
+  secret: Option<String>,
+  /// Server IP to connect to
+  #[clap(long, env = "REMEX_SERVER")]
+  server: String,
+  /// Server IP to connect to
+  #[clap(long, env = "REMEX_PORT", default_value = "4269")]
+  port: String,
+}
+
+#[derive(Debug, Clone)]
+struct Context {
+  session: db::endpoint::Session,
+  state: State,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq)]
+pub enum State {
+  /// Initializing local database and loading session
+  Initializing,
+  /// Attempting TCP connection to server
+  Connecting,
+  /// Sent authentication request, waiting for response
+  Authenticating,
+  /// Connected to server and authenticated
+  Connected,
+  /// Connection lost, attempting to reconnect
+  Reconnecting,
+}
+
+static LOCAL_DB: LazyLock<surrealdb::Surreal<Db>> = LazyLock::new(surrealdb::Surreal::init);
+static REMOTE_DB: LazyLock<surrealdb::Surreal<Client>> = LazyLock::new(surrealdb::Surreal::init);
+
+#[actix_web::main]
+async fn main() -> anyhow::Result<()> {
+  tracing_subscriber::fmt::init();
+  tracing::info!("Running client");
+
+  // WARN: NEW CODE
+
+  LOCAL_DB.connect::<SurrealKv>("endpoint.db").await?;
+  db::endpoint::Session::migrate(&LOCAL_DB).await?;
+
+  tracing::info!("Pulling most recent session");
+  let session: Option<db::endpoint::Session> = LOCAL_DB
+    .query("USE NS remex DB endpoint; SELECT * FROM session ORDER BY updated_at DESC LIMIT 1;")
+    .await?
+    .check()?
+    .take(1)?;
+
+  /* ********** VARIABLE INITIALIZATION ********** */
+
+  let hardware_hash = machine_uid::get().unwrap();
+  let args = Args::parse();
+  let ctx_data = Context {
+    state: State::Initializing,
+    session: match session {
+      Some(session) => {
+        tracing::info!("Using existing session");
+        session
+      }
+      None => {
+        let s = db::endpoint::Session::create(
+          db::endpoint::SessionData {
+            client_id: None,
+            hardware_hash: Some(hardware_hash.clone()),
+            client_name: Some(gethostname().to_string_lossy().to_string()),
+            db_addr: None,
+            tkn: None,
+            secret: None,
+          },
+          &LOCAL_DB,
+        )
+        .await?
+        .unwrap();
+        tracing::info!("New session created: {:#?}", &s);
+        s
+      }
+    },
+  };
+  let ctx = std::sync::Arc::new(Mutex::new(ctx_data));
+
+  /* ********** INPUT VALIDATION ********** */
+
+  // Validate secret length
+  if let Some(sec) = args.secret.clone() {
+    if sec.len() < 64 {
+      panic!("Secret must be at least 64 characters long");
+    }
+  }
+
+  /* ********** MAIN LOOP ********** */
+
+  // Create bounded channel for outgoing requests with backpressure
+  let (client_request_tx, mut client_request_rx) =
+    tokio::sync::mpsc::channel::<codec::ClientRequest>(1000);
+
+  // Create channel for server messages to be processed by async task
+  let (server_msg_tx, server_msg_rx) = tokio::sync::mpsc::channel::<codec::ServerResponse>(1000);
+
+  // Buffer to hold a message that was popped but failed to send due to disconnect
+  let mut pending_request: Option<codec::ClientRequest> = None;
+
+  // Spawn task to process server messages
+  tokio::spawn(async_tasks::server_msg::process_server_msg(
+    ctx.clone(),
+    args.secret.clone(),
+    client_request_tx.clone(),
+    server_msg_rx,
+  ));
+
+  // spawn threads to request new jobs and execute them outside of the reconnection loop
+  // so they keep generating messages even when the connection is down.
+  // tokio::spawn(async_tasks::jobs::jobs_check(ctx.clone(), client_request_tx.clone()));
+  // tokio::spawn(async_tasks::jobs::jobs_exec(ctx.clone(), client_request_tx.clone()));
+
+  loop {
+    // continually try and connect to the server every 5 seconds until we succeed
+    // TODO: Maybe handle errors that aren't "Connection Refused" differently in the future
+    {
+      let mut c = ctx.lock().await;
+      c.state = State::Connecting;
+    }
+    let st = TcpStream::connect(format!("{}:{}", args.server, args.port)).await;
+    if st.is_err() {
+      tracing::warn!("Failed to connect to server. Trying again in 5 seconds 1");
+      tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+    } else {
+      let stream = st.unwrap();
+      let mut framed = actix_codec::Framed::new(stream, codec::ServerCodec);
+
+      // Flush pending request from a previous failed send before entering the main loop
+      if let Some(req) = pending_request.take() {
+        if let Err(e) = framed.send(req.clone()).await {
+          tracing::error!("Failed to send pending request: {}\n Trying again in 5 seconds", e);
+          pending_request = Some(req);
+          tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+          continue;
+        }
+      }
+
+      /* ********** SERVER MESSAGE LOOP ********** */
+
+      loop {
+        tokio::select! {
+          msg = framed.next() => {
+            let Some(m) = msg else {
+              tracing::info!("Server disconnected");
+              break;
+            };
+            match m {
+              Ok(m) => {
+                if let Err(e) = server_msg_tx.send(m).await {
+                  tracing::error!("Failed to send server message to processing task: {}", e);
+                }
+              }
+              Err(e) => {
+                tracing::info!("Client error: {}", e);
+                break;
+              }
+            }
+          },
+          req = client_request_rx.recv() => {
+            if let Some(r) = req {
+              if let Err(e) = framed.send(r.clone()).await {
+                tracing::error!("Failed to send request: {:?}\n Error: {}", &r, &e);
+                pending_request = Some(r);
+                break;
+              }
+            }
+          }
+        }
+      }
+      {
+        let mut c = ctx.lock().await;
+        c.state = State::Reconnecting;
+        c.session.tkn = None;
+        c.session.push(&LOCAL_DB).await?;
+      }
+    }
+  }
+}

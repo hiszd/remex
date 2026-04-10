@@ -6,36 +6,34 @@ edition = "2021"
 
 [dependencies]
 remex-core = { path = "../core" }
-heapless = "0.9.2"
-chrono = { version = "0.4.38", features = ["serde"] }
-tokio = { version = "1.38.1", features = ["full"] }
-tracing = { version = "0.1.40", features = ["async-await"] }
-tracing-subscriber = { version = "0.3.18", features = ["chrono"] }
-actix = "0.13"
-actix-codec = "0.5.2"
-actix-files = "0.6"
-actix-web = "4.9"
-actix-web-actors = "4.1"
-actix-ws = "0.3"
-actix-rt = "2.10.0"
-byteorder = "1.2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-aes-gcm = { version = "0.10.3", features = ["heapless"] }
-gethostname = "1.1.0"
-machine-uid = "0.5.2"
-uuid = { version = "1.6", features = ["v4", "v7", "serde"] }
-tokio-stream = "0.1.17"
-tokio-util = "0.7.4"
-futures-util = "0.3.31"
-anyhow = "1.0.97"
-clap = { version = "4.5.9", features = ["derive", "env"] }
-rand = "0.10"
-derive_more = { version = "2", features = ["full"] }
-dotenvy = "0.15"
-futures = "0.3.31"
-sha2 = "0.10.9"
-surrealdb = { version = "3", default-features = false, features = [
-  "kv-surrealkv",
-  "protocol-ws",
-] }
+heapless = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+actix = { workspace = true }
+actix-codec = { workspace = true }
+actix-rt = { workspace = true }
+actix-web = { workspace = true }
+actix-files = { workspace = true }
+actix-web-actors = { workspace = true }
+actix-ws = { workspace = true }
+byteorder = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+aes-gcm = { workspace = true }
+gethostname = { workspace = true }
+machine-uid = { workspace = true }
+uuid = { workspace = true }
+tokio-stream = { workspace = true }
+tokio-util = { workspace = true }
+futures-util = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+rand = { workspace = true }
+derive_more = { workspace = true }
+dotenvy = { workspace = true }
+futures = { workspace = true }
+sha2 = { workspace = true }
+surrealdb = { workspace = true }
+thiserror = { workspace = true }

@@ -1,10 +1,5 @@
 use std::process::Command;
 
-use remex_core::{
-  codec::IdentifyType,
-  db::BearerGrantResponse,
-};
-
 /// Runs a command on the system and returns combined stdout and stderr as a string.
 pub fn run_command(program: &str, args: &[&str]) -> Result<String, std::io::Error> {
   let output = Command::new(program).args(args).output()?;

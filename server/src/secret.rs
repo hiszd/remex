@@ -1,7 +1,4 @@
-use std::{
-  env,
-  io::Write,
-};
+use std::env;
 
 pub fn save_secret(name: &str, secret: String) -> anyhow::Result<()> {
   let usr = env::var("USER").expect("No $USER env var found");
@@ -36,26 +33,6 @@ pub fn get_secret(name: &str) -> anyhow::Result<Option<String>, std::io::Error> 
       if e.kind() == std::io::ErrorKind::NotFound {
         tracing::error!("secret file not found");
         return Ok(None);
-      }
-      tracing::error!("could not get secret: {}", e);
-      Err(e)
-    }
-  }
-}
-
-pub fn remove_secret() -> anyhow::Result<(), std::io::Error> {
-  let usr = env::var("USER").expect("No $USER env var found");
-  let cdir = "/home/".to_owned() + &usr + "/.config/remex/";
-  tracing::info!("Reading secret from: {}secret", &cdir);
-  match std::fs::remove_file(cdir + "secret") {
-    Ok(_) => {
-      tracing::info!("removed secret file");
-      Ok(())
-    }
-    Err(e) => {
-      if e.kind() == std::io::ErrorKind::NotFound {
-        tracing::error!("secret file not found");
-        return Ok(());
       }
       tracing::error!("could not get secret: {}", e);
       Err(e)

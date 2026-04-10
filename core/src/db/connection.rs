@@ -1,12 +1,8 @@
 use surrealdb::{
   engine::{
     local::Db,
-    remote::ws::{
-      Client,
-      Ws,
-    },
+    remote::ws::Client,
   },
-  opt::auth::Root,
   Surreal,
 };
 

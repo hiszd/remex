@@ -21,6 +21,7 @@ use chrono::{
 
 #[derive(Debug, Clone)]
 struct FileInformation {
+  #[allow(dead_code)]
   filename: String,
   size: u64,
   last_modified: chrono::NaiveDateTime,
@@ -61,7 +62,7 @@ impl FileInterface {
           Utc
             .timestamp_opt(0, 0)
             .single()
-            .unwrap_or_else(|| Utc::now())
+            .unwrap_or_else(Utc::now)
             .naive_utc(),
         )
       }

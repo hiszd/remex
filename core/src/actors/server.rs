@@ -3,28 +3,16 @@
 use std::{
   collections::HashMap,
   sync::Arc,
-  time::Duration,
 };
 
 use actix::prelude::*;
 use surrealdb::{
-  engine::{
-    any::Any,
-    remote::ws::Client,
-  },
-  opt::auth::Record,
+  engine::any::Any,
   Surreal,
 };
 use tokio::sync::Mutex;
 
-use crate::{
-  codec::{
-    ConnectionResponse,
-    EndpointSigninCreds,
-    ServerResponse,
-  },
-  sessionmap::SessionMap,
-};
+use crate::sessionmap::SessionMap;
 
 pub mod msg;
 
