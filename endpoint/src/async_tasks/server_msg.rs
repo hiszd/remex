@@ -114,15 +114,17 @@ pub async fn server_msg_loop(
                       match reason {
                         DisconnectReason::AuthFailed => {
                           tracing::error!("Authentication failed. Removing stored credentials and quitting. Please restart with a valid --secret.");
-                          let _ = crate::fs::id::remove_id();
-                          let _ = crate::fs::secret::remove_secret();
-                          std::process::exit(1);
+                          crate::LOCAL_DB.query("USE NS remex DB endpoint; DELETE session;").await.unwrap();
+                          if ctx_lock.server_secret.is_none() {
+                            std::process::exit(1);
+                          }
                         }
                         DisconnectReason::InvalidClientId => {
                           tracing::error!("Invalid client ID. Removing stored credentials and quitting. Please restart with a valid --secret.");
-                          let _ = crate::fs::id::remove_id();
-                          let _ = crate::fs::secret::remove_secret();
-                          std::process::exit(1);
+                          crate::LOCAL_DB.query("USE NS remex DB endpoint; DELETE session;").await.unwrap();
+                          if ctx_lock.server_secret.is_none() {
+                            std::process::exit(1);
+                          }
                         }
                         DisconnectReason::DuplicateClient => {
                           tracing::error!("Duplicate client ID");
@@ -171,6 +173,7 @@ pub async fn server_msg_loop(
               }
             } else {
               tracing::info!("Server message channel closed");
+              tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
               continue;
             }
           }
@@ -190,9 +193,6 @@ pub async fn server_msg_loop(
           let mut c = ctx.lock().await;
           c.state.server_connected = ConnState::Reconnecting;
           c.session.tkn = None;
-          if let Err(e) = c.session.push(&crate::LOCAL_DB).await {
-            tracing::error!("Failed to push session: {}", e);
-          }
         }
       }
     }

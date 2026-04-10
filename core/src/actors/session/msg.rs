@@ -88,7 +88,7 @@ impl Handler<SignupClient> for super::RemexSession {
           client_secret,
         ))
       } else {
-        Err(anyhow::anyhow!("Client not found"))
+        Err(anyhow::anyhow!("Client not found 1"))
       }
     }
     .into_actor(self)

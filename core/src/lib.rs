@@ -65,20 +65,21 @@ pub struct Message {
 
 impl Message {
   pub fn new(msg: String) -> Self {
-    let packets = Message::packets_from_string(msg.clone());
+    let packets = Message::packets_from_string(&msg);
     Message { msg, packets }
   }
 
   pub fn update(&mut self, msg: String) {
-    self.msg = msg.clone();
-    self.packets = Message::packets_from_string(msg);
+    let old = std::mem::replace(&mut self.msg, msg);
+    self.packets = Message::packets_from_string(&self.msg);
+    drop(old);
   }
 
   pub fn get_packets(&self) -> &Vec<Packet> { &self.packets }
 
   pub fn get_msg(&self) -> &String { &self.msg }
 
-  fn packets_from_string(msg: String) -> Vec<Packet> {
+  fn packets_from_string(msg: &str) -> Vec<Packet> {
     let len = match msg.len() {
       0 => 0,
       _ => (msg.len() / 126) + 1,
@@ -105,7 +106,7 @@ impl Message {
     packets
   }
 
-  fn string_from_packets(packets: &Vec<Packet>) -> String {
+  fn string_from_packets(packets: &[Packet]) -> String {
     let mut rtrn = String::from("");
     for packet in packets {
       packet.information.to_vec().iter().for_each(|x| {

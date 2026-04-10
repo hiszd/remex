@@ -3,8 +3,6 @@ use rand::{
   RngExt,
 };
 
-pub mod fs;
-
 /// Generate a secret as 32 or 64 characters long
 pub fn generate_secret(long: bool) -> String {
   let len = if long { 64 } else { 32 };

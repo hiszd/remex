@@ -47,9 +47,10 @@ pub struct EndpointSigninCreds {
 // FIXME: This should not be hardcoded
 const KEY: &str = "tZs3U%hqY^o$&*y%4HcF8&RyAKevUbZn";
 
-fn decrypt(encrypted_data: Vec<u8>) -> Result<String, String> {
+fn decrypt(encrypted_data: impl AsRef<[u8]>) -> Result<String, String> {
   let key = aes_gcm::Key::<Aes256Gcm>::from_slice(KEY.as_bytes());
-  let (nonce_arr, ciphered_data) = encrypted_data.split_at(12);
+  let data = encrypted_data.as_ref();
+  let (nonce_arr, ciphered_data) = data.split_at(12);
   let nonce = aes_gcm::Nonce::from_slice(nonce_arr);
   let cipher = Aes256Gcm::new(key);
   match cipher.decrypt(nonce, ciphered_data) {
@@ -179,7 +180,7 @@ impl Decoder for ClientCodec {
     if src.len() >= size + 2 {
       let _ = src.split_to(2);
       let buf = src.split_to(size);
-      let dcpt = decrypt(buf.to_vec());
+      let dcpt = decrypt(&buf);
       match dcpt {
         Ok(d) => Ok(Some(json::from_slice::<ClientRequest>(d.as_bytes())?)),
         Err(e) => {
@@ -201,11 +202,10 @@ impl Encoder<ServerResponse> for ClientCodec {
   fn encode(&mut self, msg: ServerResponse, dst: &mut BytesMut) -> Result<(), Self::Error> {
     let msg = json::to_string(&msg).unwrap();
     let m = encrypt(msg);
-    let msg_ref: &[u8] = m.as_slice();
 
-    dst.reserve(msg_ref.len() + 2);
-    dst.put_u16(msg_ref.len() as u16);
-    dst.put(msg_ref);
+    dst.reserve(m.len() + 2);
+    dst.put_u16(m.len() as u16);
+    dst.put(m.as_slice());
 
     Ok(())
   }
@@ -229,7 +229,7 @@ impl Decoder for ServerCodec {
     if src.len() >= size + 2 {
       let _ = src.split_to(2);
       let buf = src.split_to(size);
-      let dcpt = decrypt(buf.to_vec());
+      let dcpt = decrypt(&buf);
       match dcpt {
         Ok(d) => Ok(Some(json::from_slice::<ServerResponse>(d.as_bytes())?)),
         Err(e) => {
@@ -251,11 +251,10 @@ impl Encoder<ClientRequest> for ServerCodec {
   fn encode(&mut self, msg: ClientRequest, dst: &mut BytesMut) -> Result<(), Self::Error> {
     let msg = json::to_string(&msg).unwrap();
     let m = encrypt(msg);
-    let msg_ref: &[u8] = m.as_slice();
 
-    dst.reserve(msg_ref.len() + 2);
-    dst.put_u16(msg_ref.len() as u16);
-    dst.put(msg_ref);
+    dst.reserve(m.len() + 2);
+    dst.put_u16(m.len() as u16);
+    dst.put(m.as_slice());
 
     Ok(())
   }

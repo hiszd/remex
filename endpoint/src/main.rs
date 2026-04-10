@@ -19,7 +19,6 @@ use tokio::sync::Mutex;
 
 mod async_tasks;
 mod db;
-mod fs;
 mod utils;
 
 #[derive(Parser, Debug)]
@@ -40,13 +39,14 @@ struct Args {
 struct Context {
   session: db::endpoint::Session,
   state: State,
+  server_secret: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum ConnState<T> {
+pub enum ConnState {
   Initializing,
   Connecting,
-  Connected(T),
+  Connected,
   Disconnected,
   Reconnecting,
 }
@@ -88,7 +88,19 @@ async fn main() -> Result<(), Error> {
       Ok(s) => match s.check() {
         Ok(mut s) => match s.take(1)? {
           Some(s) => s,
-          None => panic!("No session found"),
+          None => db::endpoint::Session::create(
+            db::endpoint::SessionData {
+              client_id: None,
+              hardware_hash: Some(machine_uid::get().unwrap()),
+              client_name: Some(gethostname().to_string_lossy().to_string()),
+              db_addr: None,
+              tkn: None,
+              secret: None,
+            },
+            &LOCAL_DB,
+          )
+          .await?
+          .unwrap(),
         },
         Err(e) => panic!("Failed to check session: {}", e),
       },
@@ -113,6 +125,7 @@ async fn main() -> Result<(), Error> {
       server_connected: ConnState::Initializing,
       remote_db_connected: ConnState::Initializing,
     },
+    server_secret: args.secret.clone(),
   };
   let ctx = std::sync::Arc::new(Mutex::new(ctx_data));
 
@@ -132,7 +145,7 @@ async fn main() -> Result<(), Error> {
   ));
 
   // Spawn task to process server messages
-  tokio::spawn(async_tasks::jobs::monitor_jobs(ctx.clone(), client_id.clone()));
+  tokio::spawn(async_tasks::jobs::monitor_jobs(ctx.clone()));
 
   // spawn threads to request new jobs and execute them outside of the reconnection loop
   // so they keep generating messages even when the connection is down.
