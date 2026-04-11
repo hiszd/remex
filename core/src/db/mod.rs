@@ -106,3 +106,8 @@ pub struct GrantDetails {
 pub struct Subject {
   pub record: RecordId,
 }
+
+#[derive(Serialize, Deserialize, Debug, SurrealValue, Clone)]
+pub struct BearerToken {
+  pub key: String,
+}

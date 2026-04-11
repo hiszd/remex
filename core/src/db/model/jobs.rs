@@ -82,8 +82,6 @@ pub struct JobData {
   pub job_status: JobStatus,
   pub job_shell: String,
   pub job_command: String,
-  pub created_at: surrealdb::types::Datetime,
-  pub updated_at: surrealdb::types::Datetime,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, SurrealValue)]
@@ -105,13 +103,14 @@ impl Job {
     db.query(
       r"
         USE NS remex DB remex;
-        DEFINE TABLE IF NOT EXISTS job SCHEMAFULL;
+        DEFINE TABLE IF NOT EXISTS job SCHEMAFULL
+          PERMISSIONS FULL;
         DEFINE FIELD IF NOT EXISTS job_name ON TABLE job TYPE string;
         DEFINE FIELD IF NOT EXISTS job_shell ON TABLE job TYPE string;
         DEFINE FIELD IF NOT EXISTS job_command ON TABLE job TYPE string;
 
-        DEFINE FIELD IF NOT EXISTS job_type ON TABLE job TYPE string | object;
-        DEFINE FIELD IF NOT EXISTS job_status ON TABLE job TYPE string | object;
+        DEFINE FIELD IF NOT EXISTS job_type ON TABLE job TYPE any;
+        DEFINE FIELD IF NOT EXISTS job_status ON TABLE job TYPE any;
 
         DEFINE FIELD IF NOT EXISTS assignments ON TABLE job TYPE array<record<client | group>> DEFAULT [];
 

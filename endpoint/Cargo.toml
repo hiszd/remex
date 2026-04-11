@@ -35,5 +35,5 @@ derive_more = { workspace = true }
 dotenvy = { workspace = true }
 futures = { workspace = true }
 sha2 = { workspace = true }
-surrealdb = { workspace = true }
+surrealdb.workspace = true
 thiserror = { workspace = true }

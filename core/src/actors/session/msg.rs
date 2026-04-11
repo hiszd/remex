@@ -102,7 +102,7 @@ impl Handler<SignupClient> for super::RemexSession {
           client_id,
           token,
           secret,
-          "ws://192.168.10.87:8090".into(),
+          "192.168.10.87:8090".into(),
         ));
       }
       Err(e) => {
@@ -190,7 +190,7 @@ impl Handler<SigninClient> for super::RemexSession {
           tracing::info!("client {} authenticated. sent token {}", &name, &t.grant.key);
           act
             .framed
-            .write(ServerResponse::SignedIn(t, secret, "ws://192.168.10.87:8090".into()));
+            .write(ServerResponse::SignedIn(t, secret, "192.168.10.87:8090".into()));
         }
         Err(e) => {
           tracing::error!("client authentication error: {}", e);

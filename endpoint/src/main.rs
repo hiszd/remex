@@ -8,12 +8,15 @@ use remex_core::{
   codec,
   db::DbOperator,
 };
-use surrealdb::engine::{
-  local::{
-    Db,
-    SurrealKv,
+use surrealdb::{
+  engine::{
+    local::{
+      Db,
+      SurrealKv,
+    },
+    remote::ws::Client,
   },
-  remote::ws::Client,
+  opt::auth::Token,
 };
 use tokio::sync::Mutex;
 
@@ -166,21 +169,40 @@ async fn main() -> Result<(), Error> {
   // tokio::spawn(async_tasks::jobs::jobs_exec(ctx.clone(), client_request_tx.clone()));
 
   loop {
-    let mut ctx_lock = ctx.lock().await;
+    let mut ctx_lock1 = ctx.lock().await;
     // if the server is connected and has provided the URL for the remote database, setup the connection and start processing messages
-    if (ctx_lock.state.server_connected == ConnState::Connected)
-      && ctx_lock.session.db_addr.is_some()
-      && !(ctx_lock.state.remote_db_connected == ConnState::Connected)
+    if (ctx_lock1.state.server_connected == ConnState::Connected)
+      && ctx_lock1.session.db_addr.is_some()
+      && !(ctx_lock1.state.remote_db_connected == ConnState::Connected)
     {
       tracing::info!("Connecting to remote database");
-      ctx_lock.state.remote_db_connected = ConnState::Connecting;
+      ctx_lock1.state.remote_db_connected = ConnState::Connecting;
+      let db_url = ctx_lock1.session.db_addr.clone().unwrap();
+      let token = ctx_lock1.session.tkn.clone().unwrap();
+      drop(ctx_lock1);
       REMOTE_DB
-        .connect::<surrealdb::engine::remote::ws::Ws>(ctx_lock.session.db_addr.clone().unwrap())
+        .connect::<surrealdb::engine::remote::ws::Ws>(db_url)
         .await
         .unwrap();
+      tracing::info!("Authenticating to remote database");
+      REMOTE_DB
+        .signin(surrealdb::opt::auth::Record {
+          namespace: "remex".into(),
+          database: "remex".into(),
+          access: "endpoint".into(),
+          params: remex_core::db::BearerToken {
+            key: token.grant.key.clone(),
+          },
+        })
+        .await?;
       REMOTE_DB.use_ns("remex").use_db("remex").await.unwrap();
       println!("Connected to remote database");
-      ctx_lock.state.remote_db_connected = ConnState::Connected;
+      let mut ctx_lock2 = ctx.lock().await;
+      ctx_lock2.state.remote_db_connected = ConnState::Connected;
+      drop(ctx_lock2);
+      tracing::info!("Spawning jobs monitor task");
+      // Spawn task to process server messages
+      tokio::spawn(async_tasks::jobs::monitor_jobs(ctx.clone()));
     }
   }
 }
