@@ -13,11 +13,12 @@ use surrealdb::{
   },
   Surreal,
 };
-use utoipa::ToSchema;
 
 use crate::db::DbError;
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, SurrealValue)]
+#[derive(
+  Debug, Serialize, Deserialize, PartialEq, Clone, SurrealValue, remex_macros::SerdeIntoString,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum JobType {
   Instant,
@@ -25,54 +26,43 @@ pub enum JobType {
   Recurring(surrealdb::types::Datetime, std::time::Duration),
 }
 
-impl From<String> for JobType {
-  fn from(s: String) -> Self {
-    match serde_json::from_str(&s) {
-      Ok(v) => v,
-      Err(e) => {
-        tracing::info!("Failed to parse job type: {}", s);
-        panic!("{}", e);
-      }
-    }
-  }
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, SurrealValue)]
+#[serde(rename_all = "snake_case")]
+pub enum JobSuccessStatus {
+  CompleteSuccess,
+  MostlySuccess,
+  CompleteFailure,
+  MostlyFailure,
+  Split,
 }
 
-impl From<JobType> for String {
-  fn from(jt: JobType) -> Self { serde_json::to_string(&jt).unwrap() }
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema, SurrealValue)]
+#[derive(
+  Debug,
+  Serialize,
+  Deserialize,
+  PartialEq,
+  Clone,
+  SurrealValue,
+  Default,
+  remex_macros::SerdeIntoString,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum JobStatus {
-  /// The job is waiting to be picked up for execution.
+  /// The job has not been executed
   Pending,
   /// The job is currently being executed by a client.
   Running,
   /// The job has finished successfully.
   Completed,
-  /// The job has failed during execution, includes an error message.
-  Failed(String),
+  /// All clients have completed executing this job, but some may have failed.
+  PartiallyCompleted,
+  /// Every client has failed in executing this job
+  Failed,
   /// The job was cancelled by a user or system administrator.
   Cancelled,
-  /// The job execution exceeded the allocated time limit.
-  TimedOut,
+  #[default]
   /// The job is disabled and will not be picked up for execution.
   Disabled,
-}
-
-impl From<String> for JobStatus {
-  fn from(status: String) -> Self {
-    match serde_json::from_str(&status) {
-      Ok(v) => v,
-      Err(e) => {
-        tracing::info!("Failed to parse job status: {}", status);
-        panic!("{}", e);
-      }
-    }
-  }
-}
-impl From<JobStatus> for String {
-  fn from(val: JobStatus) -> Self { serde_json::to_string(&val).unwrap() }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, SurrealValue)]
@@ -109,8 +99,8 @@ impl Job {
         DEFINE FIELD IF NOT EXISTS job_shell ON TABLE job TYPE string;
         DEFINE FIELD IF NOT EXISTS job_command ON TABLE job TYPE string;
 
-        DEFINE FIELD IF NOT EXISTS job_type ON TABLE job TYPE any;
-        DEFINE FIELD IF NOT EXISTS job_status ON TABLE job TYPE any;
+        DEFINE FIELD IF NOT EXISTS job_type ON TABLE job FLEXIBLE TYPE object;
+        DEFINE FIELD IF NOT EXISTS job_status ON TABLE job FLEXIBLE TYPE object;
 
         DEFINE FIELD IF NOT EXISTS assignments ON TABLE job TYPE array<record<client | group>> DEFAULT [];
 

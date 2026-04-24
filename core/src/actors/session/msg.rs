@@ -60,13 +60,14 @@ impl Handler<SignupClient> for super::RemexSession {
       let d = db
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("database not available"))?;
+      d.use_ns("remex").use_db("remex").await?;
 
       // Generate the client secret to be put in the database, and sent along to the client.
       let client_secret = generate_secret(true);
 
       // Enroll the client in the database, and store the secret.
       let mut response = d
-        .query("USE NS remex DB remex; UPSERT client CONTENT $data;")
+        .query("UPSERT client CONTENT $data;")
         .bind(("data", crate::db::model::clients::ClientData {
           client_name: name,
           hardware_hash,
@@ -76,7 +77,7 @@ impl Handler<SignupClient> for super::RemexSession {
         .unwrap()
         .check()
         .unwrap();
-      let client: Option<Client> = response.take(1)?;
+      let client: Option<Client> = response.take(0)?;
       if let Some(c) = client {
         Ok((
           c.id.clone(),
@@ -88,7 +89,7 @@ impl Handler<SignupClient> for super::RemexSession {
           client_secret,
         ))
       } else {
-        Err(anyhow::anyhow!("Client not found"))
+        Err(anyhow::anyhow!("Client not found?"))
       }
     }
     .into_actor(self)
@@ -141,18 +142,19 @@ impl Handler<SigninClient> for super::RemexSession {
       let d = db
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("database not available"))?;
+      d.use_ns("remex").use_db("remex").await?;
 
       // WARN: This might throw an error if the client doesn't exist instead of returning None
-      let client: Option<Client> = d.query("USE NS remex DB remex; SELECT * FROM client WHERE id = $id AND crypto::argon2::compare(secret, $secret) AND hardware_hash = $hardware_hash;")
+      let client: Option<Client> = d.query("SELECT * FROM client WHERE id = $id AND crypto::argon2::compare(secret, $secret) AND hardware_hash = $hardware_hash;")
         .bind(("id", client_id))
         .bind(("secret", client_secret.clone()))
         .bind(("hardware_hash", hardware_hash))
-        .await?.check()?.take(1)?;
+        .await?.check()?.take(0)?;
 
       if let Some(c) = client {
         // Enroll the client in the database, and store the secret.
         let mut response = d
-          .query("USE NS remex DB remex; UPSERT client CONTENT $data;")
+          .query("UPSERT client CONTENT $data;")
           .bind(("data", crate::db::model::clients::ClientData {
             client_name: c.client_name,
             hardware_hash: c.hardware_hash,
@@ -162,7 +164,7 @@ impl Handler<SigninClient> for super::RemexSession {
           .unwrap()
           .check()
           .unwrap();
-        let cli: Option<Client> = response.take(1)?;
+        let cli: Option<Client> = response.take(0)?;
         if let Some(cl) = cli {
           Ok((
             cl.id.clone(),
@@ -175,10 +177,10 @@ impl Handler<SigninClient> for super::RemexSession {
             None::<String>,
           ))
         } else {
-          Err(anyhow::anyhow!("Client not found"))
+          Err(anyhow::anyhow!("Client not found1"))
         }
       } else {
-        Err(anyhow::anyhow!("Client not found"))
+        Err(anyhow::anyhow!("Client not found2"))
       }
     }
       .into_actor(self)

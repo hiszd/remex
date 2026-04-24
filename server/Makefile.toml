@@ -6,11 +6,3 @@ script = "echo TODO: Reset database"
 
 [tasks.schema]
 script = "echo TODO: Generate schema"
-
-[tasks.openapigen]
-script = "cargo run --bin api"
-
-[tasks.apigen]
-dependencies = ["openapigen"]
-cwd = "frontend"
-script = "pnpm run api:sync"

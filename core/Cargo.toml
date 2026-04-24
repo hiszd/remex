@@ -29,3 +29,4 @@ utoipa = { version = "5", features = ["actix_extras", "chrono"] }
 surrealdb = { workspace = true }
 tokio-stream = { workspace = true }
 thiserror = { workspace = true }
+remex-macros = { path = "../macros" }

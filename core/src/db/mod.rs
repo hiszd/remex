@@ -26,6 +26,8 @@ pub enum DbError {
   SurrealDb(#[from] surrealdb::Error),
   #[error("Operation failed: {0}")]
   OperationFailed(String),
+  #[error("No Database Connection")]
+  NoDatabaseConnection(String),
 }
 
 /// Trait for database operations
@@ -65,10 +67,15 @@ where
 }
 
 pub async fn migrate(db: &Surreal<Any>) -> Result<(), DbError> {
-  model::clients::Client::migrate(db).await?;
-  model::executions::Execution::migrate(db).await?;
-  model::groups::Group::migrate(db).await?;
-  model::jobs::Job::migrate(db).await?;
+  let remex = db.clone();
+  remex.use_ns("remex").use_db("remex").await?;
+  model::clients::Client::migrate(&remex).await?;
+  model::executions::Execution::migrate(&remex).await?;
+  model::groups::Group::migrate(&remex).await?;
+  model::jobs::Job::migrate(&remex).await?;
+  let config = db.clone();
+  config.use_ns("remex").use_db("config").await?;
+  model::config::Config::migrate(&config).await?;
   Ok(())
 }
 
@@ -77,9 +84,9 @@ pub async fn get_endpoint_bearer_token(
   db: &Surreal<Any>,
 ) -> Result<Option<BearerGrantResponse>, DbError> {
   let mut res = db
-    .query(format!("USE NS remex DB remex; ACCESS endpoint GRANT FOR RECORD {};", id.to_sql()))
+    .query(format!("ACCESS endpoint GRANT FOR RECORD {};", id.to_sql()))
     .await?;
-  let token: Option<BearerGrantResponse> = res.take(1)?;
+  let token: Option<BearerGrantResponse> = res.take(0)?;
   Ok(token)
 }
 
