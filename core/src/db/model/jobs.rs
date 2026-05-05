@@ -26,45 +26,6 @@ pub enum JobType {
   Recurring(surrealdb::types::Datetime, std::time::Duration),
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, SurrealValue)]
-#[serde(rename_all = "snake_case")]
-pub enum JobSuccessStatus {
-  CompleteSuccess,
-  MostlySuccess,
-  CompleteFailure,
-  MostlyFailure,
-  Split,
-}
-
-#[derive(
-  Debug,
-  Serialize,
-  Deserialize,
-  PartialEq,
-  Clone,
-  SurrealValue,
-  Default,
-  remex_macros::SerdeIntoString,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum JobStatus {
-  /// The job has not been executed
-  Pending,
-  /// The job is currently being executed by a client.
-  Running,
-  /// The job has finished successfully.
-  Completed,
-  /// All clients have completed executing this job, but some may have failed.
-  PartiallyCompleted,
-  /// Every client has failed in executing this job
-  Failed,
-  /// The job was cancelled by a user or system administrator.
-  Cancelled,
-  #[default]
-  /// The job is disabled and will not be picked up for execution.
-  Disabled,
-}
-
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, SurrealValue, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Enabled {
