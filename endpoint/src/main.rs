@@ -1,23 +1,12 @@
 //ENDPOINT
 
-use std::sync::LazyLock;
-
 use clap::Parser;
 use gethostname::gethostname;
 use remex_core::{
   codec,
   db::DbOperator,
 };
-use surrealdb::{
-  engine::{
-    local::{
-      Db,
-      SurrealKv,
-    },
-    remote::ws::Client,
-  },
-  opt::auth::Token,
-};
+use surrealdb::engine::local::SurrealKv;
 use tokio::sync::Mutex;
 
 mod async_tasks;
@@ -65,9 +54,6 @@ pub struct State {
   pub remote_db_connected: ConnState,
 }
 
-static LOCAL_DB: LazyLock<surrealdb::Surreal<Db>> = LazyLock::new(surrealdb::Surreal::init);
-static REMOTE_DB: LazyLock<surrealdb::Surreal<Client>> = LazyLock::new(surrealdb::Surreal::init);
-
 fn init_logging(debug: bool) {
   if debug {
     tracing_subscriber::fmt()
@@ -84,6 +70,10 @@ enum Error {
   Surreal(#[from] surrealdb::Error),
   #[error(transparent)]
   DbError(#[from] remex_core::db::DbError),
+  #[error(transparent)]
+  StdIo(#[from] std::io::Error),
+  #[error("No Database Connection")]
+  NoDatabaseConnection(String),
 }
 
 #[actix_web::main]
@@ -92,13 +82,17 @@ async fn main() -> Result<(), Error> {
   init_logging(args.debug);
   println!("Running client");
 
-  LOCAL_DB.connect::<SurrealKv>("endpoint.db").await.unwrap();
-  db::migrate(&LOCAL_DB).await.unwrap();
+  db::LOCAL_DB
+    .connect::<SurrealKv>("endpoint.db")
+    .await
+    .unwrap();
+  db::migrate(&db::LOCAL_DB).await.unwrap();
 
   // Setup the initial context for the application
   let ctx_data = Context {
-    session: match LOCAL_DB
-      .query("USE NS remex DB endpoint; SELECT * FROM session ORDER BY updated_at DESC LIMIT 1;")
+    session: match db::get_local_endpoint()
+      .await?
+      .query("SELECT * FROM session ORDER BY updated_at DESC LIMIT 1;")
       .await
     {
       Ok(s) => match s.check() {
@@ -113,7 +107,7 @@ async fn main() -> Result<(), Error> {
               tkn: None,
               secret: None,
             },
-            &LOCAL_DB,
+            &db::get_local_endpoint().await?,
           )
           .await?
           .unwrap(),
@@ -131,7 +125,7 @@ async fn main() -> Result<(), Error> {
             tkn: None,
             secret: None,
           },
-          &LOCAL_DB,
+          &db::get_local_endpoint().await?,
         )
         .await?
         .unwrap()
@@ -159,9 +153,14 @@ async fn main() -> Result<(), Error> {
     client_request_rx,
   ));
 
+  let (job_injection_tx, job_injection_rx) =
+    tokio::sync::mpsc::channel::<async_tasks::jobs::JobQueueMessage>(1000);
+
+  tracing::info!("Spawning jobs scheduler loop");
+  tokio::spawn(async_tasks::jobs::job_scheduler_loop(job_injection_rx));
+
   tracing::info!("Spawning jobs monitor task");
-  // Spawn task to process server messages
-  tokio::spawn(async_tasks::jobs::monitor_jobs(ctx.clone()));
+  tokio::spawn(async_tasks::jobs::monitor_jobs(ctx.clone(), job_injection_tx.clone()));
 
   // spawn threads to request new jobs and execute them outside of the reconnection loop
   // so they keep generating messages even when the connection is down.
@@ -180,12 +179,12 @@ async fn main() -> Result<(), Error> {
       let db_url = ctx_lock1.session.db_addr.clone().unwrap();
       let token = ctx_lock1.session.tkn.clone().unwrap();
       drop(ctx_lock1);
-      REMOTE_DB
+      db::REMOTE_DB
         .connect::<surrealdb::engine::remote::ws::Ws>(db_url)
         .await
         .unwrap();
       tracing::info!("Authenticating to remote database");
-      REMOTE_DB
+      db::REMOTE_DB
         .signin(surrealdb::opt::auth::Record {
           namespace: "remex".into(),
           database: "remex".into(),
@@ -195,14 +194,11 @@ async fn main() -> Result<(), Error> {
           },
         })
         .await?;
-      REMOTE_DB.use_ns("remex").use_db("remex").await.unwrap();
+      db::REMOTE_DB.use_ns("remex").use_db("remex").await.unwrap();
       println!("Connected to remote database");
       let mut ctx_lock2 = ctx.lock().await;
       ctx_lock2.state.remote_db_connected = ConnState::Connected;
       drop(ctx_lock2);
-      tracing::info!("Spawning jobs monitor task");
-      // Spawn task to process server messages
-      tokio::spawn(async_tasks::jobs::monitor_jobs(ctx.clone()));
     }
   }
 }

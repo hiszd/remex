@@ -11,7 +11,10 @@ use remex_core::{
     DisconnectReason,
     ServerResponse,
   },
-  db::DbOperator,
+  db::{
+    DbError,
+    DbOperator,
+  },
 };
 use surrealdb::types::ToSql;
 use tokio::{
@@ -30,7 +33,7 @@ pub async fn server_msg_loop(
   args_server: String,
   args_port: String,
   mut client_request_rx: tokio::sync::mpsc::Receiver<ClientRequest>,
-) {
+) -> Result<(), DbError> {
   // Buffer to hold a message that was popped but failed to send due to disconnect
   let mut pending_request: Option<codec::ClientRequest> = None;
 
@@ -43,7 +46,9 @@ pub async fn server_msg_loop(
         tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
       }
       Ok(stream) => {
+        tracing::info!("Connected to server. Setting up codec");
         let mut framed = actix_codec::Framed::new(stream, codec::ServerCodec);
+        let local_endpoint = crate::db::get_local_endpoint().await?;
 
         // Flush pending request from a previous failed send before entering the main loop
         if let Some(req) = pending_request.take() {
@@ -114,7 +119,7 @@ pub async fn server_msg_loop(
                       match reason {
                         DisconnectReason::AuthFailed => {
                           tracing::error!("Authentication failed. Removing stored credentials and quitting. Please restart with a valid --secret.");
-                          crate::LOCAL_DB.query("USE NS remex DB endpoint; DELETE session;").await.unwrap();
+                          local_endpoint.query("DELETE session;").await.unwrap();
                           ctx_lock.authenticated = false;
                           if ctx_lock.server_secret.is_none() {
                             std::process::exit(1);
@@ -122,7 +127,7 @@ pub async fn server_msg_loop(
                         }
                         DisconnectReason::InvalidClientId => {
                           tracing::error!("Invalid client ID. Removing stored credentials and quitting. Please restart with a valid --secret.");
-                          crate::LOCAL_DB.query("USE NS remex DB endpoint; DELETE session;").await.unwrap();
+                          local_endpoint.query("USE NS remex DB endpoint; DELETE session;").await.unwrap();
                           ctx_lock.authenticated = false;
                           if ctx_lock.server_secret.is_none() {
                             std::process::exit(1);
@@ -143,7 +148,7 @@ pub async fn server_msg_loop(
                       ServerResponse::SignedIn(token, secret, server_url),
                       _,
                     ) => {
-                      println!("Authenticated and received token: {}", &token.grant.key);
+                      println!("Signed in and received token: {}", &token.grant.key);
                       if let Some(s) = secret {
                         ctx_lock.session.secret = Some(s);
                       }
@@ -151,20 +156,20 @@ pub async fn server_msg_loop(
                       ctx_lock.state.server_connected = ConnState::Connected;
                       ctx_lock.session.db_addr = Some(server_url);
                       ctx_lock.authenticated = true;
-                      ctx_lock.session.push(&crate::LOCAL_DB).await.unwrap();
+                      ctx_lock.session.push(&local_endpoint).await.unwrap();
                     }
                     (
                       ServerResponse::SignedUp(client_id, token, secret, server_url),
                       _,
                     ) => {
-                      println!("Authenticated and received token: {}", &token.grant.key);
+                      println!("Signed up and received token: {}", &token.grant.key);
                       ctx_lock.session.secret = Some(secret);
                       ctx_lock.session.tkn = Some(token.clone());
                       ctx_lock.session.client_id = Some(client_id.to_sql());
                       ctx_lock.state.server_connected = ConnState::Connected;
                       ctx_lock.session.db_addr = Some(server_url);
                       ctx_lock.authenticated = true;
-                      ctx_lock.session.push(&crate::LOCAL_DB).await.unwrap();
+                      ctx_lock.session.push(&local_endpoint).await.unwrap();
                     }
                     #[allow(unreachable_patterns)]
                     s => {
@@ -179,8 +184,12 @@ pub async fn server_msg_loop(
               }
             } else {
               println!("Server disconnected");
+              let mut c = ctx.lock().await;
+              c.state.server_connected = ConnState::Reconnecting;
+              c.authenticated = false;
+              tracing::info!("Changed connection state: {:?}", c.state.server_connected);
               tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-              continue;
+              break;
             }
           }
             msg = client_request_rx.recv() => {
@@ -196,8 +205,6 @@ pub async fn server_msg_loop(
               };
             }
           }
-          let mut c = ctx.lock().await;
-          c.state.server_connected = ConnState::Reconnecting;
         }
       }
     }

@@ -47,7 +47,7 @@ impl Session {
         DEFINE FIELD IF NOT EXISTS client_name ON TABLE session TYPE string;
         DEFINE FIELD IF NOT EXISTS hardware_hash ON TABLE session TYPE string;
         DEFINE FIELD IF NOT EXISTS db_addr ON TABLE session TYPE option<string>;
-        DEFINE FIELD IF NOT EXISTS tkn ON TABLE session TYPE any;
+        DEFINE FIELD IF NOT EXISTS tkn ON TABLE session FLEXIBLE TYPE object;
         DEFINE FIELD IF NOT EXISTS secret ON TABLE session TYPE option<string>;
       ",
     )

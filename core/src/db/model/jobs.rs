@@ -65,11 +65,32 @@ pub enum JobStatus {
   Disabled,
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, SurrealValue, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Enabled {
+  #[default]
+  Draft,
+  Enabled,
+  Disabled,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, SurrealValue, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionStatus {
+  #[default]
+  Pending,
+  Running,
+  Completed,
+  Failed,
+  TimedOut,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, SurrealValue)]
 pub struct JobData {
   pub job_name: String,
   pub job_type: JobType,
-  pub job_status: JobStatus,
+  pub execution_status: ExecutionStatus,
+  pub enabled: Enabled,
   pub job_shell: String,
   pub job_command: String,
 }
@@ -81,7 +102,8 @@ pub struct Job {
   pub job_shell: String,
   pub job_command: String,
   pub job_type: JobType,
-  pub job_status: JobStatus,
+  pub execution_status: ExecutionStatus,
+  pub enabled: Enabled,
   pub assignments: Vec<surrealdb::types::RecordId>,
   pub created_at: surrealdb::types::Datetime,
   pub updated_at: surrealdb::types::Datetime,
@@ -89,7 +111,6 @@ pub struct Job {
 
 impl Job {
   pub async fn migrate(db: &Surreal<Any>) -> Result<(), DbError> {
-    // this will create the table in the database if it does not already exist
     db.query(
       r"
         USE NS remex DB remex;
@@ -100,7 +121,23 @@ impl Job {
         DEFINE FIELD IF NOT EXISTS job_command ON TABLE job TYPE string;
 
         DEFINE FIELD IF NOT EXISTS job_type ON TABLE job FLEXIBLE TYPE object;
-        DEFINE FIELD IF NOT EXISTS job_status ON TABLE job FLEXIBLE TYPE object;
+        DEFINE FIELD IF NOT EXISTS execution_status ON TABLE job FLEXIBLE TYPE object COMPUTED {
+          LET $execs = (SELECT status FROM execution WHERE job_id = $this.id);
+          IF array::len($execs) = 0 THEN
+            RETURN { Pending: {} };
+          END IF;
+          IF (SELECT VALUE status FROM $execs WHERE status = { Failed: {} }) THEN
+            RETURN { Failed: {} };
+          END IF;
+          IF array::len($execs) = (SELECT VALUE array::len((SELECT VALUE status FROM $execs WHERE status = { TimedOut: {} }))) THEN
+            RETURN { TimedOut: {} };
+          END IF;
+          IF array::len($execs) = (SELECT VALUE array::len((SELECT VALUE status FROM $execs WHERE status = { Completed: {} }))) THEN
+            RETURN { Completed: {} };
+          END IF;
+          RETURN { Running: {} };
+        };
+        DEFINE FIELD IF NOT EXISTS enabled ON TABLE job FLEXIBLE TYPE object DEFAULT { Draft: {} };
 
         DEFINE FIELD IF NOT EXISTS assignments ON TABLE job TYPE array<record<client | group>> DEFAULT [];
 
