@@ -1,4 +1,4 @@
 /target
 /.git
 .env
-main.db
+*.db
