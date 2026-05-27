@@ -104,6 +104,18 @@ impl Job {
 
         DEFINE FIELD IF NOT EXISTS created_at ON TABLE job TYPE datetime DEFAULT time::now() READONLY;
         DEFINE FIELD IF NOT EXISTS updated_at ON TABLE job TYPE datetime VALUE time::now() READONLY;
+
+        DEFINE EVENT audit_job ON TABLE job
+        WHEN $event IN ['CREATE', 'UPDATE', 'DELETE']
+        THEN {
+          CREATE audit_log SET
+            table_name = 'job',
+            record_id = $after.id ?? $before.id,
+            action = $event,
+            before_snapshot = $before,
+            after_snapshot = $after,
+            changed_by = $auth.id;
+        };
       ",
     )
     .await?

@@ -53,7 +53,7 @@ fn init_logging(debug: bool) {
   }
 }
 
-#[actix_web::main]
+#[tokio::main]
 async fn main() -> anyhow::Result<()> {
   let args = Args::parse();
   init_logging(args.debug);

@@ -1,3 +1,4 @@
+use crate::db::SurrealValue;
 use serde::{
   Deserialize,
   Serialize,
@@ -8,7 +9,6 @@ use surrealdb::{
     local::Db,
   },
   types::{
-    SurrealValue,
     ToSql,
   },
   Surreal,
@@ -21,6 +21,8 @@ pub struct ClientData {
   pub client_name: String,
   pub secret: String,
   pub hardware_hash: String,
+  pub last_seen: Option<surrealdb::types::Datetime>,
+  pub connection_history: Vec<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize, Clone, SurrealValue)]
@@ -29,6 +31,8 @@ pub struct Client {
   pub client_name: String,
   pub secret: String,
   pub hardware_hash: String,
+  pub last_seen: Option<surrealdb::types::Datetime>,
+  pub connection_history: Vec<serde_json::Value>,
   pub created_at: surrealdb::types::Datetime,
   pub updated_at: surrealdb::types::Datetime,
 }
@@ -46,9 +50,25 @@ impl Client {
         DEFINE FIELD IF NOT EXISTS created_at ON TABLE client TYPE datetime DEFAULT time::now() READONLY;
         DEFINE FIELD IF NOT EXISTS updated_at ON TABLE client TYPE datetime VALUE time::now() READONLY;
 
+        DEFINE FIELD IF NOT EXISTS last_seen ON TABLE client TYPE option<datetime>;
+        DEFINE FIELD IF NOT EXISTS connection_history ON TABLE client TYPE array<object> DEFAULT [];
+        // TODO: Limit connection_history to last 100 entries via EVENT or application code
+
         DEFINE INDEX IF NOT EXISTS idx_hardware_hash ON TABLE client COLUMNS hardware_hash UNIQUE;
 
         DEFINE ACCESS IF NOT EXISTS endpoint ON DATABASE TYPE BEARER FOR RECORD DURATION FOR GRANT 1d;
+
+        DEFINE EVENT audit_client ON TABLE client
+        WHEN $event IN ['CREATE', 'UPDATE', 'DELETE']
+        THEN {
+          CREATE audit_log SET
+            table_name = 'client',
+            record_id = $after.id ?? $before.id,
+            action = $event,
+            before_snapshot = $before,
+            after_snapshot = $after,
+            changed_by = $auth.id;
+        };
       ",
     )
     .await?

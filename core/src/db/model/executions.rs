@@ -95,6 +95,9 @@ impl Execution {
         DEFINE FIELD IF NOT EXISTS execution_start ON TABLE execution TYPE datetime;
         DEFINE FIELD IF NOT EXISTS execution_end ON TABLE execution TYPE datetime;
 
+        DEFINE INDEX IF NOT EXISTS idx_job_id ON TABLE execution COLUMNS job_id;
+        DEFINE INDEX IF NOT EXISTS idx_client_id ON TABLE execution COLUMNS client_id;
+
         DEFINE FIELD IF NOT EXISTS created_at ON TABLE execution TYPE datetime DEFAULT time::now() READONLY;
         DEFINE FIELD IF NOT EXISTS updated_at ON TABLE execution TYPE datetime VALUE time::now() READONLY;
       ",

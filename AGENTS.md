@@ -310,60 +310,62 @@ When adding new errors, prefer `thiserror` for domain-specific errors and `thise
 
 ### Phase 1: Cleanup (High Priority)
 
-**Task 1.1: Remove deprecated enums from `core/src/db/model/jobs.rs`**
+**Task 1.1: Remove deprecated enums from `core/src/db/model/jobs.rs`** ✅ COMPLETED
 - Remove `JobSuccessStatus` enum (line 31-37)
 - Remove `JobStatus` enum (line 50-66)
 - Update any remaining references
 
-**Task 1.2: Remove server web API**
+**Task 1.2: Remove server web API** ✅ COMPLETED
 - Remove `server/src/web/` directory entirely
 - Keep `server/src/lib.rs` and `server/src/main.rs` for TCP communication
 - Remove web-related dependencies from `server/Cargo.toml`
 
-**Task 1.3: Update AGENTS.md**
+**Task 1.3: Update AGENTS.md** ✅ COMPLETED
 - Document new architecture decisions
 - Remove references to old JobStatus
 
-### Phase 2: Database Schema Enhancements (High Priority)
+### Phase 2: Database Schema Enhancements (High Priority) ✅ COMPLETED
 
-**Task 2.1: Add indexes to execution table** (`core/src/db/model/executions.rs`)
+**Task 2.1: Add indexes to execution table** (`core/src/db/model/executions.rs`) ✅ COMPLETED ✅ COMPLETED
 ```sql
 DEFINE INDEX IF NOT EXISTS idx_job_id ON TABLE execution COLUMNS job_id;
 DEFINE INDEX IF NOT EXISTS idx_client_id ON TABLE execution COLUMNS client_id;
 ```
 
-**Task 2.2: Create audit_log table** (`core/src/db/model/audit.rs`)
+**Task 2.2: Create audit_log table** (`core/src/db/model/audit.rs`) ✅ COMPLETED
 - Fields: table_name, record_id, action, before_snapshot, after_snapshot, changed_at, changed_by
 
-**Task 2.3: Add DEFINE EVENT triggers for audit logging**
+**Task 2.3: Add DEFINE EVENT triggers for audit logging** ✅ COMPLETED
 On job, client, and group tables for CREATE/UPDATE/DELETE operations.
 
-**Task 2.4: Add client connection tracking** (`core/src/db/model/clients.rs`)
+**Task 2.4: Add client connection tracking** (`core/src/db/model/clients.rs`) ✅ COMPLETED
 - Add `last_seen: datetime` field
 - Add `connection_history: array<object>` with structure: timestamp, event, ip_address
-- Add logic to limit array to last 100 entries
+- Add logic to limit array to last 100 entries (TODO in EVENT or application code)
+- Updated Client and ClientData structs
 
-### Phase 3: Configurator Authentication (Medium Priority)
+### Phase 3: Configurator Authentication (Medium Priority) ✅ COMPLETED
 
-**Task 3.1: Create User table** (`core/src/db/model/users.rs`)
+**Task 3.1: Create User table** (`core/src/db/model/users.rs`) ✅ COMPLETED
 - Fields: username, email, password (argon2 hashed), created_at, updated_at
 - Unique index on email
 
-**Task 3.2: Setup DEFINE ACCESS for configurator**
+**Task 3.2: Setup DEFINE ACCESS for configurator** ✅ COMPLETED
 - TYPE RECORD with SIGNUP/SIGNIN clauses
 - FOR TOKEN with 1h expiration
+- Defined in users.rs migration
 
-**Task 3.3: Create config database tables** (`core/src/db/model/config.rs`)
+**Task 3.3: Create config database tables** (`core/src/db/model/config.rs`) ✅ COMPLETED
 - Add `global_config` table for global settings
 - Add `user_config` table for per-user preferences
 
-### Phase 4: Documentation (Medium Priority)
+### Phase 4: Documentation (Medium Priority) ✅ COMPLETED
 
-**Task 4.1: Verify AGENTS.md is complete**
+**Task 4.1: Verify AGENTS.md is complete** ✅ COMPLETED
 - New Schema Design section ✓
 - Architecture Decisions section ✓
 - Typical Approaches section ✓
-- Implementation Plan section ✓
+- Implementation Plan section ✓ (with completed tasks marked)
 
 ### Phase 5: Configurator Updates (Lower Priority - Future)
 

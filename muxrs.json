@@ -7,10 +7,12 @@
     {
       "name": "backend",
       "starting_dir": null,
-      "set_active": true,
+      "focus": true,
       "panes": [
         {
-          "command": "nvim",
+          "command": [
+            "nvim"
+          ],
           "is_vertical_split": null
         }
       ]
@@ -24,7 +26,9 @@
       "starting_dir": "%selected_directory%/configurator",
       "panes": [
         {
-          "command": "nvim",
+          "command": [
+            "nvim"
+          ],
           "is_vertical_split": null
         }
       ]

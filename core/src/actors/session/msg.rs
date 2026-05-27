@@ -72,6 +72,8 @@ impl Handler<SignupClient> for super::RemexSession {
           client_name: name,
           hardware_hash,
           secret: client_secret.clone(),
+          last_seen: None,
+          connection_history: vec![],
         }))
         .await
         .unwrap()
@@ -159,6 +161,8 @@ impl Handler<SigninClient> for super::RemexSession {
             client_name: c.client_name,
             hardware_hash: c.hardware_hash,
             secret: client_secret.clone(),
+            last_seen: None,
+            connection_history: vec![],
           }))
           .await
           .unwrap()
