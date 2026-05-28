@@ -1,46 +1,53 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { useMutation, useQueryClient } from '@tanstack/vue-query'
-import { createJob } from '@/lib/api'
+import { ref } from "vue"
+import { useRouter } from "vue-router"
+import { useMutation, useQueryClient } from "@tanstack/vue-query"
+import { createJob } from "@/lib/api"
+import { useSurrealClient } from "@/lib/surreal"
+import type { EnabledVariant } from "@/lib/model"
 
 const router = useRouter()
 const queryClient = useQueryClient()
+const client = useSurrealClient()
 
 const form = ref({
-  name: '',
-  description: '',
-  job_type: 'instant',
-  shell: '/bin/bash',
-  command: '',
-  group_ids: [] as string[],
+  job_name: "",
+  job_shell: "/bin/bash",
+  job_command: "",
+  enabled: "Draft" as EnabledVariant,
 })
 
 const isSubmitting = ref(false)
 const submitError = ref<string | null>(null)
 
 const mutation = useMutation({
-  mutationFn: createJob,
+  mutationFn: (data: typeof form.value) =>
+    createJob(client, {
+      job_name: data.job_name,
+      job_shell: data.job_shell,
+      job_command: data.job_command,
+      job_type: { Instant: {} },
+      enabled: { [data.enabled]: {} } as Record<string, Record<string, never>>,
+      assignments: [],
+    }),
   onSuccess: () => {
-    queryClient.invalidateQueries({ queryKey: ['jobs'] })
-    router.push('/jobs')
+    queryClient.invalidateQueries({ queryKey: ["jobs"] })
+    router.push("/jobs")
   },
   onError: (err: Error) => {
-    submitError.value = err.message || 'Failed to create job'
+    submitError.value = err.message || "Failed to create job"
     isSubmitting.value = false
-  }
+  },
 })
 
 const handleSubmit = async () => {
   isSubmitting.value = true
   submitError.value = null
   mutation.mutate({
-    name: form.value.name,
-    description: form.value.description,
-    job_type: form.value.job_type,
-    shell: form.value.shell,
-    command: form.value.command,
-    group_ids: form.value.group_ids,
+    job_name: form.value.job_name,
+    job_shell: form.value.job_shell,
+    job_command: form.value.job_command,
+    enabled: form.value.enabled,
   })
 }
 </script>
@@ -59,35 +66,56 @@ const handleSubmit = async () => {
       </div>
 
       <div class="form-section">
-        <label for="name">Job Name</label>
-        <input id="name" v-model="form.name" type="text" placeholder="e.g. System Update" required />
+        <label for="job_name">Job Name</label>
+        <input
+          id="job_name"
+          v-model="form.job_name"
+          type="text"
+          placeholder="e.g. System Update"
+          required
+        />
       </div>
 
       <div class="form-section">
-        <label for="job_type">Type</label>
-        <select id="job_type" v-model="form.job_type">
-          <option value="instant">Instant</option>
-          <option value="scheduled">Scheduled</option>
-          <option value="recurring">Recurring</option>
+        <label for="job_shell">Shell</label>
+        <input
+          type="text"
+          id="job_shell"
+          v-model="form.job_shell"
+          placeholder="e.g. /bin/bash"
+          required
+        />
+      </div>
+
+      <div class="form-section">
+        <label for="job_command">Command</label>
+        <textarea
+          id="job_command"
+          v-model="form.job_command"
+          placeholder="e.g. apt-get update"
+          rows="4"
+          required
+        ></textarea>
+      </div>
+
+      <div class="form-section">
+        <label for="enabled">State</label>
+        <select id="enabled" v-model="form.enabled">
+          <option value="Draft">Draft</option>
+          <option value="Enabled">Enabled</option>
+          <option value="Disabled">Disabled</option>
         </select>
       </div>
 
-      <div class="form-section">
-        <label for="shell">Shell</label>
-        <input type="text" id="shell" v-model="form.shell" placeholder="e.g. /bin/bash" required />
-      </div>
-
-      <div class="form-section">
-        <label for="command">Command</label>
-        <textarea id="command" v-model="form.command" placeholder="e.g. apt-get update" rows="4" required></textarea>
-      </div>
-
       <div class="form-actions">
-        <button type="button" @click="router.push('/jobs')" class="btn-secondary" :disabled="isSubmitting">
-          Cancel
-        </button>
+        <button
+          type="button"
+          @click="router.push('/jobs')"
+          class="btn-secondary"
+          :disabled="isSubmitting"
+        >Cancel</button>
         <button type="submit" class="btn-primary" :disabled="isSubmitting">
-          {{ isSubmitting ? 'Creating...' : 'Create Job' }}
+          {{ isSubmitting ? "Creating..." : "Create Job" }}
         </button>
       </div>
     </form>

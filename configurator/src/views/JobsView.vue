@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { getJobs } from '@/lib/api'
-import { useQuery } from '@tanstack/vue-query'
-import JobComponent from '@/components/Job.vue'
+import { getJobs } from "@/lib/api"
+import { useQuery } from "@tanstack/vue-query"
+import { useSurrealClient } from "@/lib/surreal"
+import JobComponent from "@/components/Job.vue"
+
+const client = useSurrealClient()
 
 const { data: jobs, isLoading, isError, error } = useQuery({
-  queryKey: ['jobs'],
-  queryFn: getJobs,
+  queryKey: ["jobs"],
+  queryFn: () => getJobs(client),
 })
 </script>
 
@@ -17,13 +20,13 @@ const { data: jobs, isLoading, isError, error } = useQuery({
         <router-link to="/jobs/new" class="btn-primary">Create Job</router-link>
       </div>
       <p class="page-subtitle" v-if="jobs && jobs.length > 0">
-        {{ jobs.length }} configured {{ jobs.length === 1 ? 'job' : 'jobs' }}
+        {{ jobs.length }} configured {{ jobs.length === 1 ? "job" : "jobs" }}
       </p>
     </header>
 
     <div v-if="isLoading" class="state-card">
       <div class="spinner" />
-      <p class="state-text">Connecting to database...</p>
+      <p class="state-text">Loading jobs...</p>
     </div>
 
     <div v-else-if="isError" class="state-card state-error">
@@ -76,7 +79,6 @@ const { data: jobs, isLoading, isError, error } = useQuery({
   }
 }
 
-/* responsive card grid */
 .card-grid {
   display: flex;
   flex-direction: column;
@@ -84,7 +86,6 @@ const { data: jobs, isLoading, isError, error } = useQuery({
   width: 100%;
 }
 
-/* shared state card (loading / error / empty) */
 .state-card {
   display: flex;
   flex-direction: column;
@@ -122,7 +123,6 @@ const { data: jobs, isLoading, isError, error } = useQuery({
   border: 1px dashed var(--primary-400);
 }
 
-/* simple loading spinner */
 .spinner {
   width: 2rem;
   height: 2rem;

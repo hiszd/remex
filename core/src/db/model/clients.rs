@@ -1,4 +1,3 @@
-use crate::db::SurrealValue;
 use serde::{
   Deserialize,
   Serialize,
@@ -8,13 +7,14 @@ use surrealdb::{
     any::Any,
     local::Db,
   },
-  types::{
-    ToSql,
-  },
+  types::ToSql,
   Surreal,
 };
 
-use crate::db::DbError;
+use crate::db::{
+  DbError,
+  SurrealValue,
+};
 
 #[derive(Serialize, Deserialize, Clone, SurrealValue)]
 pub struct ClientData {
@@ -58,7 +58,7 @@ impl Client {
 
         DEFINE ACCESS IF NOT EXISTS endpoint ON DATABASE TYPE BEARER FOR RECORD DURATION FOR GRANT 1d;
 
-        DEFINE EVENT audit_client ON TABLE client
+        DEFINE EVENT IF NOT EXISTS audit_client ON TABLE client
         WHEN $event IN ['CREATE', 'UPDATE', 'DELETE']
         THEN {
           CREATE audit_log SET

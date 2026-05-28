@@ -1,15 +1,17 @@
 <script setup lang="ts">
-import { useRoute } from 'vue-router'
-import { useQuery } from '@tanstack/vue-query'
-import { getClientById } from '@/lib/api'
-import { formatDate } from '@/utils/date'
+import { useRoute } from "vue-router"
+import { useQuery } from "@tanstack/vue-query"
+import { getClientById } from "@/lib/api"
+import { useSurrealClient } from "@/lib/surreal"
+import { formatDate } from "@/utils/date"
 
 const route = useRoute()
+const surreal = useSurrealClient()
 const clientId = route.params.id as string
 
 const { data: client, isLoading, isError } = useQuery({
-  queryKey: ['client', clientId],
-  queryFn: () => getClientById(clientId),
+  queryKey: ["client", clientId],
+  queryFn: () => getClientById(surreal, clientId),
 })
 </script>
 
@@ -19,8 +21,8 @@ const { data: client, isLoading, isError } = useQuery({
       <router-link to="/clients" class="back-link">← Back to Clients</router-link>
       <div v-if="client" class="header-main">
         <div class="title-group">
-          <h1 class="page-title">{{ client.name }}</h1>
-          <p class="client-id">{{ client.id }}</p>
+          <h1 class="page-title">{{ client.client_name }}</h1>
+          <p class="client-id">{{ String(client.id) }}</p>
         </div>
       </div>
     </header>
@@ -44,11 +46,19 @@ const { data: client, isLoading, isError } = useQuery({
         <div class="info-grid">
           <div class="info-item">
             <span class="label">Client Name</span>
-            <span class="value">{{ client.name }}</span>
+            <span class="value">{{ client.client_name }}</span>
           </div>
           <div class="info-item">
             <span class="label">ID</span>
-            <span class="value monospace">{{ client.id }}</span>
+            <span class="value monospace">{{ String(client.id) }}</span>
+          </div>
+          <div class="info-item">
+            <span class="label">Hardware Hash</span>
+            <span class="value monospace">{{ client.hardware_hash }}</span>
+          </div>
+          <div class="info-item">
+            <span class="label">Last Seen</span>
+            <span class="value">{{ client.last_seen ? formatDate(client.last_seen) : "Never" }}</span>
           </div>
           <div class="info-item">
             <span class="label">Created At</span>

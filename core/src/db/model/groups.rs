@@ -45,7 +45,7 @@ impl Group {
         DEFINE FIELD IF NOT EXISTS created_at ON TABLE group TYPE datetime DEFAULT time::now() READONLY;
         DEFINE FIELD IF NOT EXISTS updated_at ON TABLE group TYPE datetime VALUE time::now() READONLY;
 
-        DEFINE EVENT audit_group ON TABLE group
+        DEFINE EVENT IF NOT EXISTS audit_group ON TABLE group
         WHEN $event IN ['CREATE', 'UPDATE', 'DELETE']
         THEN {
           CREATE audit_log SET
@@ -62,7 +62,7 @@ impl Group {
     .check()?;
     Ok(())
   }
-  }
+}
 
 impl crate::db::DbOperator<Group, GroupData> for Group {
   async fn create(obj: GroupData, db: &Surreal<Db>) -> Result<Option<Group>, DbError> {

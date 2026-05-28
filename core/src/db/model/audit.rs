@@ -1,4 +1,3 @@
-use crate::db::SurrealValue;
 use serde::{
   Deserialize,
   Serialize,
@@ -8,7 +7,10 @@ use surrealdb::{
   Surreal,
 };
 
-use crate::db::DbError;
+use crate::db::{
+  DbError,
+  SurrealValue,
+};
 
 #[derive(Debug, Serialize, Deserialize, Clone, SurrealValue)]
 pub struct AuditLogData {
@@ -42,8 +44,8 @@ impl AuditLog {
         DEFINE FIELD IF NOT EXISTS table_name ON TABLE audit_log TYPE string;
         DEFINE FIELD IF NOT EXISTS record_id ON TABLE audit_log TYPE record<job | client | group>;
         DEFINE FIELD IF NOT EXISTS action ON TABLE audit_log TYPE string;
-        DEFINE FIELD IF NOT EXISTS before_snapshot ON TABLE audit_log FLEXIBLE TYPE object;
-        DEFINE FIELD IF NOT EXISTS after_snapshot ON TABLE audit_log FLEXIBLE TYPE object;
+        DEFINE FIELD IF NOT EXISTS before_snapshot ON TABLE audit_log TYPE object FLEXIBLE;
+        DEFINE FIELD IF NOT EXISTS after_snapshot ON TABLE audit_log TYPE object FLEXIBLE;
         DEFINE FIELD IF NOT EXISTS changed_at ON TABLE audit_log TYPE datetime DEFAULT time::now() READONLY;
         DEFINE FIELD IF NOT EXISTS changed_by ON TABLE audit_log TYPE option<string>;
       ",

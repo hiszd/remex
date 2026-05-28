@@ -36,7 +36,7 @@ impl JobCache {
         USE NS remex DB remex;
         DEFINE TABLE IF NOT EXISTS job SCHEMAFULL;
         DEFINE FIELD IF NOT EXISTS job_id ON TABLE job TYPE string;
-        DEFINE FIELD IF NOT EXISTS job_info ON TABLE job FLEXIBLE TYPE object;
+        DEFINE FIELD IF NOT EXISTS job_info ON TABLE job TYPE object FLEXIBLE;
       ",
     )
     .await?

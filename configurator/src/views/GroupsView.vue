@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { getGroups } from '@/lib/api'
-import { useQuery } from '@tanstack/vue-query'
-import GroupComponent from '@/components/Group.vue'
+import { getGroups } from "@/lib/api"
+import { useQuery } from "@tanstack/vue-query"
+import { useSurrealClient } from "@/lib/surreal"
+import GroupComponent from "@/components/Group.vue"
+
+const client = useSurrealClient()
 
 const { data: groups, isLoading, isError, error } = useQuery({
-  queryKey: ['groups'],
-  queryFn: getGroups,
+  queryKey: ["groups"],
+  queryFn: () => getGroups(client),
 })
 </script>
 
@@ -17,13 +20,13 @@ const { data: groups, isLoading, isError, error } = useQuery({
         <router-link to="/groups/new" class="btn-primary">Create Group</router-link>
       </div>
       <p class="page-subtitle" v-if="groups && groups.length > 0">
-        {{ groups.length }} {{ groups.length === 1 ? 'group' : 'groups' }}
+        {{ groups.length }} {{ groups.length === 1 ? "group" : "groups" }}
       </p>
     </header>
 
     <div v-if="isLoading" class="state-card">
       <div class="spinner" />
-      <p class="state-text">Connecting to database...</p>
+      <p class="state-text">Loading groups...</p>
     </div>
 
     <div v-else-if="isError" class="state-card state-error">

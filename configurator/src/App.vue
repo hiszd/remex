@@ -1,31 +1,94 @@
 <script setup lang="ts">
-import { RouterView } from 'vue-router'
-import AppSidebar from '@/components/AppSidebar.vue'
+import { watch, ref, computed } from "vue"
+import { RouterView, useRoute } from "vue-router"
+import AppSidebar from "@/components/AppSidebar.vue"
 import { provideSurreal } from "@/lib/surreal"
+import { authReady, tryRestoreSession } from "@/lib/auth"
 
-provideSurreal({
+const route = useRoute()
+const showApp = ref(false)
+const connectionError = ref<string | null>(null)
+const isAuthPage = computed(() =>
+  ["login", "register"].includes(String(route.name))
+)
+
+const { client, isSuccess, isError, connect, error } = provideSurreal({
   endpoint: "ws://192.168.10.87:8090",
   params: {
     namespace: "remex",
     database: "remex",
-    authentication: {
-      username: "root",
-      password: "H@ck3r345",
-    },
   },
-});
+  autoConnect: false,
+})
+
+connect().catch(() => {})
+
+watch(isSuccess, async (connected) => {
+  if (connected) {
+    await tryRestoreSession(client)
+  }
+})
+
+watch(isError, (errored) => {
+  if (errored) {
+    connectionError.value = String(error.value ?? "Connection failed")
+  }
+})
+
+watch(authReady, (ready) => {
+  if (ready) {
+    showApp.value = true
+  }
+})
 </script>
 
 <template>
-  <div class="app-layout">
+  <div v-if="connectionError" class="loading-screen">
+    <div class="error-icon">⚠</div>
+    <p class="error-title">Connection failed</p>
+    <p class="error-detail">{{ connectionError }}</p>
+  </div>
+
+  <div v-else-if="!showApp" class="loading-screen">
+    <div class="spinner" />
+    <p class="loading-text">Connecting to database...</p>
+  </div>
+
+  <div v-else-if="!isAuthPage" class="app-layout">
     <AppSidebar />
     <main class="main-content">
       <RouterView />
     </main>
   </div>
+
+  <div v-else class="auth-layout">
+    <RouterView />
+  </div>
 </template>
 
 <style lang="scss">
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  font-weight: normal;
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--text);
+  transition: color 0.3s, background-color 0.3s;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    Oxygen, Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue",
+    sans-serif;
+  font-size: 15px;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
 @media (prefers-color-scheme: light) {
   :root {
     --text: #0c1f2c;
@@ -94,7 +157,6 @@ provideSurreal({
     --accent-900: #331900;
     --accent-950: #1a0c00;
 
-    /* status badge colors - light */
     --status-pending-bg: #fef9c3;
     --status-pending-text: #854d0e;
     --status-running-bg: #dcfce7;
@@ -103,11 +165,11 @@ provideSurreal({
     --status-completed-text: #166534;
     --status-failed-bg: #fee2e2;
     --status-failed-text: #991b1b;
+    --status-timedout-bg: #f3e8ff;
+    --status-timedout-text: #6b21a8;
 
-    /* danger colors - light */
     --danger-bg: #fee2e2;
     --danger-text: #991b1b;
-
   }
 }
 
@@ -179,7 +241,6 @@ provideSurreal({
     --accent-900: #ffe5cc;
     --accent-950: #fff2e5;
 
-    /* status badge colors - dark */
     --status-pending-bg: #422006;
     --status-pending-text: #fbbf24;
     --status-running-bg: #052e16;
@@ -188,15 +249,80 @@ provideSurreal({
     --status-completed-text: #22c55e;
     --status-failed-bg: #450a0a;
     --status-failed-text: #ef4444;
+    --status-timedout-bg: #3b0764;
+    --status-timedout-text: #d8b4fe;
 
-    /* danger colors - dark */
     --danger-bg: #450a0a;
     --danger-text: #fca5a5;
-
   }
 }
 
 :root {
   --color-background: var(--background);
+}
+
+.app-layout {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.main-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0;
+}
+
+.auth-layout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  background: var(--background);
+}
+
+.loading-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  gap: 1rem;
+  background: var(--background);
+  color: var(--text);
+}
+
+.spinner {
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 3px solid var(--primary-300);
+  border-top-color: var(--accent-500);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading-text {
+  font-size: 1rem;
+  opacity: 0.7;
+}
+
+.error-icon {
+  font-size: 3rem;
+}
+
+.error-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.error-detail {
+  font-size: 0.9rem;
+  opacity: 0.7;
 }
 </style>

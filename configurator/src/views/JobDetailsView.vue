@@ -1,59 +1,79 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
-import { getJobById, updateJob, deleteJob, type Job } from '@/lib/api'
-import { formatDate } from '@/utils/date'
+import { ref, computed } from "vue"
+import { useRoute, useRouter } from "vue-router"
+import { useQuery, useMutation, useQueryClient } from "@tanstack/vue-query"
+import { getJobById, updateJob, deleteJob } from "@/lib/api"
+import { useSurrealClient } from "@/lib/surreal"
+import { formatDate } from "@/utils/date"
+import {
+  extractEnumVariant,
+  formatEnumVariant,
+  makeEnabled,
+  type EnabledVariant,
+} from "@/lib/model"
 
 const route = useRoute()
 const router = useRouter()
 const queryClient = useQueryClient()
+const client = useSurrealClient()
 const jobId = route.params.id as string
 
 const showDeleteModal = ref(false)
 
 const { data: job, isLoading: loadingJob, isError: jobError } = useQuery({
-  queryKey: ['job', jobId],
-  queryFn: () => getJobById(jobId),
+  queryKey: ["job", jobId],
+  queryFn: () => getJobById(client, jobId),
 })
+
+const statusVariant = computed(() =>
+  job.value ? extractEnumVariant(job.value.execution_status) : ""
+)
+const statusDisplay = computed(() => formatEnumVariant(statusVariant.value))
+const enabledVariant = computed(() =>
+  job.value ? extractEnumVariant(job.value.enabled) : ""
+)
 
 const isEditing = ref(false)
 const editForm = ref({
-  name: '',
-  description: '',
-  job_type: '',
-  status: '',
-  shell: '',
-  command: '',
+  job_name: "",
+  job_shell: "",
+  job_command: "",
+  job_type: "",
+  enabled: "Draft" as EnabledVariant,
 })
 
 const startEditing = () => {
   if (job.value) {
     editForm.value = {
-      name: job.value.name,
-      description: job.value.description,
-      job_type: job.value.job_type,
-      status: job.value.status,
-      shell: job.value.shell,
-      command: job.value.command,
+      job_name: job.value.job_name,
+      job_shell: job.value.job_shell,
+      job_command: job.value.job_command,
+      job_type: extractEnumVariant(job.value.job_type),
+      enabled: extractEnumVariant(job.value.enabled) as EnabledVariant,
     }
     isEditing.value = true
   }
 }
 
 const updateMutation = useMutation({
-  mutationFn: (updatedJob: Partial<Job>) => updateJob(jobId, updatedJob),
+  mutationFn: (updatedJob: Partial<typeof editForm.value>) =>
+    updateJob(client, jobId, {
+      job_name: updatedJob.job_name,
+      job_shell: updatedJob.job_shell,
+      job_command: updatedJob.job_command,
+      enabled: makeEnabled(updatedJob.enabled as EnabledVariant),
+    }),
   onSuccess: () => {
-    queryClient.invalidateQueries({ queryKey: ['job', jobId] })
+    queryClient.invalidateQueries({ queryKey: ["job", jobId] })
     isEditing.value = false
-  }
+  },
 })
 
 const deleteMutation = useMutation({
-  mutationFn: () => deleteJob(jobId),
+  mutationFn: () => deleteJob(client, jobId),
   onSuccess: () => {
-    router.push('/jobs')
-  }
+    router.push("/jobs")
+  },
 })
 
 const handleUpdate = () => {
@@ -71,12 +91,20 @@ const handleDelete = () => {
       <router-link to="/jobs" class="back-link">← Back to Jobs</router-link>
       <div class="header-main">
         <div v-if="job" class="title-group">
-          <h1 class="page-title">{{ job.name }}</h1>
-          <p class="job-id">{{ job.id }}</p>
+          <h1 class="page-title">{{ job.job_name }}</h1>
+          <p class="job-id">{{ String(job.id) }}</p>
         </div>
         <div class="header-actions">
-          <button v-if="job && !isEditing" @click="startEditing" class="btn-secondary">Edit Job</button>
-          <button v-if="job && !isEditing" @click="showDeleteModal = true" class="btn-danger">Delete Job</button>
+          <button
+            v-if="job && !isEditing"
+            @click="startEditing"
+            class="btn-secondary"
+          >Edit Job</button>
+          <button
+            v-if="job && !isEditing"
+            @click="showDeleteModal = true"
+            class="btn-danger"
+          >Delete Job</button>
         </div>
       </div>
     </header>
@@ -97,31 +125,47 @@ const handleDelete = () => {
           <h2>General Information</h2>
         </div>
 
-        <form v-if="isEditing" @submit.prevent="handleUpdate" class="edit-form">
+        <form
+          v-if="isEditing"
+          @submit.prevent="handleUpdate"
+          class="edit-form"
+        >
           <div class="form-group">
             <label>Name</label>
-            <input v-model="editForm.name" type="text" required />
-          </div>
-          <div class="form-group">
-            <label>Type</label>
-            <input v-model="editForm.job_type" type="text" required />
-          </div>
-          <div class="form-group">
-            <label>Status</label>
-            <input v-model="editForm.status" type="text" required />
+            <input v-model="editForm.job_name" type="text" required />
           </div>
           <div class="form-group">
             <label>Shell</label>
-            <input type="text" v-model="editForm.shell" required />
+            <input type="text" v-model="editForm.job_shell" required />
           </div>
           <div class="form-group">
             <label>Command</label>
-            <textarea v-model="editForm.command" rows="4" required></textarea>
+            <textarea
+              v-model="editForm.job_command"
+              rows="4"
+              required
+            ></textarea>
+          </div>
+          <div class="form-group">
+            <label>State</label>
+            <select v-model="editForm.enabled">
+              <option value="Draft">Draft</option>
+              <option value="Enabled">Enabled</option>
+              <option value="Disabled">Disabled</option>
+            </select>
           </div>
           <div class="form-actions">
-            <button type="button" @click="isEditing = false" class="btn-ghost">Cancel</button>
-            <button type="submit" class="btn-primary" :disabled="updateMutation.isPending.value">
-              {{ updateMutation.isPending.value ? 'Saving...' : 'Save Changes' }}
+            <button
+              type="button"
+              @click="isEditing = false"
+              class="btn-ghost"
+            >Cancel</button>
+            <button
+              type="submit"
+              class="btn-primary"
+              :disabled="updateMutation.isPending.value"
+            >
+              {{ updateMutation.isPending.value ? "Saving..." : "Save Changes" }}
             </button>
           </div>
         </form>
@@ -130,11 +174,18 @@ const handleDelete = () => {
           <div class="info-grid">
             <div class="info-item">
               <span class="label">Status</span>
-              <span class="value status-badge" :class="job.status.toLowerCase()">{{ job.status }}</span>
+              <span
+                class="value status-badge"
+                :class="statusVariant.toLowerCase()"
+              >{{ statusDisplay }}</span>
+            </div>
+            <div class="info-item">
+              <span class="label">State</span>
+              <span class="value">{{ enabledVariant }}</span>
             </div>
             <div class="info-item">
               <span class="label">Type</span>
-              <span class="value">{{ job.job_type }}</span>
+              <span class="value">{{ extractEnumVariant(job.job_type) }}</span>
             </div>
             <div class="info-item">
               <span class="label">Created At</span>
@@ -147,11 +198,21 @@ const handleDelete = () => {
           </div>
           <div class="info-item">
             <span class="label">Shell</span>
-            <pre class="command-box">{{ job.shell }}</pre>
+            <pre class="command-box">{{ job.job_shell }}</pre>
           </div>
           <div class="info-item full-width">
             <span class="label">Command</span>
-            <pre class="command-box">{{ job.command }}</pre>
+            <pre class="command-box">{{ job.job_command }}</pre>
+          </div>
+          <div v-if="job.assignments && job.assignments.length > 0" class="info-item full-width">
+            <span class="label">Assignments</span>
+            <div class="assignment-list">
+              <span
+                v-for="a in job.assignments"
+                :key="String(a)"
+                class="assignment-chip"
+              >{{ String(a) }}</span>
+            </div>
           </div>
         </div>
       </section>
@@ -285,6 +346,32 @@ const handleDelete = () => {
   font-weight: 600;
   font-size: 0.85rem;
   background: var(--background-200);
+
+  &.active,
+  &.running {
+    background: var(--status-running-bg);
+    color: var(--status-running-text);
+  }
+
+  &.pending {
+    background: var(--status-pending-bg);
+    color: var(--status-pending-text);
+  }
+
+  &.completed {
+    background: var(--status-completed-bg);
+    color: var(--status-completed-text);
+  }
+
+  &.failed {
+    background: var(--status-failed-bg);
+    color: var(--status-failed-text);
+  }
+
+  &.timedout {
+    background: var(--status-timedout-bg);
+    color: var(--status-timedout-text);
+  }
 }
 
 .command-box {
@@ -295,6 +382,22 @@ const handleDelete = () => {
   font-size: 0.9rem;
   overflow-x: auto;
   margin: 0;
+}
+
+.assignment-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.assignment-chip {
+  display: inline-flex;
+  padding: 0.2rem 0.6rem;
+  background: var(--background-200);
+  border-radius: 0.375rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  font-family: monospace;
 }
 
 .form-group {
@@ -310,12 +413,14 @@ const handleDelete = () => {
   }
 
   input,
-  textarea {
+  textarea,
+  select {
     padding: 0.6rem;
     border-radius: 0.4rem;
     border: 1px solid rgba(0, 0, 0, 0.1);
     background: var(--background-800);
     font-size: 0.95rem;
+    color: var(--text-950);
   }
 }
 

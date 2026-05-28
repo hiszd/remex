@@ -36,7 +36,7 @@ impl ExecutionCache {
         USE NS remex DB remex;
         DEFINE TABLE IF NOT EXISTS execution SCHEMAFULL;
         DEFINE FIELD IF NOT EXISTS execution_id ON TABLE execution TYPE string;
-        DEFINE FIELD IF NOT EXISTS execution_info ON TABLE execution FLEXIBLE TYPE object;
+        DEFINE FIELD IF NOT EXISTS execution_info ON TABLE execution TYPE object FLEXIBLE;
       ",
     )
     .await?

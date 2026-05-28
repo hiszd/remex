@@ -81,31 +81,25 @@ impl Job {
         DEFINE FIELD IF NOT EXISTS job_shell ON TABLE job TYPE string;
         DEFINE FIELD IF NOT EXISTS job_command ON TABLE job TYPE string;
 
-        DEFINE FIELD IF NOT EXISTS job_type ON TABLE job FLEXIBLE TYPE object;
-        DEFINE FIELD IF NOT EXISTS execution_status ON TABLE job FLEXIBLE TYPE object COMPUTED {
-          LET $execs = (SELECT status FROM execution WHERE job_id = $this.id);
-          IF array::len($execs) = 0 THEN
-            RETURN { Pending: {} };
-          END IF;
-          IF (SELECT VALUE status FROM $execs WHERE status = { Failed: {} }) THEN
-            RETURN { Failed: {} };
-          END IF;
-          IF array::len($execs) = (SELECT VALUE array::len((SELECT VALUE status FROM $execs WHERE status = { TimedOut: {} }))) THEN
-            RETURN { TimedOut: {} };
-          END IF;
-          IF array::len($execs) = (SELECT VALUE array::len((SELECT VALUE status FROM $execs WHERE status = { Completed: {} }))) THEN
-            RETURN { Completed: {} };
-          END IF;
-          RETURN { Running: {} };
-        };
-        DEFINE FIELD IF NOT EXISTS enabled ON TABLE job FLEXIBLE TYPE object DEFAULT { Draft: {} };
+        DEFINE FIELD IF NOT EXISTS job_type ON TABLE job TYPE object FLEXIBLE;
+        DEFINE FIELD IF NOT EXISTS execution_status ON TABLE job TYPE object FLEXIBLE COMPUTED 
+          IF (SELECT count() FROM execution WHERE job_id = $this.id) = 0 
+            { { Pending: {} } }
+          ELSE IF (SELECT count() FROM execution WHERE job_id = $this.id AND status = { Failed: {} }) > 0 
+            { { Failed: {} } }
+          ELSE IF (SELECT count() FROM execution WHERE job_id = $this.id AND status = { TimedOut: {} }) = (SELECT count() FROM execution WHERE job_id = $this.id) 
+            { { TimedOut: {} } }
+          ELSE IF (SELECT count() FROM execution WHERE job_id = $this.id AND status = { Completed: {} }) = (SELECT count() FROM execution WHERE job_id = $this.id) 
+            { { Completed: {} } }
+          ELSE { { Running: {} } };
+        DEFINE FIELD IF NOT EXISTS enabled ON TABLE job TYPE object FLEXIBLE DEFAULT { Draft: {} };
 
         DEFINE FIELD IF NOT EXISTS assignments ON TABLE job TYPE array<record<client | group>> DEFAULT [];
 
         DEFINE FIELD IF NOT EXISTS created_at ON TABLE job TYPE datetime DEFAULT time::now() READONLY;
         DEFINE FIELD IF NOT EXISTS updated_at ON TABLE job TYPE datetime VALUE time::now() READONLY;
 
-        DEFINE EVENT audit_job ON TABLE job
+        DEFINE EVENT IF NOT EXISTS audit_job ON TABLE job
         WHEN $event IN ['CREATE', 'UPDATE', 'DELETE']
         THEN {
           CREATE audit_log SET

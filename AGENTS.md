@@ -3,6 +3,7 @@
 ## Directory Structure
 
 The directory and project are laid out as such:
+
 - `/core` - The shared library for all remex executables
 - `/server` - The server executable (TCP communication only, no REST API)
 - `/endpoint` - The endpoint executable and its related source code
@@ -95,11 +96,11 @@ The job table now uses a computed field for execution status:
 
 ```sql
 -- User-controlled field
-DEFINE FIELD enabled ON TABLE job FLEXIBLE TYPE object DEFAULT { Draft: {} };
+DEFINE FIELD enabled ON TABLE job TYPE object FLEXIBLE DEFAULT { Draft: {} };
 -- Values: { Draft: {} }, { Enabled: {} }, { Disabled: {} }
 
 -- Computed field based on executions
-DEFINE FIELD execution_status ON TABLE job FLEXIBLE TYPE object COMPUTED {
+DEFINE FIELD execution_status ON TABLE job TYPE object FLEXIBLE COMPUTED {
   LET $execs = (SELECT status FROM execution WHERE job_id = $this.id);
   IF array::len($execs) = 0 THEN RETURN { Pending: {} }; END IF;
   IF (SELECT VALUE status FROM $execs WHERE status = { Failed: {} }) THEN RETURN { Failed: {} }; END IF;
@@ -110,6 +111,7 @@ DEFINE FIELD execution_status ON TABLE job FLEXIBLE TYPE object COMPUTED {
 ```
 
 **Logic:**
+
 1. No executions → `Pending`
 2. Any Failed → `Failed`
 3. ALL TimedOut → `TimedOut`
@@ -122,7 +124,7 @@ DEFINE FIELD execution_status ON TABLE job FLEXIBLE TYPE object COMPUTED {
 DEFINE TABLE IF NOT EXISTS execution SCHEMAFULL;
 DEFINE FIELD job_id ON TABLE execution TYPE record<job>;
 DEFINE FIELD client_id ON TABLE execution TYPE record<client>;
-DEFINE FIELD status ON TABLE execution FLEXIBLE TYPE object; -- ExecutionStatus enum
+DEFINE FIELD status ON TABLE execution TYPE object FLEXIBLE; -- ExecutionStatus enum
 DEFINE INDEX idx_job_id ON TABLE execution COLUMNS job_id;
 DEFINE INDEX idx_client_id ON TABLE execution COLUMNS client_id;
 ```
@@ -146,13 +148,14 @@ DEFINE TABLE IF NOT EXISTS audit_log SCHEMAFULL;
 DEFINE FIELD table_name ON TABLE audit_log TYPE string;
 DEFINE FIELD record_id ON TABLE audit_log TYPE record<job | client | group>;
 DEFINE FIELD action ON TABLE audit_log TYPE string; -- CREATE, UPDATE, DELETE
-DEFINE FIELD before_snapshot ON TABLE audit_log FLEXIBLE TYPE object;
-DEFINE FIELD after_snapshot ON TABLE audit_log FLEXIBLE TYPE object;
+DEFINE FIELD before_snapshot ON TABLE audit_log TYPE object FLEXIBLE;
+DEFINE FIELD after_snapshot ON TABLE audit_log TYPE object FLEXIBLE;
 DEFINE FIELD changed_at ON TABLE audit_log TYPE datetime DEFAULT time::now() READONLY;
 DEFINE FIELD changed_by ON TABLE audit_log TYPE option<string>;
 ```
 
 Event trigger for audit logging:
+
 ```sql
 DEFINE EVENT audit_job ON TABLE job
 WHEN $event IN ["CREATE", "UPDATE", "DELETE"]
@@ -180,6 +183,7 @@ DEFINE INDEX idx_email ON TABLE user COLUMNS email UNIQUE;
 ```
 
 Access method for configurator:
+
 ```sql
 DEFINE ACCESS configurator_access ON DATABASE TYPE RECORD
   SIGNUP (CREATE user SET username = $username, email = $email, password = crypto::argon2::generate($password))
@@ -190,28 +194,33 @@ DEFINE ACCESS configurator_access ON DATABASE TYPE RECORD
 ## Architecture Decisions
 
 ### 1. Computed Fields vs Stored Fields
+
 - **execution_status** on job table is COMPUTED - derived from execution records at query time
 - **enabled** on job table is stored - user-controlled state
 - This separation allows the system to react to execution changes automatically
 
 ### 2. Offline Operation Strategy
+
 - Endpoint maintains local cache of jobs and executions
 - Jobs are cached locally for offline execution
 - Executions created offline are stored locally, then synced to core on reconnect
 - **No pull** of executions from core to endpoint (one-way sync)
 
 ### 3. Direct Database Access for Configurator
+
 - Configurator connects directly to SurrealDB (no REST API middleware)
 - Uses SurrealDB's built-in authentication (DEFINE ACCESS ... TYPE RECORD)
 - Server's web API has been removed to simplify architecture
 
 ### 4. Audit Trail Approach
+
 - Using SurrealDB DEFINE EVENT for automatic audit logging
 - Events fire on CREATE, UPDATE, DELETE operations
 - Captures before/after snapshots using $before and $after variables
 - Changed_by captures $auth.id when available (user or endpoint token)
 
 ### 5. Connection Tracking
+
 - Client connection history stored as embedded array (not separate table)
 - Array limited to last 100 entries (managed by event or application)
 - Includes timestamp, event type, and IP address
@@ -219,7 +228,9 @@ DEFINE ACCESS configurator_access ON DATABASE TYPE RECORD
 ## Typical Approaches
 
 ### When to Use COMPUTED Fields
+
 Use for derived state that depends on related records:
+
 ```sql
 DEFINE FIELD field_name ON TABLE table COMPUTED {
   -- Query related records and derive value
@@ -228,7 +239,9 @@ DEFINE FIELD field_name ON TABLE table COMPUTED {
 ```
 
 ### When to Use DEFINE EVENT
+
 Use for side effects that must happen with the transaction:
+
 - Audit logging (must not fail independently)
 - Cascading updates
 - Notifications
@@ -240,11 +253,13 @@ THEN { /* side effects */ };
 ```
 
 ### When to Use Record Relationships
+
 - Use `record<type>` fields for single references
 - Use `array<record<type>>` for multiple references (like group members)
 - Use relation tables only for many-to-many with additional metadata
 
 ### When to Use BEARER vs RECORD Access
+
 - **BEARER FOR RECORD**: For endpoints/services that need to act as a specific record
 - **TYPE RECORD**: For configurator users that sign in with credentials
 - Both support token expiration and refresh
@@ -254,6 +269,7 @@ THEN { /* side effects */ };
 ### Packet System
 
 Messages are fragmented into 128-byte fixed-size packets for transmission over TCP:
+
 - **Packet size**: 128 bytes total
 - **Payload**: 126 bytes per packet (2 bytes for packet metadata)
 - **Header**: `[packet_number, total_packets]`
@@ -261,6 +277,7 @@ Messages are fragmented into 128-byte fixed-size packets for transmission over T
 ### Message Contents Types
 
 Messages are classified by their first character prefix:
+
 - **`0` prefix**: Command - executable instructions
 - **`1` prefix**: Secret - sensitive data (credentials, tokens)
 - **Other**: Log - general logging information
@@ -311,34 +328,40 @@ When adding new errors, prefer `thiserror` for domain-specific errors and `thise
 ### Phase 1: Cleanup (High Priority)
 
 **Task 1.1: Remove deprecated enums from `core/src/db/model/jobs.rs`** ✅ COMPLETED
+
 - Remove `JobSuccessStatus` enum (line 31-37)
 - Remove `JobStatus` enum (line 50-66)
 - Update any remaining references
 
 **Task 1.2: Remove server web API** ✅ COMPLETED
+
 - Remove `server/src/web/` directory entirely
 - Keep `server/src/lib.rs` and `server/src/main.rs` for TCP communication
 - Remove web-related dependencies from `server/Cargo.toml`
 
 **Task 1.3: Update AGENTS.md** ✅ COMPLETED
+
 - Document new architecture decisions
 - Remove references to old JobStatus
 
 ### Phase 2: Database Schema Enhancements (High Priority) ✅ COMPLETED
 
 **Task 2.1: Add indexes to execution table** (`core/src/db/model/executions.rs`) ✅ COMPLETED ✅ COMPLETED
+
 ```sql
 DEFINE INDEX IF NOT EXISTS idx_job_id ON TABLE execution COLUMNS job_id;
 DEFINE INDEX IF NOT EXISTS idx_client_id ON TABLE execution COLUMNS client_id;
 ```
 
 **Task 2.2: Create audit_log table** (`core/src/db/model/audit.rs`) ✅ COMPLETED
+
 - Fields: table_name, record_id, action, before_snapshot, after_snapshot, changed_at, changed_by
 
 **Task 2.3: Add DEFINE EVENT triggers for audit logging** ✅ COMPLETED
 On job, client, and group tables for CREATE/UPDATE/DELETE operations.
 
 **Task 2.4: Add client connection tracking** (`core/src/db/model/clients.rs`) ✅ COMPLETED
+
 - Add `last_seen: datetime` field
 - Add `connection_history: array<object>` with structure: timestamp, event, ip_address
 - Add logic to limit array to last 100 entries (TODO in EVENT or application code)
@@ -347,46 +370,69 @@ On job, client, and group tables for CREATE/UPDATE/DELETE operations.
 ### Phase 3: Configurator Authentication (Medium Priority) ✅ COMPLETED
 
 **Task 3.1: Create User table** (`core/src/db/model/users.rs`) ✅ COMPLETED
+
 - Fields: username, email, password (argon2 hashed), created_at, updated_at
 - Unique index on email
 
 **Task 3.2: Setup DEFINE ACCESS for configurator** ✅ COMPLETED
+
 - TYPE RECORD with SIGNUP/SIGNIN clauses
 - FOR TOKEN with 1h expiration
 - Defined in users.rs migration
 
 **Task 3.3: Create config database tables** (`core/src/db/model/config.rs`) ✅ COMPLETED
+
 - Add `global_config` table for global settings
 - Add `user_config` table for per-user preferences
 
 ### Phase 4: Documentation (Medium Priority) ✅ COMPLETED
 
 **Task 4.1: Verify AGENTS.md is complete** ✅ COMPLETED
+
 - New Schema Design section ✓
 - Architecture Decisions section ✓
 - Typical Approaches section ✓
 - Implementation Plan section ✓ (with completed tasks marked)
 
-### Phase 5: Configurator Updates (Lower Priority - Future)
+### Phase 5: Configurator Updates (Lower Priority) ✅ COMPLETED
 
-**Task 5.1: Update Vue.js views**
-- Update `Job.vue` to use `execution_status` and `enabled` fields
-- Update `JobsView.vue` and `JobDetailsView.vue` for new schema
-- Add status badges for: Pending, Running, Completed, Failed, TimedOut
+**Task 5.1: Update Vue.js views** ✅ COMPLETED
 
-**Task 5.2: Implement login UI**
-- Create login/registration views
-- Use SurrealDB's record access for authentication
-- Store bearer token in Vue app state
+- Updated `Job.vue` to use `execution_status` (computed) and `enabled` fields
+- Updated `JobsView.vue`, `JobDetailsView.vue`, `CreateJobView.vue` for new schema
+- Updated `Group.vue`, `GroupDetailsView.vue`, `CreateGroupView.vue`, `GroupsView.vue` for new schema
+- Updated `ClientDetailsView.vue`, `ClientsView.vue` for new schema
+- Updated `DashboardView.vue` for new schema
+- Added status badges for: Pending, Running, Completed, Failed, TimedOut
+- All views now use actual DB field names (snake_case)
+- Created `src/lib/model.ts` with full TypeScript types matching backend schema
+- Created `src/lib/api.ts` with CRUD functions (getJobs, getJobById, createJob, updateJob, deleteJob, etc.)
+- Added `extractEnumVariant()` and `formatEnumVariant()` helpers for SurrealDB object-typed enums
+- Added `FIELD_LABELS` map and `fieldLabel()` helper for human-readable display names
+
+**Task 5.2: Implement login UI** ✅ COMPLETED
+
+- Created `LoginView.vue` with email/password form
+- Created `RegisterView.vue` with username/email/password form
+- Created `src/lib/auth.ts` with `useAuth()` composable (login, signup, logout, session restore)
+- Uses SurrealDB's `signin()`/`signup()` with `configurator_access` record access
+- Auth token stored in `localStorage` for persistence
+- Session restore on app startup via `tryRestoreSession()`
+- Router navigation guard redirects unauthenticated users to `/login`
+- Sidebar shows username and logout button when authenticated
+- Removed hardcoded root credentials from App.vue
+- Full-screen auth layout (no sidebar) on login/register pages
 
 ### Phase 6: Verification (Lower Priority)
 
 **Task 6.1: Verify endpoint sync**
+
 - Test offline execution storage
 - Test sync to core on reconnect
 - Verify audit logs are created correctly
 
 **Task 6.2: Test audit trail**
+
 - Create/update/delete records
 - Verify audit_log entries are created
 - Test querying audit_log for specific records

@@ -1,38 +1,42 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { useMutation, useQueryClient } from '@tanstack/vue-query'
-import { createGroup } from '@/lib/api'
+import { ref } from "vue"
+import { useRouter } from "vue-router"
+import { useMutation, useQueryClient } from "@tanstack/vue-query"
+import { createGroup } from "@/lib/api"
+import { useSurrealClient } from "@/lib/surreal"
 
 const router = useRouter()
 const queryClient = useQueryClient()
+const client = useSurrealClient()
 
 const form = ref({
-  name: '',
-  client_ids: [] as string[],
+  group_name: "",
 })
 
 const isSubmitting = ref(false)
 const submitError = ref<string | null>(null)
 
 const mutation = useMutation({
-  mutationFn: createGroup,
+  mutationFn: (data: { group_name: string }) =>
+    createGroup(client, {
+      group_name: data.group_name,
+      members: [],
+    }),
   onSuccess: () => {
-    queryClient.invalidateQueries({ queryKey: ['groups'] })
-    router.push('/groups')
+    queryClient.invalidateQueries({ queryKey: ["groups"] })
+    router.push("/groups")
   },
   onError: (err: Error) => {
-    submitError.value = err.message || 'Failed to create group'
+    submitError.value = err.message || "Failed to create group"
     isSubmitting.value = false
-  }
+  },
 })
 
 const handleSubmit = async () => {
   isSubmitting.value = true
   submitError.value = null
   mutation.mutate({
-    name: form.value.name,
-    client_ids: form.value.client_ids,
+    group_name: form.value.group_name,
   })
 }
 </script>
@@ -51,10 +55,10 @@ const handleSubmit = async () => {
       </div>
 
       <div class="form-section">
-        <label for="name">Group Name</label>
+        <label for="group_name">Group Name</label>
         <input
-          id="name"
-          v-model="form.name"
+          id="group_name"
+          v-model="form.group_name"
           type="text"
           placeholder="e.g. Production Servers"
           required
@@ -62,11 +66,14 @@ const handleSubmit = async () => {
       </div>
 
       <div class="form-actions">
-        <button type="button" @click="router.push('/groups')" class="btn-secondary" :disabled="isSubmitting">
-          Cancel
-        </button>
+        <button
+          type="button"
+          @click="router.push('/groups')"
+          class="btn-secondary"
+          :disabled="isSubmitting"
+        >Cancel</button>
         <button type="submit" class="btn-primary" :disabled="isSubmitting">
-          {{ isSubmitting ? 'Creating...' : 'Create Group' }}
+          {{ isSubmitting ? "Creating..." : "Create Group" }}
         </button>
       </div>
     </form>

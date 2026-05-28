@@ -86,7 +86,7 @@ impl Execution {
 
         DEFINE FIELD IF NOT EXISTS job_id ON TABLE execution TYPE record<job>;
         DEFINE FIELD IF NOT EXISTS client_id ON TABLE execution TYPE record<client>;
-        DEFINE FIELD IF NOT EXISTS status ON TABLE execution FLEXIBLE TYPE object;
+        DEFINE FIELD IF NOT EXISTS status ON TABLE execution TYPE object FLEXIBLE;
 
         DEFINE FIELD IF NOT EXISTS output ON TABLE execution TYPE string;
         DEFINE FIELD IF NOT EXISTS command ON TABLE execution TYPE string;

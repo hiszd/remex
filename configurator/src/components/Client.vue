@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { formatDate } from '@/utils/date';
-import { type Client } from '@/lib/api'
+import type { Client } from '@/lib/model'
 import { Hero } from '@/styles/color/hero';
 const props = defineProps<{
   client: Client
@@ -11,7 +11,7 @@ const created = formatDate(props.client.created_at)
 
 <template>
   <div class="client-card" :style=[Hero]>
-    <h2>{{ client.name }}</h2>
+    <h2>{{ client.client_name }}</h2>
     <div class="data">
       <span class="line">
         <p class="label">ID: </p>

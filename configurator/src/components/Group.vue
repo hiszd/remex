@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { formatDate } from '@/utils/date';
-import { type Group, type Client } from '@/lib/api'
-import { Hero } from '@/styles/color/hero';
+import { formatDate } from "@/utils/date"
+import { type Group } from "@/lib/model"
+import { Hero } from "@/styles/color/hero"
 
 const props = defineProps<{
   group: Group
-  clients?: Client[]
 }>()
 
 const created = formatDate(props.group.created_at)
@@ -15,8 +14,8 @@ const created = formatDate(props.group.created_at)
   <router-link :to="'/groups/' + group.id" class="hero-card-link">
     <div class="hero-card" :style="[Hero]">
       <div class="hero-header">
-        <h1 class="hero-name">{{ group.name }}</h1>
-        <p class="hero-id">{{ group.id }}</p>
+        <h1 class="hero-name">{{ group.group_name }}</h1>
+        <p class="hero-id">{{ String(group.id) }}</p>
       </div>
       <div class="hero-details">
         <span class="detail">
@@ -24,8 +23,8 @@ const created = formatDate(props.group.created_at)
           <p class="value">{{ created }}</p>
         </span>
         <span class="detail">
-          <p class="label">Client IDs</p>
-          <p class="value">{{ group.client_ids?.length ?? 0 }} clients</p>
+          <p class="label">Members</p>
+          <p class="value">{{ group.members?.length ?? 0 }} clients</p>
         </span>
       </div>
     </div>
@@ -33,7 +32,7 @@ const created = formatDate(props.group.created_at)
 </template>
 
 <style lang="scss" scoped>
-@import '@/styles/hero-card.scss';
+@import "@/styles/hero-card.scss";
 
 .hero-card-link {
   padding: 0;

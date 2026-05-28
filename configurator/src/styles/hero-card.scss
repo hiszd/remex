@@ -128,9 +128,19 @@
           color: var(--status-pending-text);
         }
 
+        &.completed {
+          background: var(--status-completed-bg);
+          color: var(--status-completed-text);
+        }
+
         &.failed {
           background: var(--status-failed-bg);
           color: var(--status-failed-text);
+        }
+
+        &.timedout {
+          background: var(--status-timedout-bg);
+          color: var(--status-timedout-text);
         }
       }
     }

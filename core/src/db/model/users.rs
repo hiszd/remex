@@ -46,7 +46,7 @@ impl User {
         DEFINE ACCESS configurator_access ON DATABASE TYPE RECORD
           SIGNUP (CREATE user SET username = $username, email = $email, password = crypto::argon2::generate($password))
           SIGNIN (SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(password, $password))
-          FOR TOKEN 1h;
+          DURATION FOR TOKEN 1h;
       ",
     )
     .await?

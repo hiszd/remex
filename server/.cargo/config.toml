@@ -1,3 +1,7 @@
 [env]
 DB_ENDPOINT = "ws://192.168.10.87:8090"
 DB_PASSWORD = "H@ck3r345"
+
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-C", "link-args=-fuse-ld=mold"]

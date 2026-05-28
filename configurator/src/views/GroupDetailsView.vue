@@ -1,24 +1,34 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRoute } from 'vue-router'
-import { useQuery } from '@tanstack/vue-query'
-import { getGroupById, getJobs } from '@/lib/api'
-import { formatDate } from '@/utils/date'
+import { ref } from "vue"
+import { useRoute, useRouter } from "vue-router"
+import { useQuery, useMutation, useQueryClient } from "@tanstack/vue-query"
+import { getGroupById, deleteGroup } from "@/lib/api"
+import { useSurrealClient } from "@/lib/surreal"
+import { formatDate } from "@/utils/date"
 
 const route = useRoute()
+const router = useRouter()
+const queryClient = useQueryClient()
+const client = useSurrealClient()
 const groupId = route.params.id as string
 
 const showDeleteModal = ref(false)
 
 const { data: group, isLoading: loadingGroup, isError: groupError } = useQuery({
-  queryKey: ['group', groupId],
-  queryFn: () => getGroupById(groupId),
+  queryKey: ["group", groupId],
+  queryFn: () => getGroupById(client, groupId),
 })
 
-const { data: jobs } = useQuery({
-  queryKey: ['jobs'],
-  queryFn: getJobs,
+const deleteMutation = useMutation({
+  mutationFn: () => deleteGroup(client, groupId),
+  onSuccess: () => {
+    router.push("/groups")
+  },
 })
+
+const handleDelete = () => {
+  deleteMutation.mutate()
+}
 </script>
 
 <template>
@@ -27,8 +37,8 @@ const { data: jobs } = useQuery({
       <router-link to="/groups" class="back-link">← Back to Groups</router-link>
       <div v-if="group" class="header-main">
         <div class="title-group">
-          <h1 class="page-title">{{ group.name }}</h1>
-          <p class="group-id">{{ group.id }}</p>
+          <h1 class="page-title">{{ group.group_name }}</h1>
+          <p class="group-id">{{ String(group.id) }}</p>
         </div>
         <div class="header-actions">
           <button @click="showDeleteModal = true" class="btn-danger">Delete Group</button>
@@ -55,11 +65,11 @@ const { data: jobs } = useQuery({
         <div class="info-grid">
           <div class="info-item">
             <span class="label">Group Name</span>
-            <span class="value">{{ group.name }}</span>
+            <span class="value">{{ group.group_name }}</span>
           </div>
           <div class="info-item">
             <span class="label">ID</span>
-            <span class="value monospace">{{ group.id }}</span>
+            <span class="value monospace">{{ String(group.id) }}</span>
           </div>
           <div class="info-item">
             <span class="label">Created At</span>
@@ -68,27 +78,36 @@ const { data: jobs } = useQuery({
         </div>
       </section>
 
-      <section class="jobs-section card">
+      <section
+        v-if="group.members && group.members.length > 0"
+        class="members-section card"
+      >
         <div class="section-header">
-          <h2>Jobs</h2>
+          <h2>Members ({{ group.members.length }})</h2>
         </div>
 
-        <div v-if="!jobs || jobs.length === 0" class="empty-text">
-          No jobs assigned to this group.
-        </div>
-
-        <div v-else class="entity-list">
+        <div class="member-list">
           <router-link
-            v-for="job in jobs"
-            :key="String(job.id)"
-            :to="'/jobs/' + job.id"
-            class="entity-chip"
+            v-for="member in group.members"
+            :key="String(member)"
+            :to="'/clients/' + String(member)"
+            class="member-chip"
           >
-            <span class="entity-name">{{ job.name }}</span>
-            <span class="entity-id">{{ job.id }}</span>
+            {{ String(member) }}
           </router-link>
         </div>
       </section>
+    </div>
+
+    <div v-if="showDeleteModal" class="modal-overlay">
+      <div class="modal-content">
+        <h3>Delete Group</h3>
+        <p>Are you sure you want to delete this group? This action cannot be undone.</p>
+        <div class="modal-actions">
+          <button @click="showDeleteModal = false" class="btn-secondary">Cancel</button>
+          <button @click="handleDelete" class="btn-danger">Delete</button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -204,45 +223,28 @@ const { data: jobs } = useQuery({
   }
 }
 
-.entity-list {
+.member-list {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: 0.5rem;
 }
 
-.entity-chip {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.75rem 1rem;
+.member-chip {
+  display: inline-flex;
+  padding: 0.4rem 0.8rem;
   background: var(--background-200);
   border: 1px solid rgba(0, 0, 0, 0.1);
   border-radius: 0.5rem;
   text-decoration: none;
   color: inherit;
+  font-family: monospace;
+  font-size: 0.85rem;
   transition: background 0.2s, border-color 0.2s;
 
   &:hover {
     background: var(--background-100);
     border-color: var(--accent-400);
   }
-
-  .entity-name {
-    font-weight: 600;
-    color: var(--text-900);
-  }
-
-  .entity-id {
-    font-size: 0.8rem;
-    font-family: monospace;
-    opacity: 0.5;
-  }
-}
-
-.empty-text {
-  color: var(--text-500);
-  font-size: 0.9rem;
-  font-style: italic;
 }
 
 .state-card {
@@ -301,5 +303,39 @@ const { data: jobs } = useQuery({
   border-radius: 0.5rem;
   font-weight: 600;
   cursor: pointer;
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: var(--background-300);
+  padding: 2rem;
+  border-radius: 1rem;
+  max-width: 400px;
+
+  h3 {
+    margin: 0 0 1rem;
+  }
+
+  p {
+    margin: 0 0 1.5rem;
+  }
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
 }
 </style>

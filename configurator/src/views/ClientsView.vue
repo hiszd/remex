@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { getClients } from '@/lib/api'
-import { useQuery } from '@tanstack/vue-query'
-import Client1 from '@/components/Client1.vue'
+import { getClients } from "@/lib/api"
+import { useQuery } from "@tanstack/vue-query"
+import { useSurrealClient } from "@/lib/surreal"
+import Client1 from "@/components/Client1.vue"
+
+const client = useSurrealClient()
 
 const { data: clients, isLoading, isError, error } = useQuery({
-  queryKey: ['clients'],
-  queryFn: getClients,
+  queryKey: ["clients"],
+  queryFn: () => getClients(client),
 })
 </script>
 
@@ -14,13 +17,13 @@ const { data: clients, isLoading, isError, error } = useQuery({
     <header class="page-header">
       <h1 class="page-title">Clients</h1>
       <p class="page-subtitle" v-if="clients && clients.length > 0">
-        {{ clients.length }} registered {{ clients.length === 1 ? 'client' : 'clients' }}
+        {{ clients.length }} registered {{ clients.length === 1 ? "client" : "clients" }}
       </p>
     </header>
 
     <div v-if="isLoading" class="state-card">
       <div class="spinner" />
-      <p class="state-text">Connecting to database...</p>
+      <p class="state-text">Loading clients...</p>
     </div>
 
     <div v-else-if="isError" class="state-card state-error">
@@ -35,9 +38,9 @@ const { data: clients, isLoading, isError, error } = useQuery({
 
     <div v-else class="card-grid">
       <Client1
-        v-for="client in clients"
-        :client="client"
-        :key="String(client.id)"
+        v-for="c in clients"
+        :client="c"
+        :key="String(c.id)"
       />
     </div>
   </div>
@@ -69,7 +72,6 @@ const { data: clients, isLoading, isError, error } = useQuery({
   }
 }
 
-/* responsive card grid */
 .card-grid {
   display: flex;
   flex-direction: column;
@@ -77,7 +79,6 @@ const { data: clients, isLoading, isError, error } = useQuery({
   width: 100%;
 }
 
-/* shared state card (loading / error / empty) */
 .state-card {
   display: flex;
   flex-direction: column;
@@ -115,7 +116,6 @@ const { data: clients, isLoading, isError, error } = useQuery({
   border: 1px dashed var(--primary-400);
 }
 
-/* simple loading spinner */
 .spinner {
   width: 2rem;
   height: 2rem;
