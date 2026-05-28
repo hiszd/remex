@@ -4,10 +4,7 @@ use serde::{
 };
 use surrealdb::{
   engine::any::Any,
-  types::{
-    SurrealValue,
-    ToSql,
-  },
+  types::SurrealValue,
   Surreal,
 };
 
@@ -35,7 +32,7 @@ impl User {
     db.query(
       r"
         USE NS remex DB remex;
-        DEFINE TABLE IF NOT EXISTS user SCHEMAFULL;
+        DEFINE TABLE IF NOT EXISTS user SCHEMAFULL PERMISSIONS FOR select FULL;
         DEFINE FIELD IF NOT EXISTS username ON TABLE user TYPE string;
         DEFINE FIELD IF NOT EXISTS email ON TABLE user TYPE string;
         DEFINE FIELD IF NOT EXISTS password ON TABLE user TYPE string VALUE crypto::argon2::generate($value);
@@ -43,8 +40,8 @@ impl User {
         DEFINE FIELD IF NOT EXISTS updated_at ON TABLE user TYPE datetime VALUE time::now() READONLY;
         DEFINE INDEX IF NOT EXISTS idx_email ON TABLE user COLUMNS email UNIQUE;
 
-        DEFINE ACCESS configurator_access ON DATABASE TYPE RECORD
-          SIGNUP (CREATE user SET username = $username, email = $email, password = crypto::argon2::generate($password))
+        DEFINE ACCESS IF NOT EXISTS configurator_access ON DATABASE TYPE RECORD
+          SIGNUP (CREATE user SET username = $username, email = $email, password = $password)
           SIGNIN (SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(password, $password))
           DURATION FOR TOKEN 1h;
       ",

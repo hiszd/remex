@@ -12,10 +12,13 @@ const isSubmitting = ref(false)
 const errorMsg = ref<string | null>(null)
 
 async function handleSubmit() {
+  console.log("[LoginView] handleSubmit called")
   isSubmitting.value = true
   errorMsg.value = null
   try {
+    console.log("[LoginView] calling login()...")
     await login(email.value, password.value)
+    console.log("[LoginView] login() returned, pushing to /")
     router.push("/")
   } catch (err: unknown) {
     errorMsg.value =
