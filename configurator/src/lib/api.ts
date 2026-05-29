@@ -71,6 +71,15 @@ export async function createGroup(
   return (result as unknown as Group[])[0]
 }
 
+export async function updateGroup(
+  client: Surreal,
+  id: string,
+  data: Partial<GroupCreate>
+): Promise<Group> {
+  const result = await client.update<Group>(rid(id)).merge(data)
+  return result as unknown as Group
+}
+
 export async function deleteGroup(
   client: Surreal,
   id: string

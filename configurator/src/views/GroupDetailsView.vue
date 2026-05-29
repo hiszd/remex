@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref } from "vue"
+import { ref, computed } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/vue-query"
-import { getGroupById, deleteGroup } from "@/lib/api"
+import { getGroupById, deleteGroup, updateGroup, getClients } from "@/lib/api"
 import { useSurrealClient } from "@/lib/surreal"
 import { formatDate } from "@/utils/date"
+import AssignmentManager from "@/components/AssignmentManager.vue"
+import type { RecordId } from "surrealdb"
 
 const route = useRoute()
 const router = useRouter()
@@ -19,6 +21,25 @@ const { data: group, isLoading: loadingGroup, isError: groupError } = useQuery({
   queryFn: () => getGroupById(client, groupId),
 })
 
+const { data: allClients } = useQuery({
+  queryKey: ["clients"],
+  queryFn: () => getClients(client),
+})
+
+const isEditingMembers = ref(false)
+
+const memberItems = computed(() => {
+  if (!group.value || !allClients.value) return []
+
+  const memberIds = new Set(group.value.members.map(m => String(m)))
+  return allClients.value.map(c => ({
+    id: c.id,
+    name: c.client_name,
+    type: 'client' as const,
+    selected: memberIds.has(String(c.id)),
+  }))
+})
+
 const deleteMutation = useMutation({
   mutationFn: () => deleteGroup(client, groupId),
   onSuccess: () => {
@@ -26,8 +47,31 @@ const deleteMutation = useMutation({
   },
 })
 
+const updateMembersMutation = useMutation({
+  mutationFn: (selectedIds: RecordId[]) =>
+    updateGroup(client, groupId, { members: selectedIds }),
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ["group", groupId] })
+    isEditingMembers.value = false
+  },
+})
+
 const handleDelete = () => {
   deleteMutation.mutate()
+}
+
+const handleMembersSubmit = (selectedIds: RecordId[]) => {
+  updateMembersMutation.mutate(selectedIds)
+}
+
+const handleMembersCancel = () => {
+  isEditingMembers.value = false
+}
+
+const handleViewDetails = (item: any) => {
+  if (item.type === 'client') {
+    router.push(`/clients/${item.id}`)
+  }
 }
 </script>
 
@@ -78,24 +122,26 @@ const handleDelete = () => {
         </div>
       </section>
 
-      <section
-        v-if="group.members && group.members.length > 0"
-        class="members-section card"
-      >
+      <section class="members-section card">
         <div class="section-header">
-          <h2>Members ({{ group.members.length }})</h2>
+          <h2>Members</h2>
+          <button
+            v-if="!isEditingMembers"
+            @click="isEditingMembers = true"
+            class="btn-secondary"
+          >Edit Members</button>
         </div>
 
-        <div class="member-list">
-          <router-link
-            v-for="member in group.members"
-            :key="String(member)"
-            :to="'/clients/' + String(member)"
-            class="member-chip"
-          >
-            {{ String(member) }}
-          </router-link>
-        </div>
+        <AssignmentManager
+          :mode="isEditingMembers ? 'edit' : 'view'"
+          :items="memberItems"
+          :show-group-members="false"
+          empty-view-text="No clients assigned to this group"
+          empty-edit-text="No clients available"
+          @submit="handleMembersSubmit"
+          @cancel="handleMembersCancel"
+          @view-details="handleViewDetails"
+        />
       </section>
     </div>
 
@@ -303,6 +349,24 @@ const handleDelete = () => {
   border-radius: 0.5rem;
   font-weight: 600;
   cursor: pointer;
+}
+
+.btn-secondary {
+  background: transparent;
+  border: 1px solid var(--accent-500);
+  color: var(--accent-500);
+  padding: 0.6rem 1.25rem;
+  border-radius: 0.5rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.members-section {
+  .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
 }
 
 .modal-overlay {

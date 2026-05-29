@@ -2,7 +2,7 @@
 import { ref, computed } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/vue-query"
-import { getJobById, updateJob, deleteJob } from "@/lib/api"
+import { getJobById, updateJob, deleteJob, getClients, getGroups } from "@/lib/api"
 import { useSurrealClient } from "@/lib/surreal"
 import { formatDate } from "@/utils/date"
 import {
@@ -11,6 +11,8 @@ import {
   makeEnabled,
   type EnabledVariant,
 } from "@/lib/model"
+import AssignmentManager from "@/components/AssignmentManager.vue"
+import type { RecordId } from "surrealdb"
 
 const route = useRoute()
 const router = useRouter()
@@ -23,6 +25,16 @@ const showDeleteModal = ref(false)
 const { data: job, isLoading: loadingJob, isError: jobError } = useQuery({
   queryKey: ["job", jobId],
   queryFn: () => getJobById(client, jobId),
+})
+
+const { data: allClients } = useQuery({
+  queryKey: ["clients"],
+  queryFn: () => getClients(client),
+})
+
+const { data: allGroups } = useQuery({
+  queryKey: ["groups"],
+  queryFn: () => getGroups(client),
 })
 
 const statusVariant = computed(() =>
@@ -40,6 +52,41 @@ const editForm = ref({
   job_command: "",
   job_type: "",
   enabled: "Draft" as EnabledVariant,
+})
+
+const isEditingAssignments = ref(false)
+
+const assignmentItems = computed(() => {
+  if (!job.value || !allClients.value || !allGroups.value) return []
+
+  const assignedIds = new Set(job.value.assignments.map(a => String(a)))
+  const items: any[] = []
+
+  allGroups.value.forEach(group => {
+    const isAssigned = assignedIds.has(String(group.id))
+    const groupMembers = allClients.value!.filter(c =>
+      group.members.some(m => String(m) === String(c.id))
+    )
+    items.push({
+      id: group.id,
+      name: group.group_name,
+      type: 'group' as const,
+      selected: isAssigned,
+      members: groupMembers,
+    })
+  })
+
+  allClients.value.forEach(c => {
+    const isAssigned = assignedIds.has(String(c.id))
+    items.push({
+      id: c.id,
+      name: c.client_name,
+      type: 'client' as const,
+      selected: isAssigned,
+    })
+  })
+
+  return items
 })
 
 const startEditing = () => {
@@ -76,12 +123,37 @@ const deleteMutation = useMutation({
   },
 })
 
+const updateAssignmentsMutation = useMutation({
+  mutationFn: (selectedIds: RecordId[]) =>
+    updateJob(client, jobId, { assignments: selectedIds }),
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ["job", jobId] })
+    isEditingAssignments.value = false
+  },
+})
+
 const handleUpdate = () => {
   updateMutation.mutate(editForm.value)
 }
 
 const handleDelete = () => {
   deleteMutation.mutate()
+}
+
+const handleAssignmentSubmit = (selectedIds: RecordId[]) => {
+  updateAssignmentsMutation.mutate(selectedIds)
+}
+
+const handleAssignmentCancel = () => {
+  isEditingAssignments.value = false
+}
+
+const handleViewDetails = (item: any) => {
+  if (item.type === 'client') {
+    router.push(`/clients/${item.id}`)
+  } else if (item.type === 'group') {
+    router.push(`/groups/${item.id}`)
+  }
 }
 </script>
 
@@ -204,17 +276,29 @@ const handleDelete = () => {
             <span class="label">Command</span>
             <pre class="command-box">{{ job.job_command }}</pre>
           </div>
-          <div v-if="job.assignments && job.assignments.length > 0" class="info-item full-width">
-            <span class="label">Assignments</span>
-            <div class="assignment-list">
-              <span
-                v-for="a in job.assignments"
-                :key="String(a)"
-                class="assignment-chip"
-              >{{ String(a) }}</span>
-            </div>
-          </div>
         </div>
+      </section>
+
+      <section class="assignments-section card">
+        <div class="section-header">
+          <h2>Assignments</h2>
+          <button
+            v-if="!isEditingAssignments"
+            @click="isEditingAssignments = true"
+            class="btn-secondary"
+          >Edit Assignments</button>
+        </div>
+
+        <AssignmentManager
+          :mode="isEditingAssignments ? 'edit' : 'view'"
+          :items="assignmentItems"
+          :show-group-members="true"
+          empty-view-text="No clients or groups assigned"
+          empty-edit-text="No clients or groups available"
+          @submit="handleAssignmentSubmit"
+          @cancel="handleAssignmentCancel"
+          @view-details="handleViewDetails"
+        />
       </section>
     </div>
 
@@ -548,5 +632,13 @@ const handleDelete = () => {
   display: flex;
   justify-content: flex-end;
   gap: 0.75rem;
+}
+
+.assignments-section {
+  .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
 }
 </style>
