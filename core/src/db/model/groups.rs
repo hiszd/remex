@@ -37,7 +37,8 @@ impl Group {
     db.query(
       r"
         USE NS remex DB remex;
-        DEFINE TABLE IF NOT EXISTS group SCHEMAFULL;
+        DEFINE TABLE IF NOT EXISTS group SCHEMAFULL
+          PERMISSIONS FOR select FULL FOR create FULL FOR update FULL FOR delete FULL;
         DEFINE FIELD IF NOT EXISTS group_name ON TABLE group TYPE string;
 
         DEFINE FIELD IF NOT EXISTS members ON TABLE group TYPE array<record<client>> DEFAULT [];

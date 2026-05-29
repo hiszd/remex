@@ -11,7 +11,7 @@ const created = formatDate(props.client.created_at)
 </script>
 
 <template>
-  <router-link :to="'/clients/' + client.client_name" class="hero-card-link">
+  <router-link :to="'/clients/' + client.id" class="hero-card-link">
     <div class="hero-card" :style="[Hero]">
       <div class="hero-header">
         <h1 class="hero-name">{{ client.client_name }}</h1>

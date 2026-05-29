@@ -76,7 +76,7 @@ impl Job {
       r"
         USE NS remex DB remex;
         DEFINE TABLE IF NOT EXISTS job SCHEMAFULL
-          PERMISSIONS FULL;
+          PERMISSIONS FOR select FULL FOR create FULL FOR update FULL FOR delete FULL;
         DEFINE FIELD IF NOT EXISTS job_name ON TABLE job TYPE string;
         DEFINE FIELD IF NOT EXISTS job_shell ON TABLE job TYPE string;
         DEFINE FIELD IF NOT EXISTS job_command ON TABLE job TYPE string;

@@ -82,7 +82,8 @@ impl Execution {
     db.query(
       r"
         USE NS remex DB remex;
-        DEFINE TABLE IF NOT EXISTS execution SCHEMAFULL;
+        DEFINE TABLE IF NOT EXISTS execution SCHEMAFULL
+          PERMISSIONS FOR select FULL FOR create FULL FOR update FULL;
 
         DEFINE FIELD IF NOT EXISTS job_id ON TABLE execution TYPE record<job>;
         DEFINE FIELD IF NOT EXISTS client_id ON TABLE execution TYPE record<client>;

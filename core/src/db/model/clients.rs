@@ -43,7 +43,8 @@ impl Client {
     db.query(
       r"
         USE NS remex DB remex;
-        DEFINE TABLE IF NOT EXISTS client SCHEMAFULL;
+        DEFINE TABLE IF NOT EXISTS client SCHEMAFULL
+          PERMISSIONS FOR select FULL;
         DEFINE FIELD IF NOT EXISTS client_name ON TABLE client TYPE string;
         DEFINE FIELD IF NOT EXISTS secret ON TABLE client TYPE string VALUE crypto::argon2::generate($value);
         DEFINE FIELD IF NOT EXISTS hardware_hash ON TABLE client TYPE string;
