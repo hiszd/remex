@@ -65,8 +65,8 @@ impl Client {
             table_name = 'client',
             record_id = $after.id ?? $before.id,
             action = $event,
-            before_snapshot = $before,
-            after_snapshot = $after,
+            before_snapshot = IF $event = 'CREATE' THEN {} ELSE $before END,
+            after_snapshot = IF $event = 'DELETE' THEN {} ELSE $after END,
             changed_by = $auth.id;
         };
       ",

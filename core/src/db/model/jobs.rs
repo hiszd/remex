@@ -82,16 +82,17 @@ impl Job {
         DEFINE FIELD IF NOT EXISTS job_command ON TABLE job TYPE string;
 
         DEFINE FIELD IF NOT EXISTS job_type ON TABLE job TYPE object FLEXIBLE;
-        DEFINE FIELD IF NOT EXISTS execution_status ON TABLE job TYPE object FLEXIBLE COMPUTED 
-          IF (SELECT count() FROM execution WHERE job_id = $this.id) = 0 
-            { { Pending: {} } }
-          ELSE IF (SELECT count() FROM execution WHERE job_id = $this.id AND status = { Failed: {} }) > 0 
-            { { Failed: {} } }
-          ELSE IF (SELECT count() FROM execution WHERE job_id = $this.id AND status = { TimedOut: {} }) = (SELECT count() FROM execution WHERE job_id = $this.id) 
-            { { TimedOut: {} } }
-          ELSE IF (SELECT count() FROM execution WHERE job_id = $this.id AND status = { Completed: {} }) = (SELECT count() FROM execution WHERE job_id = $this.id) 
-            { { Completed: {} } }
-          ELSE { { Running: {} } };
+        DEFINE FIELD IF NOT EXISTS execution_status ON TABLE job TYPE object COMPUTED
+          IF count((SELECT id FROM execution WHERE job_id = $this.id)) = 0
+            THEN { Pending: {} }
+          ELSE IF count((SELECT id FROM execution WHERE job_id = $this.id AND status = { Failed: {} })) > 0
+            THEN { Failed: {} }
+          ELSE IF count((SELECT id FROM execution WHERE job_id = $this.id AND status = { TimedOut: {} })) = count((SELECT id FROM execution WHERE job_id = $this.id))
+            THEN { TimedOut: {} }
+          ELSE IF count((SELECT id FROM execution WHERE job_id = $this.id AND status = { Completed: {} })) = count((SELECT id FROM execution WHERE job_id = $this.id))
+            THEN { Completed: {} }
+          ELSE { Running: {} }
+          END;
         DEFINE FIELD IF NOT EXISTS enabled ON TABLE job TYPE object FLEXIBLE DEFAULT { Draft: {} };
 
         DEFINE FIELD IF NOT EXISTS assignments ON TABLE job TYPE array<record<client | group>> DEFAULT [];
@@ -106,8 +107,8 @@ impl Job {
             table_name = 'job',
             record_id = $after.id ?? $before.id,
             action = $event,
-            before_snapshot = $before,
-            after_snapshot = $after,
+            before_snapshot = IF $event = 'CREATE' THEN {} ELSE $before END,
+            after_snapshot = IF $event = 'DELETE' THEN {} ELSE $after END,
             changed_by = $auth.id;
         };
       ",

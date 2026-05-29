@@ -28,7 +28,7 @@ export async function createJob(
   client: Surreal,
   data: JobCreate
 ): Promise<Job> {
-  const result = await client.create<Job>("job", data)
+  const result = await client.create<Job>(new Table("job")).content(data)
   return (result as unknown as Job[])[0]
 }
 
@@ -37,8 +37,8 @@ export async function updateJob(
   id: string,
   data: Partial<JobCreate>
 ): Promise<Job> {
-  const result = await client.merge<Job>(rid(id), data)
-  return (result as unknown as Job[])[0]
+  const result = await client.update<Job>(rid(id)).merge(data)
+  return result as unknown as Job
 }
 
 export async function deleteJob(
@@ -67,7 +67,7 @@ export async function createGroup(
   client: Surreal,
   data: GroupCreate
 ): Promise<Group> {
-  const result = await client.create<Group>("group", data)
+  const result = await client.create<Group>(new Table("group")).content(data)
   return (result as unknown as Group[])[0]
 }
 
