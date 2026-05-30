@@ -25,6 +25,86 @@ remex_configurator is a standalone Vue.js web application for the end user to cr
 
 All styles should use colors from the themes, and not hard-coded colors. If a theme color needs to be added, it should be added to the theme file.
 
+## Icon Library
+
+**Location**: `/configurator/src/components/icons/`
+
+**Naming Convention**: `Icon[Name].vue` (PascalCase)
+
+**Guidelines for Creating Icons**:
+- Use `viewBox="0 0 [width] [height]"` for scalable icons
+- Default sizes: 16px for button icons, 20px for standard icons
+- Use `stroke="currentColor"` and `fill="none"` for line-based icons
+- Use `stroke-width="1.5"` for consistent line weight
+- Use `stroke-linecap="round"` and `stroke-linejoin="round"` for smooth corners
+- Always use `currentColor` to inherit text color and support light/dark themes
+
+**Using Icons in Components**:
+- Icon containers must have a theme-aware color set (e.g., `color: var(--text)`)
+- This ensures icons automatically adapt to light/dark mode
+- Example:
+  ```scss
+  .icon-container {
+    color: var(--text);
+    // Icons will inherit this color via currentColor
+  }
+  ```
+
+**Available Icons**:
+
+### IconViewDetails.vue (16x16)
+Document icon for "view details" actions.
+
+```vue
+<template>
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="2" width="10" height="12" rx="1"/>
+    <path d="M6 6h4M6 9h4"/>
+  </svg>
+</template>
+```
+
+### IconGroup.vue (20x20)
+Overlapping people icon for groups.
+
+```vue
+<template>
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="7" cy="7" r="3"/>
+    <path d="M2 17v-1a4 4 0 0 1 4-4h2a4 4 0 0 1 4 4v1"/>
+    <circle cx="14" cy="8" r="2"/>
+    <path d="M18 17v-1a3 3 0 0 0-3-3h-1"/>
+  </svg>
+</template>
+```
+
+### IconClient.vue (20x20)
+Monitor icon for clients.
+
+```vue
+<template>
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="4" width="14" height="10" rx="1"/>
+    <path d="M8 17h4M10 14v3"/>
+  </svg>
+</template>
+```
+
+**Usage Example**:
+
+```vue
+<script setup>
+import IconViewDetails from '@/components/icons/IconViewDetails.vue'
+</script>
+
+<template>
+  <button>
+    <IconViewDetails />
+    View Details
+  </button>
+</template>
+```
+
 ## Database Patterns
 
 This codebase uses SurrealDB as its database. All database operations follow a consistent pattern:

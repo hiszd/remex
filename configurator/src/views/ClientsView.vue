@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { getClients } from "@/lib/api"
+import { getClients, getJobs, getGroups, getJobsForClient, getGroupsForClient } from "@/lib/api"
 import { useQuery } from "@tanstack/vue-query"
 import { useSurrealClient } from "@/lib/surreal"
 import Client1 from "@/components/Client1.vue"
@@ -9,6 +9,16 @@ const client = useSurrealClient()
 const { data: clients, isLoading, isError, error } = useQuery({
   queryKey: ["clients"],
   queryFn: () => getClients(client),
+})
+
+const { data: jobs } = useQuery({
+  queryKey: ["jobs"],
+  queryFn: () => getJobs(client),
+})
+
+const { data: groups } = useQuery({
+  queryKey: ["groups"],
+  queryFn: () => getGroups(client),
 })
 </script>
 
@@ -41,6 +51,8 @@ const { data: clients, isLoading, isError, error } = useQuery({
         v-for="c in clients"
         :client="c"
         :key="String(c.id)"
+        :job-count="jobs ? getJobsForClient(c.id, jobs).length : 0"
+        :group-count="groups ? getGroupsForClient(c.id, groups).length : 0"
       />
     </div>
   </div>

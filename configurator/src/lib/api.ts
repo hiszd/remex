@@ -101,3 +101,17 @@ export async function getClientById(
   const result = await client.select<Client>(rid(id))
   return (result as unknown as Client) ?? null
 }
+
+/* ── Helpers ── */
+
+export function getJobsForClient(clientId: RecordId, jobs: Job[]): Job[] {
+  return jobs.filter(job => 
+    job.assignments.some(a => String(a) === String(clientId))
+  )
+}
+
+export function getGroupsForClient(clientId: RecordId, groups: Group[]): Group[] {
+  return groups.filter(group => 
+    group.members.some(m => String(m) === String(clientId))
+  )
+}

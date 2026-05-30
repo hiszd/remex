@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { useRoute } from "vue-router"
+import { computed } from "vue"
+import { useRoute, useRouter } from "vue-router"
 import { useQuery } from "@tanstack/vue-query"
-import { getClientById } from "@/lib/api"
+import { getClientById, getJobs, getGroups, getJobsForClient, getGroupsForClient } from "@/lib/api"
 import { useSurrealClient } from "@/lib/surreal"
 import { formatDate } from "@/utils/date"
+import { extractEnumVariant, formatEnumVariant } from "@/lib/model"
+import IconViewDetails from "@/components/icons/IconViewDetails.vue"
 
 const route = useRoute()
+const router = useRouter()
 const surreal = useSurrealClient()
 const clientId = route.params.id as string
 
@@ -13,6 +17,38 @@ const { data: client, isLoading, isError } = useQuery({
   queryKey: ["client", clientId],
   queryFn: () => getClientById(surreal, clientId),
 })
+
+const { data: jobs } = useQuery({
+  queryKey: ["jobs"],
+  queryFn: () => getJobs(surreal),
+})
+
+const { data: groups } = useQuery({
+  queryKey: ["groups"],
+  queryFn: () => getGroups(surreal),
+})
+
+const assignedJobs = computed(() => {
+  if (!client.value || !jobs.value) return []
+  return getJobsForClient(client.value.id, jobs.value)
+})
+
+const assignedGroups = computed(() => {
+  if (!client.value || !groups.value) return []
+  return getGroupsForClient(client.value.id, groups.value)
+})
+
+const getStatusVariant = (job: any) => extractEnumVariant(job.enabled)
+const getExecutionStatusVariant = (job: any) => extractEnumVariant(job.execution_status)
+const getExecutionStatusDisplay = (job: any) => formatEnumVariant(getExecutionStatusVariant(job))
+
+const navigateToJob = (jobId: any) => {
+  router.push(`/jobs/${jobId}`)
+}
+
+const navigateToGroup = (groupId: any) => {
+  router.push(`/groups/${groupId}`)
+}
 </script>
 
 <template>
@@ -63,6 +99,60 @@ const { data: client, isLoading, isError } = useQuery({
           <div class="info-item">
             <span class="label">Created At</span>
             <span class="value">{{ formatDate(client.created_at) }}</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="assignments-section card">
+        <div class="section-header">
+          <h2>Assigned Jobs ({{ assignedJobs.length }})</h2>
+        </div>
+
+        <div v-if="assignedJobs.length === 0" class="empty-state">
+          <p>None assigned</p>
+        </div>
+
+        <div v-else class="assignment-list">
+          <div
+            v-for="job in assignedJobs"
+            :key="String(job.id)"
+            class="assignment-item"
+          >
+            <span class="assignment-name">{{ job.job_name }}</span>
+            <div class="assignment-badges">
+              <span class="badge state-badge" :class="getStatusVariant(job).toLowerCase()">
+                {{ getStatusVariant(job) }}
+              </span>
+              <span class="badge status-badge" :class="getExecutionStatusVariant(job).toLowerCase()">
+                {{ getExecutionStatusDisplay(job) }}
+              </span>
+            </div>
+            <button class="details-btn" @click="navigateToJob(job.id)" title="View details">
+              <IconViewDetails />
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section class="assignments-section card">
+        <div class="section-header">
+          <h2>Assigned Groups ({{ assignedGroups.length }})</h2>
+        </div>
+
+        <div v-if="assignedGroups.length === 0" class="empty-state">
+          <p>None assigned</p>
+        </div>
+
+        <div v-else class="assignment-list">
+          <div
+            v-for="group in assignedGroups"
+            :key="String(group.id)"
+            class="assignment-item"
+          >
+            <span class="assignment-name">{{ group.group_name }}</span>
+            <button class="details-btn" @click="navigateToGroup(group.id)" title="View details">
+              <IconViewDetails />
+            </button>
           </div>
         </div>
       </section>
@@ -218,6 +308,116 @@ const { data: client, isLoading, isError } = useQuery({
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+.assignments-section {
+  .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+}
+
+.empty-state {
+  padding: 1.5rem;
+  text-align: center;
+  color: var(--text-500);
+  font-size: 0.9rem;
+}
+
+.assignment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.assignment-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--background-200);
+  border-radius: 0.5rem;
+  transition: background 0.2s;
+}
+
+.details-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.5rem;
+  font-size: 1.25rem;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+  color: var(--text);
+  flex-shrink: 0;
+
+  &:hover {
+    opacity: 1;
+  }
+}
+
+.assignment-name {
+  font-weight: 500;
+}
+
+.assignment-badges {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.6rem;
+  border-radius: 9999px;
+  font-weight: 600;
+  font-size: 0.75rem;
+  background: var(--background-300);
+}
+
+.state-badge {
+  &.draft {
+    background: var(--status-pending-bg);
+    color: var(--status-pending-text);
+  }
+
+  &.enabled {
+    background: var(--status-completed-bg);
+    color: var(--status-completed-text);
+  }
+
+  &.disabled {
+    background: var(--status-failed-bg);
+    color: var(--status-failed-text);
+  }
+}
+
+.status-badge {
+  &.pending {
+    background: var(--status-pending-bg);
+    color: var(--status-pending-text);
+  }
+
+  &.running {
+    background: var(--status-running-bg);
+    color: var(--status-running-text);
+  }
+
+  &.completed {
+    background: var(--status-completed-bg);
+    color: var(--status-completed-text);
+  }
+
+  &.failed {
+    background: var(--status-failed-bg);
+    color: var(--status-failed-text);
+  }
+
+  &.timedout {
+    background: var(--status-timedout-bg);
+    color: var(--status-timedout-text);
   }
 }
 </style>

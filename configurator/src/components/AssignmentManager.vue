@@ -2,6 +2,9 @@
 import { ref, computed, watch } from 'vue'
 import type { RecordId } from 'surrealdb'
 import type { Client } from '@/lib/model'
+import IconGroup from '@/components/icons/IconGroup.vue'
+import IconClient from '@/components/icons/IconClient.vue'
+import IconViewDetails from '@/components/icons/IconViewDetails.vue'
 
 interface AssignmentItem {
   id: RecordId
@@ -48,17 +51,30 @@ const isSelected = (id: RecordId): boolean => {
   return localSelections.value.get(String(id)) ?? false
 }
 
+const isMemberSelected = (clientId: RecordId): boolean => {
+  if (!props.showGroupMembers) return false
+
+  for (const item of props.items) {
+    if (item.type === 'group' && item.members) {
+      const groupSelected = props.mode === 'view'
+        ? item.selected
+        : (localSelections.value.get(String(item.id)) ?? false)
+
+      if (groupSelected) {
+        const isMember = item.members.some(member => String(member.id) === String(clientId))
+        if (isMember) return true
+      }
+    }
+  }
+
+  return false
+}
+
 const toggleItem = (item: AssignmentItem) => {
   if (props.mode !== 'edit') return
-  
+
   const newSelected = !isSelected(item.id)
   localSelections.value.set(String(item.id), newSelected)
-  
-  if (item.type === 'group' && item.members && props.showGroupMembers) {
-    item.members.forEach(member => {
-      localSelections.value.set(String(member.id), newSelected)
-    })
-  }
 }
 
 const handleSubmit = () => {
@@ -99,43 +115,26 @@ const hasItems = computed(() => displayItems.value.length > 0)
     </div>
 
     <div v-else class="items-list">
-      <div
-        v-for="item in displayItems"
-        :key="String(item.id)"
-        class="item-wrapper"
-      >
-        <div
-          class="item"
-          :class="{ 
-            selected: isSelected(item.id),
-            clickable: mode === 'edit'
-          }"
-          @click="toggleItem(item)"
-        >
+      <div v-for="item in displayItems" :key="String(item.id)" class="item-wrapper">
+        <div class="item" :class="{
+          selected: isSelected(item.id),
+          clickable: mode === 'edit'
+        }" @click="toggleItem(item)">
           <div class="item-icon">
-            <span v-if="item.type === 'group'">👥</span>
-            <span v-else>🖥️</span>
+            <IconGroup v-if="item.type === 'group'" />
+            <IconClient v-else />
           </div>
           <div class="item-name">{{ item.name }}</div>
-          <button
-            v-if="mode === 'view'"
-            class="details-btn"
-            @click.stop="handleViewDetails(item)"
-            title="View details"
-          >
-            📄
+          <button v-if="mode === 'view'" class="details-btn" @click.stop="handleViewDetails(item)" title="View details">
+            <IconViewDetails />
           </button>
         </div>
 
         <div v-if="showGroupMembers && item.type === 'group' && item.members" class="members-list">
-          <div
-            v-for="member in item.members"
-            :key="String(member.id)"
-            class="item member-item"
-            :class="{ selected: isSelected(member.id) }"
-          >
+          <div v-for="member in item.members" :key="String(member.id)" class="item member-item"
+            :class="{ selected: isMemberSelected(member.id) }">
             <div class="item-icon">
-              <span>🖥️</span>
+              <IconClient />
             </div>
             <div class="item-name">{{ member.client_name }}</div>
           </div>
@@ -215,6 +214,7 @@ const hasItems = computed(() => displayItems.value.length > 0)
 .item-icon {
   font-size: 1.25rem;
   flex-shrink: 0;
+  color: var(--text);
 }
 
 .item-name {
@@ -223,12 +223,13 @@ const hasItems = computed(() => displayItems.value.length > 0)
 }
 
 .details-btn {
+  color: var(--color-text);
   background: none;
   border: none;
   cursor: pointer;
   padding: 0.25rem;
   font-size: 1.25rem;
-  opacity: 0.7;
+  opacity: 1;
   transition: opacity 0.2s;
 
   &:hover {
