@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { ref, computed } from "vue"
+import { ref, computed, h } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/vue-query"
-import { getGroupById, deleteGroup, updateGroup, getClients } from "@/lib/api"
+import { getGroupById, deleteGroup, updateGroup, getClients, getJobs, getJobsForGroup } from "@/lib/api"
 import { useSurrealClient } from "@/lib/surreal"
 import { formatDate } from "@/utils/date"
 import AssignmentManager from "@/components/AssignmentManager.vue"
+import IconJob from "@/components/icons/IconJob.vue"
+import { extractEnumVariant, formatEnumVariant } from "@/lib/model"
 import type { RecordId } from "surrealdb"
 
 const route = useRoute()
@@ -26,17 +28,60 @@ const { data: allClients } = useQuery({
   queryFn: () => getClients(client),
 })
 
+const { data: allJobs } = useQuery({
+  queryKey: ["jobs"],
+  queryFn: () => getJobs(client),
+})
+
 const isEditingMembers = ref(false)
 
-const memberItems = computed(() => {
+const selectedItems = computed(() => {
   if (!group.value || !allClients.value) return []
 
   const memberIds = new Set(group.value.members.map(m => String(m)))
+  let sel = allClients.value.reduce((acc, c) => {
+    if (memberIds.has(String(c.id))) {
+      acc.push({
+        id: c.id,
+        name: c.client_name,
+        type: 'client' as const,
+      })
+    }
+    return acc
+  }, [] as { id: RecordId, name: string, type: 'client' | 'group' | 'job' }[]);
+
+  return sel ? sel : [];
+})
+const allItems = computed(() => {
+  if (!group.value || !allClients.value) return []
+
   return allClients.value.map(c => ({
     id: c.id,
     name: c.client_name,
     type: 'client' as const,
-    selected: memberIds.has(String(c.id)),
+  }))
+})
+
+const assignedJobs = computed(() => {
+  if (!group.value || !allJobs.value) return []
+  return getJobsForGroup(group.value.id, allJobs.value)
+})
+
+const jobItems = computed(() => {
+  return assignedJobs.value.map(job => ({
+    id: job.id,
+    name: job.job_name,
+    type: 'job' as const,
+    selected: true,
+    renderIcon: () => h(IconJob),
+    renderContent: () => h('div', { class: 'assignment-badges' }, [
+      h('span', {
+        class: ['badge', 'state-badge', extractEnumVariant(job.enabled).toLowerCase()]
+      }, extractEnumVariant(job.enabled)),
+      h('span', {
+        class: ['badge', 'status-badge', extractEnumVariant(job.execution_status).toLowerCase()]
+      }, formatEnumVariant(extractEnumVariant(job.execution_status)))
+    ])
   }))
 })
 
@@ -72,6 +117,10 @@ const handleViewDetails = (item: any) => {
   if (item.type === 'client') {
     router.push(`/clients/${item.id}`)
   }
+}
+
+const handleJobViewDetails = (item: any) => {
+  router.push(`/jobs/${item.id}`)
 }
 </script>
 
@@ -125,23 +174,22 @@ const handleViewDetails = (item: any) => {
       <section class="members-section card">
         <div class="section-header">
           <h2>Members</h2>
-          <button
-            v-if="!isEditingMembers"
-            @click="isEditingMembers = true"
-            class="btn-secondary"
-          >Edit Members</button>
+          <button v-if="!isEditingMembers" @click="isEditingMembers = true" class="btn-secondary">Edit Members</button>
         </div>
 
-        <AssignmentManager
-          :mode="isEditingMembers ? 'edit' : 'view'"
-          :items="memberItems"
-          :show-group-members="false"
-          empty-view-text="No clients assigned to this group"
-          empty-edit-text="No clients available"
-          @submit="handleMembersSubmit"
-          @cancel="handleMembersCancel"
-          @view-details="handleViewDetails"
-        />
+        <AssignmentManager :selectedItems="selectedItems" :allItems="isEditingMembers ? allItems : undefined"
+          :show-group-members="false" empty-view-text="No clients assigned to this group"
+          empty-edit-text="No clients available" @submit="handleMembersSubmit" @cancel="handleMembersCancel"
+          @view-details="handleViewDetails" />
+      </section>
+
+      <section class="assignments-section card">
+        <div class="section-header">
+          <h2>Assigned Jobs ({{ assignedJobs.length }})</h2>
+        </div>
+
+        <AssignmentManager :selectedItems="jobItems" :show-group-members="false"
+          empty-view-text="No jobs assigned to this group" @view-details="handleJobViewDetails" />
       </section>
     </div>
 
@@ -401,5 +449,71 @@ const handleViewDetails = (item: any) => {
   display: flex;
   justify-content: flex-end;
   gap: 0.75rem;
+}
+
+.assignments-section {
+  .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+}
+
+.assignment-badges {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.6rem;
+  border-radius: 9999px;
+  font-weight: 600;
+  font-size: 0.75rem;
+  background: var(--background-300);
+}
+
+.state-badge {
+  &.draft {
+    background: var(--status-pending-bg);
+    color: var(--status-pending-text);
+  }
+
+  &.enabled {
+    background: var(--status-completed-bg);
+    color: var(--status-completed-text);
+  }
+
+  &.disabled {
+    background: var(--status-failed-bg);
+    color: var(--status-failed-text);
+  }
+}
+
+.status-badge {
+  &.pending {
+    background: var(--status-pending-bg);
+    color: var(--status-pending-text);
+  }
+
+  &.running {
+    background: var(--status-running-bg);
+    color: var(--status-running-text);
+  }
+
+  &.completed {
+    background: var(--status-completed-bg);
+    color: var(--status-completed-text);
+  }
+
+  &.failed {
+    background: var(--status-failed-bg);
+    color: var(--status-failed-text);
+  }
+
+  &.timedout {
+    background: var(--status-timedout-bg);
+    color: var(--status-timedout-text);
+  }
 }
 </style>

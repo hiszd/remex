@@ -1,29 +1,31 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, type VNode, watch } from 'vue'
 import type { RecordId } from 'surrealdb'
 import type { Client } from '@/lib/model'
 import IconGroup from '@/components/icons/IconGroup.vue'
 import IconClient from '@/components/icons/IconClient.vue'
+import IconJob from '@/components/icons/IconJob.vue'
 import IconViewDetails from '@/components/icons/IconViewDetails.vue'
 
 interface AssignmentItem {
   id: RecordId
   name: string
-  type: 'client' | 'group'
-  selected: boolean
+  type: 'client' | 'group' | 'job'
   members?: Client[]
+  renderIcon?: (item: AssignmentItem) => VNode
+  renderContent?: (item: AssignmentItem) => VNode
 }
 
 const props = withDefaults(defineProps<{
-  mode: 'view' | 'edit'
-  items: AssignmentItem[]
+  selectedItems: AssignmentItem[]
+  allItems?: AssignmentItem[]
   showGroupMembers?: boolean
   emptyViewText?: string
   emptyEditText?: string
 }>(), {
   showGroupMembers: false,
   emptyViewText: 'Nothing is currently assigned',
-  emptyEditText: ''
+  emptyEditText: '',
 })
 
 const emit = defineEmits<{
@@ -34,19 +36,18 @@ const emit = defineEmits<{
 
 const localSelections = ref<Map<string, boolean>>(new Map())
 
-watch(() => props.mode, (newMode) => {
-  if (newMode === 'edit') {
-    const newMap = new Map<string, boolean>()
-    props.items.forEach(item => {
-      newMap.set(String(item.id), item.selected)
-    })
-    localSelections.value = newMap
-  }
+const effectiveMode = computed(() => props.allItems ? 'edit' : 'view')
+watch(() => props.selectedItems, (newItems) => {
+  const newMap = new Map<string, boolean>()
+  newItems.forEach(item => {
+    newMap.set(String(item.id), true)
+  })
+  localSelections.value = newMap
 }, { immediate: true })
 
 const isSelected = (id: RecordId): boolean => {
-  if (props.mode === 'view') {
-    return props.items.find(item => String(item.id) === String(id))?.selected ?? false
+  if (effectiveMode.value === 'view') {
+    return props.selectedItems.find(item => String(item.id) === String(id)) ? true : false
   }
   return localSelections.value.get(String(id)) ?? false
 }
@@ -54,10 +55,10 @@ const isSelected = (id: RecordId): boolean => {
 const isMemberSelected = (clientId: RecordId): boolean => {
   if (!props.showGroupMembers) return false
 
-  for (const item of props.items) {
+  for (const item of props.selectedItems) {
     if (item.type === 'group' && item.members) {
-      const groupSelected = props.mode === 'view'
-        ? item.selected
+      const groupSelected = effectiveMode.value === 'view'
+        ? true
         : (localSelections.value.get(String(item.id)) ?? false)
 
       if (groupSelected) {
@@ -71,7 +72,7 @@ const isMemberSelected = (clientId: RecordId): boolean => {
 }
 
 const toggleItem = (item: AssignmentItem) => {
-  if (props.mode !== 'edit') return
+  if (effectiveMode.value !== 'edit') return
 
   const newSelected = !isSelected(item.id)
   localSelections.value.set(String(item.id), newSelected)
@@ -81,7 +82,7 @@ const handleSubmit = () => {
   const selectedIds: RecordId[] = []
   localSelections.value.forEach((selected, idStr) => {
     if (selected) {
-      const item = props.items.find(i => String(i.id) === idStr)
+      const item = props.selectedItems.find(i => String(i.id) === idStr)
       if (item) {
         selectedIds.push(item.id)
       }
@@ -99,10 +100,10 @@ const handleViewDetails = (item: AssignmentItem) => {
 }
 
 const displayItems = computed(() => {
-  if (props.mode === 'view') {
-    return props.items.filter(item => item.selected)
+  if (effectiveMode.value === 'view') {
+    return props.selectedItems
   }
-  return props.items
+  return props.allItems ? props.allItems : []
 })
 
 const hasItems = computed(() => displayItems.value.length > 0)
@@ -111,21 +112,25 @@ const hasItems = computed(() => displayItems.value.length > 0)
 <template>
   <div class="assignment-manager">
     <div v-if="!hasItems" class="empty-state">
-      <p class="empty-text">{{ mode === 'view' ? emptyViewText : emptyEditText }}</p>
+      <p class="empty-text">{{ effectiveMode === 'view' ? emptyViewText : emptyEditText }}</p>
     </div>
 
     <div v-else class="items-list">
       <div v-for="item in displayItems" :key="String(item.id)" class="item-wrapper">
         <div class="item" :class="{
           selected: isSelected(item.id),
-          clickable: mode === 'edit'
+          clickable: effectiveMode === 'edit'
         }" @click="toggleItem(item)">
           <div class="item-icon">
-            <IconGroup v-if="item.type === 'group'" />
-            <IconClient v-else />
+            <component v-if="item.renderIcon" :is="item.renderIcon(item)" />
+            <IconGroup v-else-if="item.type === 'group'" />
+            <IconClient v-else-if="item.type === 'client'" />
+            <IconJob v-else-if="item.type === 'job'" />
           </div>
           <div class="item-name">{{ item.name }}</div>
-          <button v-if="mode === 'view'" class="details-btn" @click.stop="handleViewDetails(item)" title="View details">
+          <component v-if="item.renderContent" :is="item.renderContent(item)" class="item-content" />
+          <button v-if="effectiveMode === 'view'" class="details-btn" @click.stop="handleViewDetails(item)"
+            title="View details">
             <IconViewDetails />
           </button>
         </div>
@@ -142,7 +147,7 @@ const hasItems = computed(() => displayItems.value.length > 0)
       </div>
     </div>
 
-    <div v-if="mode === 'edit'" class="actions">
+    <div v-if="effectiveMode === 'edit'" class="actions">
       <button class="btn-primary" @click="handleSubmit">Submit</button>
       <button class="btn-secondary" @click="handleCancel">Cancel</button>
     </div>
@@ -220,6 +225,12 @@ const hasItems = computed(() => displayItems.value.length > 0)
 .item-name {
   flex: 1;
   font-weight: 500;
+}
+
+.item-content {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .details-btn {

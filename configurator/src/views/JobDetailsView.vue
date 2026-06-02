@@ -167,16 +167,8 @@ const handleViewDetails = (item: any) => {
           <p class="job-id">{{ String(job.id) }}</p>
         </div>
         <div class="header-actions">
-          <button
-            v-if="job && !isEditing"
-            @click="startEditing"
-            class="btn-secondary"
-          >Edit Job</button>
-          <button
-            v-if="job && !isEditing"
-            @click="showDeleteModal = true"
-            class="btn-danger"
-          >Delete Job</button>
+          <button v-if="job && !isEditing" @click="startEditing" class="btn-secondary">Edit Job</button>
+          <button v-if="job && !isEditing" @click="showDeleteModal = true" class="btn-danger">Delete Job</button>
         </div>
       </div>
     </header>
@@ -197,11 +189,7 @@ const handleViewDetails = (item: any) => {
           <h2>General Information</h2>
         </div>
 
-        <form
-          v-if="isEditing"
-          @submit.prevent="handleUpdate"
-          class="edit-form"
-        >
+        <form v-if="isEditing" @submit.prevent="handleUpdate" class="edit-form">
           <div class="form-group">
             <label>Name</label>
             <input v-model="editForm.job_name" type="text" required />
@@ -212,11 +200,7 @@ const handleViewDetails = (item: any) => {
           </div>
           <div class="form-group">
             <label>Command</label>
-            <textarea
-              v-model="editForm.job_command"
-              rows="4"
-              required
-            ></textarea>
+            <textarea v-model="editForm.job_command" rows="4" required></textarea>
           </div>
           <div class="form-group">
             <label>State</label>
@@ -227,16 +211,8 @@ const handleViewDetails = (item: any) => {
             </select>
           </div>
           <div class="form-actions">
-            <button
-              type="button"
-              @click="isEditing = false"
-              class="btn-ghost"
-            >Cancel</button>
-            <button
-              type="submit"
-              class="btn-primary"
-              :disabled="updateMutation.isPending.value"
-            >
+            <button type="button" @click="isEditing = false" class="btn-ghost">Cancel</button>
+            <button type="submit" class="btn-primary" :disabled="updateMutation.isPending.value">
               {{ updateMutation.isPending.value ? "Saving..." : "Save Changes" }}
             </button>
           </div>
@@ -246,10 +222,7 @@ const handleViewDetails = (item: any) => {
           <div class="info-grid">
             <div class="info-item">
               <span class="label">Status</span>
-              <span
-                class="value status-badge"
-                :class="statusVariant.toLowerCase()"
-              >{{ statusDisplay }}</span>
+              <span class="value status-badge" :class="statusVariant.toLowerCase()">{{ statusDisplay }}</span>
             </div>
             <div class="info-item">
               <span class="label">State</span>
@@ -282,23 +255,14 @@ const handleViewDetails = (item: any) => {
       <section class="assignments-section card">
         <div class="section-header">
           <h2>Assignments</h2>
-          <button
-            v-if="!isEditingAssignments"
-            @click="isEditingAssignments = true"
-            class="btn-secondary"
-          >Edit Assignments</button>
+          <button v-if="!isEditingAssignments" @click="isEditingAssignments = true" class="btn-secondary">Edit
+            Assignments</button>
         </div>
 
-        <AssignmentManager
-          :mode="isEditingAssignments ? 'edit' : 'view'"
-          :items="assignmentItems"
-          :show-group-members="true"
-          empty-view-text="No clients or groups assigned"
-          empty-edit-text="No clients or groups available"
-          @submit="handleAssignmentSubmit"
-          @cancel="handleAssignmentCancel"
-          @view-details="handleViewDetails"
-        />
+        <AssignmentManager :mode="isEditingAssignments ? 'edit' : 'view'" :selectedItems="assignmentItems"
+          :show-group-members="true" empty-view-text="No clients or groups assigned"
+          empty-edit-text="No clients or groups available" @submit="handleAssignmentSubmit"
+          @cancel="handleAssignmentCancel" @view-details="handleViewDetails" />
       </section>
     </div>
 

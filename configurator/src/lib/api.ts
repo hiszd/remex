@@ -115,3 +115,9 @@ export function getGroupsForClient(clientId: RecordId, groups: Group[]): Group[]
     group.members.some(m => String(m) === String(clientId))
   )
 }
+
+export function getJobsForGroup(groupId: RecordId, jobs: Job[]): Job[] {
+  return jobs.filter(job => 
+    job.assignments.some(a => String(a) === String(groupId))
+  )
+}
