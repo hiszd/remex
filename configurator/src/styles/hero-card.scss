@@ -109,39 +109,8 @@
       }
 
       &.status-badge {
-        display: inline-block;
+        @extend .status-badge;
         width: fit-content;
-        padding: 0.1rem 0.5rem;
-        border-radius: 9999px;
-        font-weight: 600;
-        font-size: 0.8rem;
-        background: var(--background-200);
-
-        &.active,
-        &.running {
-          background: var(--status-running-bg);
-          color: var(--status-running-text);
-        }
-
-        &.pending {
-          background: var(--status-pending-bg);
-          color: var(--status-pending-text);
-        }
-
-        &.completed {
-          background: var(--status-completed-bg);
-          color: var(--status-completed-text);
-        }
-
-        &.failed {
-          background: var(--status-failed-bg);
-          color: var(--status-failed-text);
-        }
-
-        &.timedout {
-          background: var(--status-timedout-bg);
-          color: var(--status-timedout-text);
-        }
       }
     }
   }

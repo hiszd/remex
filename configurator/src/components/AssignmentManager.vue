@@ -7,7 +7,7 @@ import IconClient from '@/components/icons/IconClient.vue'
 import IconJob from '@/components/icons/IconJob.vue'
 import IconViewDetails from '@/components/icons/IconViewDetails.vue'
 
-interface AssignmentItem {
+export interface AssignmentItem {
   id: RecordId
   name: string
   type: 'client' | 'group' | 'job'
@@ -82,7 +82,7 @@ const handleSubmit = () => {
   const selectedIds: RecordId[] = []
   localSelections.value.forEach((selected, idStr) => {
     if (selected) {
-      const item = props.selectedItems.find(i => String(i.id) === idStr)
+      const item = props.allItems?.find(i => String(i.id) === idStr)
       if (item) {
         selectedIds.push(item.id)
       }
@@ -127,7 +127,8 @@ const hasItems = computed(() => displayItems.value.length > 0)
             <IconClient v-else-if="item.type === 'client'" />
             <IconJob v-else-if="item.type === 'job'" />
           </div>
-          <div class="item-name">{{ item.name }}</div>
+          <div v-if="item.name != ''" class="item-name">{{ item.name }}</div>
+          <div v-if="item.name == ''" class="item-name">Nothing Here</div>
           <component v-if="item.renderContent" :is="item.renderContent(item)" class="item-content" />
           <button v-if="effectiveMode === 'view'" class="details-btn" @click.stop="handleViewDetails(item)"
             title="View details">
@@ -159,19 +160,6 @@ const hasItems = computed(() => displayItems.value.length > 0)
   display: flex;
   flex-direction: column;
   gap: 1rem;
-}
-
-.empty-state {
-  padding: 2rem;
-  text-align: center;
-  background: var(--background-300);
-  border-radius: 0.5rem;
-}
-
-.empty-text {
-  margin: 0;
-  color: var(--text-500);
-  font-size: 0.9rem;
 }
 
 .items-list {
@@ -233,21 +221,6 @@ const hasItems = computed(() => displayItems.value.length > 0)
   gap: 0.5rem;
 }
 
-.details-btn {
-  color: var(--color-text);
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 0.25rem;
-  font-size: 1.25rem;
-  opacity: 1;
-  transition: opacity 0.2s;
-
-  &:hover {
-    opacity: 1;
-  }
-}
-
 .actions {
   display: flex;
   gap: 0.75rem;
@@ -255,34 +228,7 @@ const hasItems = computed(() => displayItems.value.length > 0)
   border-top: 1px solid var(--background-400);
 }
 
-.btn-primary {
-  padding: 0.6rem 1.25rem;
-  border-radius: 0.5rem;
-  background-color: var(--accent-500);
-  color: white;
-  font-weight: 700;
-  border: none;
-  cursor: pointer;
-  transition: background 0.2s;
-
-  &:hover {
-    background-color: var(--accent-600);
-  }
-}
-
 .btn-secondary {
-  padding: 0.6rem 1.25rem;
-  border-radius: 0.5rem;
-  background-color: transparent;
-  color: var(--text-950);
-  font-weight: 600;
-  border: 1px solid var(--background-400);
-  cursor: pointer;
   margin-left: auto;
-  transition: background 0.2s;
-
-  &:hover {
-    background-color: var(--background-200);
-  }
 }
 </style>

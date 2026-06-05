@@ -168,7 +168,7 @@ function formatTimeAgo(dateStr: string) {
             <span class="recent-item-time">{{ formatTimeAgo(job.created_at) }}</span>
           </div>
           <span
-            class="recent-item-status"
+            class="status-badge"
             :class="getStatusClass(extractEnumVariant(job.execution_status))"
           >
             {{ formatEnumVariant(extractEnumVariant(job.execution_status)) }}
@@ -181,28 +181,9 @@ function formatTimeAgo(dateStr: string) {
 
 <style lang="scss" scoped>
 .page {
-  display: flex;
-  flex-direction: column;
   width: 100%;
   max-width: 1000px;
   margin: 0 auto;
-  padding: 2rem 1.5rem;
-  gap: 2rem;
-}
-
-.page-header {
-  .page-title {
-    margin: 0;
-    font-size: 1.75rem;
-    font-weight: 800;
-    color: var(--text);
-  }
-
-  .page-subtitle {
-    margin: 0.25rem 0 0;
-    font-size: 0.9rem;
-    color: var(--text-500);
-  }
 }
 
 .stats-grid {
@@ -268,9 +249,6 @@ function formatTimeAgo(dateStr: string) {
 }
 
 .section-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
   margin-bottom: 1rem;
 }
 
@@ -333,95 +311,6 @@ function formatTimeAgo(dateStr: string) {
 }
 
 .recent-item-status {
-  padding: 0.25rem 0.75rem;
-  border-radius: 1rem;
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: capitalize;
-
-  &.status-running {
-    background-color: var(--status-running-bg);
-    color: var(--status-running-text);
-  }
-
-  &.status-completed {
-    background-color: var(--status-completed-bg);
-    color: var(--status-completed-text);
-  }
-
-  &.status-failed {
-    background-color: var(--status-failed-bg);
-    color: var(--status-failed-text);
-  }
-
-  &.status-pending {
-    background-color: var(--status-pending-bg);
-    color: var(--status-pending-text);
-  }
-
-  &.status-timedout {
-    background-color: var(--status-timedout-bg);
-    color: var(--status-timedout-text);
-  }
-}
-
-.state-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.75rem;
-  padding: 3rem 1.5rem;
-  border-radius: 1rem;
-  background-color: var(--background-300);
-  color: var(--text-950);
-  text-align: center;
-}
-
-.state-label {
-  margin: 0;
-  font-size: 1.1rem;
-  font-weight: 700;
-}
-
-.state-text {
-  margin: 0;
-  font-size: 0.9rem;
-  opacity: 0.7;
-}
-
-.state-empty {
-  border: 1px dashed var(--primary-400);
-}
-
-.spinner {
-  width: 2rem;
-  height: 2rem;
-  border: 3px solid var(--primary-300);
-  border-top-color: var(--accent-500);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.btn-primary {
-  margin-top: 0.5rem;
-  padding: 0.6rem 1.25rem;
-  border-radius: 0.5rem;
-  background-color: var(--accent-500);
-  color: white;
-  font-weight: 700;
-  text-decoration: none;
-  font-size: 0.9rem;
-  transition: background 0.2s;
-
-  &:hover {
-    background-color: var(--accent-600);
-  }
+  /* uses global .status-badge styles */
 }
 </style>

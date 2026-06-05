@@ -2,16 +2,17 @@
 import { ref, computed } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/vue-query"
-import { getJobById, updateJob, deleteJob, getClients, getGroups } from "@/lib/api"
+import { getJobById, updateJob, deleteJob, getClients, getGroups, getClientById, getGroupById } from "@/lib/api"
 import { useSurrealClient } from "@/lib/surreal"
 import { formatDate } from "@/utils/date"
 import {
   extractEnumVariant,
   formatEnumVariant,
   makeEnabled,
+  type Client,
   type EnabledVariant,
 } from "@/lib/model"
-import AssignmentManager from "@/components/AssignmentManager.vue"
+import AssignmentManager, { type AssignmentItem } from "@/components/AssignmentManager.vue"
 import type { RecordId } from "surrealdb"
 
 const route = useRoute()
@@ -27,15 +28,106 @@ const { data: job, isLoading: loadingJob, isError: jobError } = useQuery({
   queryFn: () => getJobById(client, jobId),
 })
 
-const { data: allClients } = useQuery({
-  queryKey: ["clients"],
-  queryFn: () => getClients(client),
-})
+const getAssignments = computed(() => {
+  let assignments: AssignmentItem[] = []
+  for (const id of job.value?.assignments ?? []) {
+    if (String(id).startsWith("client")) {
+      const { data } = useQuery({
+        queryKey: ["job", jobId],
+        queryFn: () => getClientById(client, String(id)),
+      });
+      if (data?.value) {
+        assignments.push(
+          {
+            id: data.value.id,
+            name: data.value.client_name,
+            type: 'client'
+          }
+        )
+      } else {
+        console.error(`Could not find client with id ${id}`)
+      }
+    } else {
+      const { data } = useQuery({
+        queryKey: ["job", jobId],
+        queryFn: () => {
+          try {
+            return getGroupById(client, String(id))
+          } catch (e) {
+            console.error(e)
+          }
+        },
+      });
+      if (data?.value) {
+        let members = []
+        members = data.value.members?.reduce((acc, m) => {
+          const { data: d } = useQuery({
+            queryKey: ["job", jobId],
+            queryFn: () => getClientById(client, String(m)),
+          });
+          if (d?.value) {
+            acc.push(d.value)
+          }
+          return acc
+        }, [] as Client[])
+        if (members.length != data.value?.members?.length) {
+          console.error(`Could not find members for group with id ${id}`)
+          console.error(`${data.value.members} != ${members}`)
+        }
+        assignments.push({
+          id: data.value.id,
+          name: data.value.group_name,
+          type: 'group',
+          members,
+        })
+      } else {
+        console.error(`Could not find group with id ${id}`)
+      }
+    }
+  }
+  console.log("assignments: ", assignments)
+  return assignments;
+});
 
-const { data: allGroups } = useQuery({
-  queryKey: ["groups"],
-  queryFn: () => getGroups(client),
-})
+const getAll = computed(() => {
+  let all: AssignmentItem[] = [];
+  const { data: clntdata } = useQuery({
+    queryKey: ["jobClients", jobId],
+    queryFn: () => getClients(client),
+    enabled: isEditingAssignments,
+  });
+  if (clntdata?.value) {
+    all.concat(clntdata?.value.map(c => {
+      return {
+        id: c.id,
+        name: c.client_name,
+        type: 'client'
+      }
+    }))
+  }
+  const { data: grpdata } = useQuery({
+    queryKey: ["jobGroups", jobId],
+    queryFn: () => getGroups(client),
+    enabled: isEditingAssignments,
+  });
+  if (grpdata?.value) {
+    all.concat(grpdata?.value.map(g => {
+      return {
+        id: g.id,
+        name: g.group_name,
+        type: 'group',
+        members: g.members.reduce((acc, m) => {
+          const d = clntdata?.value?.find(c => String(c.id) == String(m.id))
+          if (d) {
+            acc.push(d)
+          }
+          return acc
+        }, [] as Client[])
+      }
+    }));
+  }
+  return all;
+});
 
 const statusVariant = computed(() =>
   job.value ? extractEnumVariant(job.value.execution_status) : ""
@@ -55,39 +147,6 @@ const editForm = ref({
 })
 
 const isEditingAssignments = ref(false)
-
-const assignmentItems = computed(() => {
-  if (!job.value || !allClients.value || !allGroups.value) return []
-
-  const assignedIds = new Set(job.value.assignments.map(a => String(a)))
-  const items: any[] = []
-
-  allGroups.value.forEach(group => {
-    const isAssigned = assignedIds.has(String(group.id))
-    const groupMembers = allClients.value!.filter(c =>
-      group.members.some(m => String(m) === String(c.id))
-    )
-    items.push({
-      id: group.id,
-      name: group.group_name,
-      type: 'group' as const,
-      selected: isAssigned,
-      members: groupMembers,
-    })
-  })
-
-  allClients.value.forEach(c => {
-    const isAssigned = assignedIds.has(String(c.id))
-    items.push({
-      id: c.id,
-      name: c.client_name,
-      type: 'client' as const,
-      selected: isAssigned,
-    })
-  })
-
-  return items
-})
 
 const startEditing = () => {
   if (job.value) {
@@ -191,20 +250,20 @@ const handleViewDetails = (item: any) => {
 
         <form v-if="isEditing" @submit.prevent="handleUpdate" class="edit-form">
           <div class="form-group">
-            <label>Name</label>
-            <input v-model="editForm.job_name" type="text" required />
+            <label class="form-label">Name</label>
+            <input v-model="editForm.job_name" type="text" class="form-input" required />
           </div>
           <div class="form-group">
-            <label>Shell</label>
-            <input type="text" v-model="editForm.job_shell" required />
+            <label class="form-label">Shell</label>
+            <input type="text" v-model="editForm.job_shell" class="form-input" required />
           </div>
           <div class="form-group">
-            <label>Command</label>
-            <textarea v-model="editForm.job_command" rows="4" required></textarea>
+            <label class="form-label">Command</label>
+            <textarea v-model="editForm.job_command" class="form-input" rows="4" required></textarea>
           </div>
           <div class="form-group">
-            <label>State</label>
-            <select v-model="editForm.enabled">
+            <label class="form-label">State</label>
+            <select v-model="editForm.enabled" class="form-input">
               <option value="Draft">Draft</option>
               <option value="Enabled">Enabled</option>
               <option value="Disabled">Disabled</option>
@@ -259,7 +318,7 @@ const handleViewDetails = (item: any) => {
             Assignments</button>
         </div>
 
-        <AssignmentManager :mode="isEditingAssignments ? 'edit' : 'view'" :selectedItems="assignmentItems"
+        <AssignmentManager :selectedItems="getAssignments" :allItems="isEditingAssignments ? getAll : undefined"
           :show-group-members="true" empty-view-text="No clients or groups assigned"
           empty-edit-text="No clients or groups available" @submit="handleAssignmentSubmit"
           @cancel="handleAssignmentCancel" @view-details="handleViewDetails" />
@@ -281,52 +340,9 @@ const handleViewDetails = (item: any) => {
 
 <style lang="scss" scoped>
 .page {
-  display: flex;
-  flex-direction: column;
   width: 100%;
   max-width: 1000px;
   margin: 0 auto;
-  padding: 2rem 1.5rem;
-  gap: 2rem;
-}
-
-.back-link {
-  display: inline-block;
-  margin-bottom: 1rem;
-  font-size: 0.9rem;
-  color: var(--accent-500);
-  text-decoration: none;
-
-  &:hover {
-    text-decoration: underline;
-  }
-}
-
-.header-main {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 1rem;
-}
-
-.header-actions {
-  display: flex;
-  gap: 0.75rem;
-}
-
-.title-group {
-  .page-title {
-    margin: 0;
-    font-size: 2rem;
-    font-weight: 800;
-  }
-
-  .job-id {
-    margin: 0.25rem 0 0;
-    font-size: 0.9rem;
-    font-family: monospace;
-    opacity: 0.5;
-  }
 }
 
 .details-container {
@@ -335,90 +351,9 @@ const handleViewDetails = (item: any) => {
   gap: 1.5rem;
 }
 
-.card {
-  background: var(--background-300);
-  color: var(--text-950);
-  border-radius: 1rem;
-  padding: 1.5rem;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-}
-
-.section-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1.5rem;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-  padding-bottom: 0.75rem;
-
-  h2 {
-    margin: 0;
-    font-size: 1.25rem;
-    font-weight: 700;
-  }
-}
-
-.info-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1.5rem;
-  margin-bottom: 1.5rem;
-}
-
 .info-item {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-
   &.full-width {
     grid-column: 1 / -1;
-  }
-
-  .label {
-    font-size: 0.7rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    opacity: 0.6;
-  }
-
-  .value {
-    font-size: 1rem;
-  }
-}
-
-.status-badge {
-  display: inline-block;
-  width: fit-content;
-  padding: 0.1rem 0.6rem;
-  border-radius: 9999px;
-  font-weight: 600;
-  font-size: 0.85rem;
-  background: var(--background-200);
-
-  &.active,
-  &.running {
-    background: var(--status-running-bg);
-    color: var(--status-running-text);
-  }
-
-  &.pending {
-    background: var(--status-pending-bg);
-    color: var(--status-pending-text);
-  }
-
-  &.completed {
-    background: var(--status-completed-bg);
-    color: var(--status-completed-text);
-  }
-
-  &.failed {
-    background: var(--status-failed-bg);
-    color: var(--status-failed-text);
-  }
-
-  &.timedout {
-    background: var(--status-timedout-bg);
-    color: var(--status-timedout-text);
   }
 }
 
@@ -432,43 +367,25 @@ const handleViewDetails = (item: any) => {
   margin: 0;
 }
 
-.assignment-list {
+.edit-form {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.assignment-chip {
-  display: inline-flex;
-  padding: 0.2rem 0.6rem;
-  background: var(--background-200);
-  border-radius: 0.375rem;
-  font-size: 0.8rem;
-  font-weight: 500;
-  font-family: monospace;
+  flex-direction: column;
+  gap: 1rem;
 }
 
 .form-group {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  margin-bottom: 1rem;
+  margin-bottom: 0;
 
-  label {
-    font-size: 0.8rem;
-    font-weight: 700;
-    opacity: 0.8;
+  textarea {
+    resize: vertical;
+    min-height: 100px;
   }
 
-  input,
-  textarea,
   select {
-    padding: 0.6rem;
-    border-radius: 0.4rem;
-    border: 1px solid rgba(0, 0, 0, 0.1);
-    background: var(--background-800);
-    font-size: 0.95rem;
-    color: var(--text-950);
+    cursor: pointer;
   }
 }
 
@@ -476,133 +393,7 @@ const handleViewDetails = (item: any) => {
   display: flex;
   justify-content: flex-end;
   gap: 0.75rem;
-}
-
-.btn-primary {
-  background: var(--accent-500);
-  color: white;
-  padding: 0.6rem 1.25rem;
-  border-radius: 0.5rem;
-  font-weight: 700;
-  border: none;
-  cursor: pointer;
-}
-
-.btn-secondary {
-  background: transparent;
-  border: 1px solid var(--accent-500);
-  color: var(--accent-500);
-  padding: 0.6rem 1.25rem;
-  border-radius: 0.5rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.btn-ghost {
-  background: transparent;
-  border: none;
-  padding: 0.6rem 1.25rem;
-  cursor: pointer;
-  color: var(--text-800);
-}
-
-.btn-danger {
-  background: var(--danger-bg);
-  color: var(--danger-text);
-  border: 1px solid var(--danger-text);
-  padding: 0.6rem 1.25rem;
-  border-radius: 0.5rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.spinner {
-  width: 2rem;
-  height: 2rem;
-  border: 3px solid rgba(0, 0, 0, 0.1);
-  border-top-color: var(--accent-500);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.state-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.75rem;
-  padding: 3rem 1.5rem;
-  border-radius: 1rem;
-  background-color: var(--background-300);
-  color: var(--text-950);
-  text-align: center;
-}
-
-.state-label {
-  margin: 0;
-  font-size: 1.1rem;
-  font-weight: 700;
-}
-
-.state-text {
-  margin: 0;
-  font-size: 0.9rem;
-  opacity: 0.7;
-}
-
-.state-error {
-  border: 1px solid var(--accent-400);
-
-  .state-label {
-    color: var(--accent-500);
-  }
-}
-
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.modal-content {
-  background: var(--background-300);
-  padding: 2rem;
-  border-radius: 1rem;
-  max-width: 400px;
-
-  h3 {
-    margin: 0 0 1rem;
-  }
-
-  p {
-    margin: 0 0 1.5rem;
-  }
-}
-
-.modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.75rem;
-}
-
-.assignments-section {
-  .section-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
+  padding-top: 1rem;
+  border-top: 1px solid var(--background-400);
 }
 </style>

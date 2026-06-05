@@ -29,7 +29,11 @@ export async function createJob(
   data: JobCreate
 ): Promise<Job> {
   const result = await client.create<Job>(new Table("job")).content(data)
-  return (result as unknown as Job[])[0]
+  if (!result) {
+    throw new Error("Failed to create job")
+  } else {
+    return (result as unknown as Job)
+  }
 }
 
 export async function updateJob(
@@ -58,9 +62,14 @@ export async function getGroups(client: Surreal): Promise<Group[]> {
 export async function getGroupById(
   client: Surreal,
   id: string
-): Promise<Group | null> {
+): Promise<Group> {
   const result = await client.select<Group>(rid(id))
-  return (result as unknown as Group) ?? null
+  if (!result) {
+    console.error("[api] getGroupById failed:", id)
+    throw new Error(`Group not found: ${id}`)
+  } else {
+    return (result as unknown as Group)
+  }
 }
 
 export async function createGroup(
@@ -68,7 +77,11 @@ export async function createGroup(
   data: GroupCreate
 ): Promise<Group> {
   const result = await client.create<Group>(new Table("group")).content(data)
-  return (result as unknown as Group[])[0]
+  if (!result) {
+    throw new Error("Failed to create group")
+  } else {
+    return (result as unknown as Group)
+  }
 }
 
 export async function updateGroup(
@@ -76,6 +89,7 @@ export async function updateGroup(
   id: string,
   data: Partial<GroupCreate>
 ): Promise<Group> {
+  console.log("updateGroup", { id, data })
   const result = await client.update<Group>(rid(id)).merge(data)
   return result as unknown as Group
 }
@@ -104,20 +118,28 @@ export async function getClientById(
 
 /* ── Helpers ── */
 
-export function getJobsForClient(clientId: RecordId, jobs: Job[]): Job[] {
-  return jobs.filter(job => 
-    job.assignments.some(a => String(a) === String(clientId))
+export function getJobsForClient(clientId: RecordId, jobs: Job[], groups: Group[]): Job[] {
+  console.log("getJobsForClient", { clientId, jobs, groups })
+  const clientGroupIds = groups
+    .filter(g => g.members.some(m => String(m) === String(clientId)))
+    .map(g => g.id)
+
+  return jobs.filter(job =>
+    job.assignments.some(a =>
+      String(a) === String(clientId) ||
+      clientGroupIds.some(gid => String(gid) === String(a))
+    )
   )
 }
 
 export function getGroupsForClient(clientId: RecordId, groups: Group[]): Group[] {
-  return groups.filter(group => 
+  return groups.filter(group =>
     group.members.some(m => String(m) === String(clientId))
   )
 }
 
 export function getJobsForGroup(groupId: RecordId, jobs: Job[]): Job[] {
-  return jobs.filter(job => 
+  return jobs.filter(job =>
     job.assignments.some(a => String(a) === String(groupId))
   )
 }

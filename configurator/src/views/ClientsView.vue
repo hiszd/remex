@@ -51,7 +51,7 @@ const { data: groups } = useQuery({
         v-for="c in clients"
         :client="c"
         :key="String(c.id)"
-        :job-count="jobs ? getJobsForClient(c.id, jobs).length : 0"
+        :job-count="jobs && groups ? getJobsForClient(c.id, jobs, groups).length : 0"
         :group-count="groups ? getGroupsForClient(c.id, groups).length : 0"
       />
     </div>
@@ -60,28 +60,9 @@ const { data: groups } = useQuery({
 
 <style lang="scss" scoped>
 .page {
-  display: flex;
-  flex-direction: column;
   width: 100%;
   max-width: 1400px;
   margin: 0 auto;
-  padding: 2rem 1.5rem;
-  gap: 1.5rem;
-}
-
-.page-header {
-  .page-title {
-    margin: 0;
-    font-size: 1.75rem;
-    font-weight: 800;
-    color: var(--text);
-  }
-
-  .page-subtitle {
-    margin: 0.25rem 0 0;
-    font-size: 0.9rem;
-    color: var(--text-500);
-  }
 }
 
 .card-grid {
@@ -89,55 +70,5 @@ const { data: groups } = useQuery({
   flex-direction: column;
   gap: 1.5rem;
   width: 100%;
-}
-
-.state-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.75rem;
-  padding: 3rem 1.5rem;
-  border-radius: 1rem;
-  background-color: var(--background-300);
-  color: var(--text-950);
-  text-align: center;
-}
-
-.state-label {
-  margin: 0;
-  font-size: 1.1rem;
-  font-weight: 700;
-}
-
-.state-text {
-  margin: 0;
-  font-size: 0.9rem;
-  opacity: 0.7;
-}
-
-.state-error {
-  border: 1px solid var(--accent-400);
-
-  .state-label {
-    color: var(--accent-500);
-  }
-}
-
-.state-empty {
-  border: 1px dashed var(--primary-400);
-}
-
-.spinner {
-  width: 2rem;
-  height: 2rem;
-  border: 3px solid var(--primary-300);
-  border-top-color: var(--accent-500);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
 }
 </style>

@@ -1,10 +1,7 @@
 <script setup lang="ts">
-import { useRouter } from 'vue-router';
-import { formatDate } from '@/utils/date';
-import { Hero } from '@/styles/color/hero';
-import type { Client } from '@/lib/model';
-import IconClient from '@/components/icons/IconClient.vue';
-import IconViewDetails from '@/components/icons/IconViewDetails.vue';
+import { formatDate } from "@/utils/date"
+import { Hero } from "@/styles/color/hero"
+import type { Client } from "@/lib/model"
 
 const props = withDefaults(defineProps<{
   client: Client
@@ -15,85 +12,50 @@ const props = withDefaults(defineProps<{
   groupCount: 0
 })
 
-const router = useRouter();
 const created = formatDate(props.client.created_at)
-
-const navigateToDetails = () => {
-  router.push(`/clients/${props.client.id}`);
-}
+const lastSeen = props.client.last_seen ? formatDate(props.client.last_seen) : "Never"
 </script>
 
 <template>
-  <div class="client-card" :style="[Hero]">
-    <div class="item-icon">
-      <IconClient />
-    </div>
-    <div class="client-info">
-      <div class="hero-header">
-        <h1 class="hero-name">{{ client.client_name }}</h1>
-        <p class="hero-id">{{ client.client_name }}</p>
+  <div class="client-card-container">
+    <router-link :to="'/clients/' + client.id" class="hero-card-link">
+      <div class="hero-card" :style="[Hero]">
+        <div class="hero-header">
+          <h1 class="hero-name">{{ client.client_name }}</h1>
+          <p class="hero-id">{{ String(client.id) }}</p>
+        </div>
+        <div class="hero-details">
+          <span class="detail">
+            <p class="label">Jobs</p>
+            <p class="value">{{ jobCount }}</p>
+          </span>
+          <span class="detail">
+            <p class="label">Groups</p>
+            <p class="value">{{ groupCount }}</p>
+          </span>
+          <span class="detail">
+            <p class="label">Last Seen</p>
+            <p class="value">{{ lastSeen }}</p>
+          </span>
+          <span class="detail">
+            <p class="label">Created</p>
+            <p class="value">{{ created }}</p>
+          </span>
+        </div>
       </div>
-      <div class="hero-details">
-        <span class="detail">
-          <p class="label">Jobs</p>
-          <p class="value">{{ jobCount }}</p>
-        </span>
-        <span class="detail">
-          <p class="label">Groups</p>
-          <p class="value">{{ groupCount }}</p>
-        </span>
-        <span class="detail">
-          <p class="label">Created</p>
-          <p class="value">{{ created }}</p>
-        </span>
-      </div>
-    </div>
-    <button class="details-btn" @click="navigateToDetails" title="View details">
-      <IconViewDetails />
-    </button>
+    </router-link>
   </div>
 </template>
 
 <style lang="scss" scoped>
-@import '@/styles/hero-card.scss';
+@import "@/styles/hero-card.scss";
 
-.client-card {
+.client-card-container {
   display: flex;
-  align-items: center;
-  gap: 1rem;
-  padding: 1rem;
-  background: var(--background-300);
-  border-radius: 0.5rem;
-  transition: background-color 0.2s;
+  flex-direction: column;
 }
 
-.item-icon {
-  font-size: 1.5rem;
-  flex-shrink: 0;
-  color: var(--text);
-}
-
-.client-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.details-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 0.5rem;
-  font-size: 1.25rem;
-  opacity: 0.7;
-  transition: opacity 0.2s;
-  color: var(--text);
-
-  &:hover {
-    opacity: 1;
-  }
-}
-
-.hero-details .detail .value.monospace {
-  background: rgba(0, 0, 0, 0.05);
+.hero-card-link {
+  padding: 0;
 }
 </style>

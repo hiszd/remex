@@ -21,7 +21,7 @@ const { client, isSuccess, isError, connect, error } = provideSurreal({
   autoConnect: false,
 })
 
-connect().catch(() => {})
+connect().catch(() => { })
 
 watch(isSuccess, async (connected) => {
   if (connected) {
@@ -51,7 +51,7 @@ watch(authReady, (ready) => {
 
   <div v-else-if="!showApp" class="loading-screen">
     <div class="spinner" />
-    <p class="loading-text">Connecting to database...</p>
+    <p class="loading-text">Loading...</p>
   </div>
 
   <div v-else-if="!isAuthPage" class="app-layout">
@@ -259,6 +259,459 @@ body {
 
 :root {
   --color-background: var(--background);
+  --color-border: var(--background-400);
+}
+
+/* ── Buttons ── */
+
+.btn-primary {
+  padding: 0.625rem 1.25rem;
+  border-radius: 0.5rem;
+  background: var(--accent-500);
+  color: white;
+  font-weight: 700;
+  font-size: 0.875rem;
+  border: none;
+  cursor: pointer;
+  transition: background 0.2s;
+
+  &:hover:not(:disabled) {
+    background: var(--accent-600);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.btn-secondary {
+  padding: 0.625rem 1.25rem;
+  border-radius: 0.5rem;
+  background: transparent;
+  border: 1px solid var(--accent-500);
+  color: var(--accent-500);
+  font-weight: 600;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+
+  &:hover:not(:disabled) {
+    background: var(--accent-50);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.btn-danger {
+  padding: 0.625rem 1.25rem;
+  border-radius: 0.5rem;
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  border: 1px solid var(--danger-text);
+  font-weight: 600;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+
+  &:hover:not(:disabled) {
+    opacity: 0.9;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.btn-ghost {
+  padding: 0.625rem 1.25rem;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--text-600);
+  font-weight: 600;
+  font-size: 0.875rem;
+  border: 1px solid var(--background-400);
+  cursor: pointer;
+  transition: all 0.15s ease;
+
+  &:hover:not(:disabled) {
+    background: var(--background-200);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+/* ── Cards ── */
+
+.card {
+  background: var(--background-300);
+  color: var(--text-950);
+  border-radius: 1rem;
+  padding: 1.5rem;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+/* ── Badges ── */
+
+.status-badge {
+  display: inline-block;
+  padding: 0.125rem 0.625rem;
+  border-radius: 9999px;
+  font-weight: 600;
+  font-size: 0.75rem;
+
+  &.pending {
+    background: var(--status-pending-bg);
+    color: var(--status-pending-text);
+  }
+
+  &.running {
+    background: var(--status-running-bg);
+    color: var(--status-running-text);
+  }
+
+  &.completed {
+    background: var(--status-completed-bg);
+    color: var(--status-completed-text);
+  }
+
+  &.failed {
+    background: var(--status-failed-bg);
+    color: var(--status-failed-text);
+  }
+
+  &.timedout {
+    background: var(--status-timedout-bg);
+    color: var(--status-timedout-text);
+  }
+}
+
+.state-badge {
+  display: inline-block;
+  padding: 0.125rem 0.625rem;
+  border-radius: 9999px;
+  font-weight: 600;
+  font-size: 0.75rem;
+
+  &.draft {
+    background: var(--status-pending-bg);
+    color: var(--status-pending-text);
+  }
+
+  &.enabled {
+    background: var(--status-completed-bg);
+    color: var(--status-completed-text);
+  }
+
+  &.disabled {
+    background: var(--status-failed-bg);
+    color: var(--status-failed-text);
+  }
+}
+
+/* ── Forms ── */
+
+.form-input {
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-border);
+  background: var(--background-50);
+  font-size: 0.875rem;
+  color: var(--text-950);
+  transition: border-color 0.15s;
+
+  &:focus {
+    outline: none;
+    border-color: var(--accent-500);
+    box-shadow: 0 0 0 2px var(--accent-100);
+  }
+
+  &::placeholder {
+    color: var(--text-400);
+  }
+}
+
+.form-label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+  color: var(--text-600);
+  margin-bottom: 0.4rem;
+}
+
+.info-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.6;
+}
+
+/* ── Layout ── */
+
+.back-link {
+  display: inline-block;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+  color: var(--accent-500);
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.page {
+  display: flex;
+  flex-direction: column;
+  padding: 2rem 1.5rem;
+  gap: 2rem;
+}
+
+.page-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.page-title {
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 800;
+}
+
+.page-subtitle {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-500);
+}
+
+.header-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.header-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.title-group {
+  .page-title {
+    margin: 0;
+    font-size: 2rem;
+    font-weight: 800;
+  }
+
+  .record-id {
+    margin: 0.25rem 0 0;
+    font-size: 0.9rem;
+    font-family: monospace;
+    opacity: 0.5;
+  }
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  padding-bottom: 0.75rem;
+
+  h2 {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 700;
+  }
+}
+
+/* ── Utilities ── */
+
+.empty-state {
+  padding: 2rem;
+  text-align: center;
+  background: var(--background-300);
+  border-radius: 0.5rem;
+
+  p {
+    margin: 0;
+    color: var(--text-500);
+    font-size: 0.9rem;
+  }
+}
+
+.state-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 3rem 1.5rem;
+  border-radius: 1rem;
+  background-color: var(--background-300);
+  color: var(--text-950);
+  text-align: center;
+
+  .state-label {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 700;
+  }
+
+  .state-text {
+    margin: 0;
+    font-size: 0.9rem;
+    opacity: 0.7;
+  }
+
+  &.state-error {
+    border: 1px solid var(--accent-400);
+
+    .state-label {
+      color: var(--accent-500);
+    }
+  }
+}
+
+.monospace {
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  background: rgba(0, 0, 0, 0.05);
+  padding: 0.2rem 0.4rem;
+  border-radius: 0.25rem;
+  word-break: break-all;
+}
+
+/* ── Modal ── */
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.modal-content {
+  background: var(--background-300);
+  padding: 1.5rem;
+  border-radius: 1rem;
+  max-width: 400px;
+  width: 100%;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3), 0 10px 10px -5px rgba(0, 0, 0, 0.2);
+
+  h3 {
+    margin: 0 0 1rem;
+    font-size: 1.25rem;
+    font-weight: 700;
+  }
+
+  p {
+    margin: 0 0 1.5rem;
+    font-size: 0.9rem;
+    color: var(--text-500);
+  }
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
+/* ── Details Button ── */
+
+.details-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.5rem;
+  font-size: 1.25rem;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+  color: var(--text);
+  flex-shrink: 0;
+
+  &:hover {
+    opacity: 1;
+  }
+}
+
+/* ── Assignment List ── */
+
+.assignment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.assignment-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: var(--background-200);
+  border-radius: 0.5rem;
+  transition: background 0.2s;
+
+  &:hover {
+    background: var(--background-100);
+  }
+}
+
+.assignment-badges {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.assignment-name {
+  flex: 1;
+  font-weight: 500;
+}
+
+/* ── Info Grid ── */
+
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.5rem;
+}
+
+.info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+
+  .label {
+    @extend .info-label;
+  }
+
+  .value {
+    font-size: 1rem;
+    width: fit-content;
+
+    &.monospace {
+      @extend .monospace;
+    }
+  }
 }
 
 .app-layout {

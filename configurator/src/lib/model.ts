@@ -1,4 +1,4 @@
-import type { RecordId } from "surrealdb";
+import type { RecordId, Values } from "surrealdb";
 
 /* ── SurrealDB object-typed enums ── */
 
@@ -43,14 +43,15 @@ export interface Job {
   updated_at: string
 }
 
-export interface JobCreate {
-  job_name: string
-  job_shell: string
-  job_command: string
-  job_type: JobType
-  enabled: Enabled
-  assignments: RecordId[]
-}
+// export interface JobCreate {
+//   job_name: string
+//   job_shell: string
+//   job_command: string
+//   job_type: JobType
+//   enabled: Enabled
+//   assignments: RecordId[]
+// }
+export type JobCreate = Values<Job>
 
 export interface Group {
   id: RecordId
@@ -60,10 +61,11 @@ export interface Group {
   updated_at: string
 }
 
-export interface GroupCreate {
-  group_name: string
-  members: RecordId[]
-}
+// export interface GroupCreate {
+//   group_name: string
+//   members: RecordId[]
+// }
+export type GroupCreate = Values<Group>
 
 export interface Client {
   id: RecordId
@@ -100,8 +102,16 @@ export interface User {
 
 /* ── Enum helpers ── */
 
-export function extractEnumVariant(obj: Record<string, unknown>): string {
-  return Object.keys(obj)[0]
+export function extractEnumVariant(obj: Record<string, any>): string {
+  if (!obj) return ""
+  let k = Object.keys(obj)
+  let l = (k.length > 0) ? k[0] : undefined
+  if (l) {
+    return l
+  } else {
+    console.error("[model] extractEnumVariant failed:", obj)
+    return ""
+  }
 }
 
 export function formatEnumVariant(variant: string): string {
