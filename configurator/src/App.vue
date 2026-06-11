@@ -4,6 +4,7 @@ import { RouterView, useRoute } from "vue-router"
 import AppSidebar from "@/components/AppSidebar.vue"
 import { provideSurreal } from "@/lib/surreal"
 import { authReady, tryRestoreSession } from "@/lib/auth"
+import { useAuthGuard } from "@/lib/authGuard"
 
 const route = useRoute()
 const showApp = ref(false)
@@ -21,11 +22,18 @@ const { client, isSuccess, isError, connect, error } = provideSurreal({
   autoConnect: false,
 })
 
+// Mount the global auth guard: handles token refresh and auth error redirects
+const { scheduleRefresh } = useAuthGuard(client)
+
 connect().catch(() => { })
 
 watch(isSuccess, async (connected) => {
   if (connected) {
-    await tryRestoreSession(client)
+    const restored = await tryRestoreSession(client)
+    if (restored) {
+      // Session restored from localStorage — schedule proactive token refresh
+      scheduleRefresh()
+    }
   }
 })
 

@@ -3,8 +3,12 @@ import { useSurrealClient } from "@/lib/surreal"
 import type { Surreal } from "surrealdb"
 import type { User } from "@/lib/model"
 
+/** localStorage key for the JWT access token */
 const AUTH_TOKEN_KEY = "remex_auth_token"
+/** localStorage key for the user's email (used for session restore) */
 const AUTH_EMAIL_KEY = "remex_auth_email"
+/** localStorage key for the JWT refresh token */
+const AUTH_REFRESH_KEY = "remex_refresh_token"
 
 interface AuthState {
   user: User | null
@@ -13,6 +17,32 @@ interface AuthState {
 const state = shallowRef<AuthState>({ user: null })
 export const isAuthenticatedGlob = computed(() => state.value.user !== null)
 export const authReady = ref(false)
+
+/**
+ * Decode the `exp` claim from a JWT to get its absolute expiry time.
+ * Returns null if the token cannot be parsed or has no `exp` claim.
+ */
+export function getTokenExpiry(token: string): Date | null {
+  try {
+    const parts = token.split('.')
+    if (parts.length !== 3) return null
+    const payload = JSON.parse(atob(parts[1]))
+    return payload.exp ? new Date(payload.exp * 1000) : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Clear all persisted auth state and reset the reactive auth store.
+ * Call this on logout, token expiry, or any auth failure.
+ */
+export function clearAuth(): void {
+  localStorage.removeItem(AUTH_TOKEN_KEY)
+  localStorage.removeItem(AUTH_EMAIL_KEY)
+  localStorage.removeItem(AUTH_REFRESH_KEY)
+  state.value = { user: null }
+}
 
 async function loadCurrentUser(client: Surreal, email: string): Promise<void> {
   try {
@@ -46,9 +76,32 @@ export async function tryRestoreSession(client: Surreal): Promise<boolean> {
     authReady.value = true
     return true
   } catch {
-    localStorage.removeItem(AUTH_TOKEN_KEY)
-    localStorage.removeItem(AUTH_EMAIL_KEY)
-    state.value = { user: null }
+    // Access token is expired — try to refresh if we have a valid refresh token
+    const refreshToken = localStorage.getItem(AUTH_REFRESH_KEY)
+    if (refreshToken) {
+      try {
+        const newTokens = await client.refresh({
+          access: "",
+          refresh: refreshToken,
+        })
+        localStorage.setItem(AUTH_TOKEN_KEY, newTokens.access)
+        if (newTokens.refresh) {
+          localStorage.setItem(AUTH_REFRESH_KEY, newTokens.refresh)
+        }
+        await client.authenticate(newTokens.access)
+        await client.use({ namespace: "remex", database: "remex" })
+        await loadCurrentUser(client, email)
+        authReady.value = true
+        return true
+      } catch {
+        // Refresh token also expired — full logout
+        clearAuth()
+        authReady.value = true
+        return false
+      }
+    }
+
+    clearAuth()
     authReady.value = true
     return false
   }
@@ -70,6 +123,9 @@ export function useAuth() {
     })
     console.log("[auth] signin success")
     localStorage.setItem(AUTH_TOKEN_KEY, token.access)
+    if (token.refresh) {
+      localStorage.setItem(AUTH_REFRESH_KEY, token.refresh)
+    }
     localStorage.setItem(AUTH_EMAIL_KEY, email)
     await client.authenticate(token.access)
     await client.use({ namespace: "remex", database: "remex" })
@@ -92,6 +148,9 @@ export function useAuth() {
     })
     console.log("[auth] signup success")
     localStorage.setItem(AUTH_TOKEN_KEY, token.access)
+    if (token.refresh) {
+      localStorage.setItem(AUTH_REFRESH_KEY, token.refresh)
+    }
     localStorage.setItem(AUTH_EMAIL_KEY, email)
     await client.authenticate(token.access)
     await client.use({ namespace: "remex", database: "remex" })
@@ -106,9 +165,7 @@ export function useAuth() {
     } catch {
       // ignore cleanup errors
     }
-    localStorage.removeItem(AUTH_TOKEN_KEY)
-    localStorage.removeItem(AUTH_EMAIL_KEY)
-    state.value = { user: null }
+    clearAuth()
   }
 
   return {
