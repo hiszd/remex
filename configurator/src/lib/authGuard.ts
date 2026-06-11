@@ -5,9 +5,10 @@
  *
  * This module provides:
  *
- * 1. **Inactivity tracking** — Monitors user activity (mouse, keyboard, touch).
+ * 1. **Inactivity tracking** — Monitors user activity (keyboard, click, touch).
  *    After 15 minutes of inactivity, the session is revoked server-side and
- *    the user is redirected to `/login`.
+ *    the user is redirected to `/login`. Event resets are throttled to once
+ *    per 60 seconds to prevent rapid timer resets from continuous interaction.
  *
  * 2. **Proactive token refresh** — Before the access token expires, the guard
  *    rotates the refresh token to obtain a new access token.
@@ -29,7 +30,7 @@
  * ## Token lifecycle
  *
  *   signin/signup → access token (15m) + refresh token (7d, server-side)
- *   └─> inactivity timer: 15min of no interaction → revoke + redirect
+ *   └─> inactivity timer: 15min of no interaction → revoke + redirect (throttled to 1/min)
  *   └─> rotation timer: fires when access token is within 45s of expiry
  *       └─> rotateRefreshToken() → new access + refresh tokens
  *           └─> schedule next rotation
@@ -60,12 +61,19 @@ const ACCESS_TOKEN_KEY = "remex_access_token"
 // ---------------------------------------------------------------------------
 
 let inactivityTimer: ReturnType<typeof setTimeout> | null = null
+let lastResetTime = 0
+const RESET_THROTTLE_MS = 60 * 1000 // max once per minute
 
 /**
  * Reset the inactivity timer. Called on every user interaction.
+ * Throttled to fire at most once per 60 seconds to prevent rapid resets.
  * If the timer fires, the session is revoked and the user is redirected.
  */
 export function resetInactivityTimer(client: Surreal, router: Router): void {
+  const now = Date.now()
+  if (now - lastResetTime < RESET_THROTTLE_MS) return
+  lastResetTime = now
+
   if (inactivityTimer) clearTimeout(inactivityTimer)
   inactivityTimer = setTimeout(async () => {
     await handleSignOut(client, router)
@@ -92,7 +100,7 @@ export function setupGlobalInactivityListeners(
   client: Surreal,
   router: Router
 ): void {
-  const events = ["mousemove", "keydown", "click", "touchstart", "scroll"]
+  const events = ["keydown", "click", "touchstart"]
   const reset = () => resetInactivityTimer(client, router)
 
   events.forEach((event) => {
@@ -112,7 +120,7 @@ export function teardownGlobalInactivityListeners(): void {
     clearTimeout(inactivityTimer)
     inactivityTimer = null
   }
-  const events = ["mousemove", "keydown", "click", "touchstart", "scroll"]
+  const events = ["keydown", "click", "touchstart"]
   events.forEach((event) => {
     window.removeEventListener(event, resetInactivityTimer as EventListener)
   })
@@ -138,6 +146,8 @@ function useTokenRotationTimer(client: Surreal) {
    * If the token is already within the buffer window, rotate immediately.
    */
   function scheduleRotation(): void {
+    if (timer) clearTimeout(timer)
+
     const token = sessionStorage.getItem(ACCESS_TOKEN_KEY)
     if (!token) return
 

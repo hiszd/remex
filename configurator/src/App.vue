@@ -30,12 +30,7 @@ connect().catch(() => { })
 
 watch(isSuccess, async (connected) => {
   if (connected) {
-    const restored = await tryRestoreSession(client)
-    if (restored) {
-      // Session restored from sessionStorage — schedule token rotation and inactivity tracking
-      scheduleRotation()
-      setupGlobalInactivityListeners(client, router)
-    }
+    await tryRestoreSession(client)
   }
 })
 
@@ -47,6 +42,8 @@ watch(isError, (errored) => {
 
 watch(authReady, (ready) => {
   if (ready) {
+    scheduleRotation()
+    setupGlobalInactivityListeners(client, router)
     showApp.value = true
   }
 })

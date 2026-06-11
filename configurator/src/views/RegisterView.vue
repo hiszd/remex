@@ -2,11 +2,8 @@
 import { ref } from "vue"
 import { useRouter } from "vue-router"
 import { useAuth } from "@/lib/auth"
-import { useSurrealClient } from "@/lib/surreal"
-import { setupGlobalInactivityListeners } from "@/lib/authGuard"
 
 const router = useRouter()
-const client = useSurrealClient()
 const { signup } = useAuth()
 
 const username = ref("")
@@ -20,7 +17,6 @@ async function handleSubmit() {
   errorMsg.value = null
   try {
     await signup(username.value, email.value, password.value)
-    setupGlobalInactivityListeners(client, router)
     router.push("/")
   } catch (err: unknown) {
     errorMsg.value =
