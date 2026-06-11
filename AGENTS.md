@@ -25,6 +25,59 @@ remex_configurator is a standalone Vue.js web application for the end user to cr
 
 All styles should use colors from the themes, and not hard-coded colors. If a theme color needs to be added, it should be added to the theme file.
 
+### Global Design System (App.vue)
+
+All common UI patterns are defined as global styles in `App.vue`. Use these classes in templates instead of redefining styles in component scoped styles.
+
+#### CSS Variables
+- `--color-border`: Border color (maps to `--background-400`)
+
+#### Buttons
+- `.btn-primary`: Accent-colored action button
+- `.btn-secondary`: Outlined accent button
+- `.btn-danger`: Red danger/delete button
+- `.btn-ghost`: Subtle bordered button
+
+All buttons share: `padding: 0.625rem 1.25rem`, `border-radius: 0.5rem`, `font-size: 0.875rem`, `font-weight: 600/700`, hover/disabled states.
+
+#### Cards
+- `.card`: Standard card with `background: var(--background-300)`, `border-radius: 1rem`, `padding: 1.5rem`, subtle shadow
+
+#### Badges
+- `.status-badge`: For execution status (pending, running, completed, failed, timedout)
+- `.state-badge`: For enabled state (draft, enabled, disabled)
+Both share: `padding: 0.125rem 0.625rem`, `border-radius: 9999px`, `font-size: 0.75rem`, `font-weight: 600`
+
+#### Forms
+- `.form-input`: Standard input/textarea/select styling with focus ring
+- `.form-label`: Uppercase label style (`font-size: 0.8rem`, `font-weight: 700`, `letter-spacing: 0.025em`)
+- `.info-label`: Smaller label for read-only detail views (`font-size: 0.7rem`, `letter-spacing: 0.05em`)
+
+#### Layout
+- `.page`: Page container with `padding: 2rem 1.5rem`, `gap: 2rem`
+- `.page-header`: Header container
+- `.page-title`: List page titles (`font-size: 1.75rem`, `font-weight: 800`)
+- `.page-subtitle`: Subtitle text (`font-size: 0.9rem`, `color: var(--text-500)`)
+- `.back-link`: Navigation back link
+- `.header-main`: Detail page header with title + actions
+- `.title-group`: Title + record ID grouping
+- `.section-header`: Section header with h2 + optional action button
+- `.info-grid`: Responsive grid for detail view info items
+- `.info-item`: Single info item with label + value
+
+#### Utilities
+- `.empty-state`: Empty list/content placeholder
+- `.state-card`: Loading/error/empty state container
+- `.monospace`: Monospace text styling
+- `.spinner` + `@keyframes spin`: Loading spinner
+- `.details-btn`: Icon-only "view details" button
+- `.assignment-list`, `.assignment-item`, `.assignment-badges`, `.assignment-name`: Assignment list patterns
+
+#### Modals
+- `.modal-overlay`: Fixed overlay with `backdrop-filter: blur(4px)`, `z-index: 9999`
+- `.modal-content`: Centered modal card
+- `.modal-actions`: Action button row
+
 ## Icon Library
 
 **Location**: `/configurator/src/components/icons/`
