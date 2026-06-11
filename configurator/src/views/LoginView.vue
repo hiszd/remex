@@ -2,8 +2,11 @@
 import { ref } from "vue"
 import { useRouter } from "vue-router"
 import { useAuth } from "@/lib/auth"
+import { useSurrealClient } from "@/lib/surreal"
+import { setupGlobalInactivityListeners } from "@/lib/authGuard"
 
 const router = useRouter()
+const client = useSurrealClient()
 const { login } = useAuth()
 
 const email = ref("")
@@ -12,13 +15,11 @@ const isSubmitting = ref(false)
 const errorMsg = ref<string | null>(null)
 
 async function handleSubmit() {
-  console.log("[LoginView] handleSubmit called")
   isSubmitting.value = true
   errorMsg.value = null
   try {
-    console.log("[LoginView] calling login()...")
     await login(email.value, password.value)
-    console.log("[LoginView] login() returned, pushing to /")
+    setupGlobalInactivityListeners(client, router)
     router.push("/")
   } catch (err: unknown) {
     errorMsg.value =

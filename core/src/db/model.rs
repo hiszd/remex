@@ -4,4 +4,5 @@ pub mod config;
 pub mod executions;
 pub mod groups;
 pub mod jobs;
+pub mod refresh_tokens;
 pub mod users;

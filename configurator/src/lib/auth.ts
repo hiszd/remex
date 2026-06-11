@@ -3,12 +3,17 @@ import { useSurrealClient } from "@/lib/surreal"
 import type { Surreal } from "surrealdb"
 import type { User } from "@/lib/model"
 
-/** localStorage key for the JWT access token */
-const AUTH_TOKEN_KEY = "remex_auth_token"
-/** localStorage key for the user's email (used for session restore) */
+/** sessionStorage key for the JWT access token */
+const ACCESS_TOKEN_KEY = "remex_access_token"
+/** sessionStorage key for the user's email (used for loading user record) */
 const AUTH_EMAIL_KEY = "remex_auth_email"
-/** localStorage key for the JWT refresh token */
-const AUTH_REFRESH_KEY = "remex_refresh_token"
+/** sessionStorage key for the server-side refresh token */
+const REFRESH_TOKEN_KEY = "remex_refresh_token"
+
+/** SurrealDB access configuration */
+const NS = "remex"
+const DB = "remex"
+const AC = "configurator_access"
 
 interface AuthState {
   user: User | null
@@ -24,7 +29,7 @@ export const authReady = ref(false)
  */
 export function getTokenExpiry(token: string): Date | null {
   try {
-    const parts = token.split('.')
+    const parts = token.split(".")
     if (parts.length !== 3) return null
     const payload = JSON.parse(atob(parts[1]))
     return payload.exp ? new Date(payload.exp * 1000) : null
@@ -34,24 +39,43 @@ export function getTokenExpiry(token: string): Date | null {
 }
 
 /**
+ * Check if the given access token is expired or within 45 seconds of expiry.
+ */
+export function isAccessTokenExpired(token: string | null): boolean {
+  if (!token) return true
+  try {
+    const expiry = getTokenExpiry(token)
+    if (!expiry) return true
+    // Proactively mark expired if within 45 seconds of actual boundary
+    return Date.now() >= expiry.getTime() - 45_000
+  } catch {
+    return true
+  }
+}
+
+/**
  * Clear all persisted auth state and reset the reactive auth store.
  * Call this on logout, token expiry, or any auth failure.
  */
 export function clearAuth(): void {
-  localStorage.removeItem(AUTH_TOKEN_KEY)
-  localStorage.removeItem(AUTH_EMAIL_KEY)
-  localStorage.removeItem(AUTH_REFRESH_KEY)
+  sessionStorage.removeItem(ACCESS_TOKEN_KEY)
+  sessionStorage.removeItem(AUTH_EMAIL_KEY)
+  sessionStorage.removeItem(REFRESH_TOKEN_KEY)
   state.value = { user: null }
 }
 
+/**
+ * Load the current user record by email into the reactive auth store.
+ */
 async function loadCurrentUser(client: Surreal, email: string): Promise<void> {
   try {
-    const r = await client.query(
-      "SELECT id, username, email, created_at, updated_at FROM user WHERE email = $email",
-      { email }
-    ).collect()
-    const user = (r?.[0] as unknown) as User | undefined
-    console.log("[auth] loadCurrentUser query returned:", user)
+    const r = await client
+      .query(
+        "SELECT id, username, email, created_at, updated_at FROM user WHERE email = $email",
+        { email }
+      )
+      .collect()
+    const user = (r as unknown[])[0] as User | undefined
     if (user) {
       state.value = { user }
     }
@@ -61,49 +85,130 @@ async function loadCurrentUser(client: Surreal, email: string): Promise<void> {
   }
 }
 
+/**
+ * Mint a new server-side refresh token after a successful signin.
+ * Stores the token in sessionStorage and returns it.
+ */
+export async function mintRefreshToken(client: Surreal): Promise<string> {
+  const result = await client
+    .query(
+      `{
+        LET $token_str = rand::string(64);
+        CREATE refresh_token SET
+          user = $auth,
+          token = $token_str,
+          expires = time::now() + 7d;
+        RETURN $token_str;
+      }`
+    )
+    .collect()
+
+  const token = (result as unknown[])[0] as string | undefined
+  if (!token) throw new Error("Failed to provision session token context")
+
+  sessionStorage.setItem(REFRESH_TOKEN_KEY, token)
+  return token
+}
+
+/**
+ * Rotate the current refresh token: invalidate the old one and mint a new one.
+ * First re-authenticates with the old refresh token, then performs the rotation.
+ * Stores the new token in sessionStorage and returns it.
+ */
+export async function rotateRefreshToken(client: Surreal): Promise<string> {
+  const oldToken = sessionStorage.getItem(REFRESH_TOKEN_KEY)
+  if (!oldToken) throw new Error("No active refresh token found in storage")
+
+  // Re-authenticate the connection using the token exchange parameter
+  await client.signin({
+    namespace: NS,
+    database: DB,
+    access: AC,
+    variables: { refresh_token: oldToken },
+  })
+
+  const result = await client
+    .query(
+      `{
+        UPDATE refresh_token SET active = false, revoked_at = time::now() WHERE token = $old_token;
+        LET $new_token_str = rand::string(64);
+        CREATE refresh_token SET
+          user = $auth,
+          token = $new_token_str,
+          expires = time::now() + 7d;
+        RETURN $new_token_str;
+      }`,
+      { old_token: oldToken }
+    )
+    .collect()
+
+  const newToken = (result as unknown[])[0] as string | undefined
+  if (!newToken) throw new Error("Token rotation rejected by database engine")
+
+  sessionStorage.setItem(REFRESH_TOKEN_KEY, newToken)
+  return newToken
+}
+
+/**
+ * Attempt to restore a session from sessionStorage using a stored refresh token.
+ * Returns true if the session was restored successfully, false otherwise.
+ */
 export async function tryRestoreSession(client: Surreal): Promise<boolean> {
-  const token = localStorage.getItem(AUTH_TOKEN_KEY)
-  const email = localStorage.getItem(AUTH_EMAIL_KEY)
-  if (!token || !email) {
+  const storedRefreshToken = sessionStorage.getItem(REFRESH_TOKEN_KEY)
+  const email = sessionStorage.getItem(AUTH_EMAIL_KEY)
+  if (!storedRefreshToken || !email) {
     authReady.value = true
     return false
   }
 
   try {
-    await client.authenticate(token)
-    await client.use({ namespace: "remex", database: "remex" })
+    // Re-authenticate the client instance using the saved refresh token
+    const tokens = await client.signin({
+      namespace: NS,
+      database: DB,
+      access: AC,
+      variables: { refresh_token: storedRefreshToken },
+    })
+
+    // Store the new access token
+    sessionStorage.setItem(ACCESS_TOKEN_KEY, tokens.access)
+    await client.use({ namespace: NS, database: DB })
+
+    // Load the user record
     await loadCurrentUser(client, email)
+
+    // Proactively rotate to reset the server grace window
+    await rotateRefreshToken(client)
+
     authReady.value = true
     return true
   } catch {
-    // Access token is expired — try to refresh if we have a valid refresh token
-    const refreshToken = localStorage.getItem(AUTH_REFRESH_KEY)
-    if (refreshToken) {
-      try {
-        const newTokens = await client.refresh({
-          access: "",
-          refresh: refreshToken,
-        })
-        localStorage.setItem(AUTH_TOKEN_KEY, newTokens.access)
-        if (newTokens.refresh) {
-          localStorage.setItem(AUTH_REFRESH_KEY, newTokens.refresh)
-        }
-        await client.authenticate(newTokens.access)
-        await client.use({ namespace: "remex", database: "remex" })
-        await loadCurrentUser(client, email)
-        authReady.value = true
-        return true
-      } catch {
-        // Refresh token also expired — full logout
-        clearAuth()
-        authReady.value = true
-        return false
-      }
-    }
-
     clearAuth()
     authReady.value = true
     return false
+  }
+}
+
+/**
+ * Clear the server-side refresh token and local auth state.
+ */
+export async function clearAuthSession(client: Surreal): Promise<void> {
+  const oldToken = sessionStorage.getItem(REFRESH_TOKEN_KEY)
+  if (oldToken) {
+    try {
+      await client.query(
+        "UPDATE refresh_token SET active = false, revoked_at = time::now() WHERE token = $old_token;",
+        { old_token: oldToken }
+      )
+    } catch {
+      // Fail silently on server cleanup during hard sign-out
+    }
+  }
+  clearAuth()
+  try {
+    await client.invalidate()
+  } catch {
+    // Ignore cleanup errors
   }
 }
 
@@ -114,23 +219,25 @@ export function useAuth() {
   const isAuthenticated = computed(() => state.value.user !== null)
 
   async function login(email: string, password: string): Promise<void> {
-    console.log("[auth] login() start")
-    const token = await client.signin({
-      namespace: "remex",
-      database: "remex",
-      access: "configurator_access",
-      variables: { email, password },
+    // Authenticate with credentials (Mode A)
+    const tokens = await client.signin({
+      namespace: NS,
+      database: DB,
+      access: AC,
+      variables: { email, pass: password },
     })
-    console.log("[auth] signin success")
-    localStorage.setItem(AUTH_TOKEN_KEY, token.access)
-    if (token.refresh) {
-      localStorage.setItem(AUTH_REFRESH_KEY, token.refresh)
-    }
-    localStorage.setItem(AUTH_EMAIL_KEY, email)
-    await client.authenticate(token.access)
-    await client.use({ namespace: "remex", database: "remex" })
+
+    // Store the access token
+    sessionStorage.setItem(ACCESS_TOKEN_KEY, tokens.access)
+    sessionStorage.setItem(AUTH_EMAIL_KEY, email)
+
+    await client.use({ namespace: NS, database: DB })
+
+    // Mint a server-side refresh token
+    await mintRefreshToken(client)
+
+    // Load the user record
     await loadCurrentUser(client, email)
-    console.log("[auth] login() complete, user:", state.value.user)
     authReady.value = true
   }
 
@@ -139,33 +246,29 @@ export function useAuth() {
     email: string,
     password: string
   ): Promise<void> {
-    console.log("[auth] signup() start")
-    const token = await client.signup({
-      namespace: "remex",
-      database: "remex",
-      access: "configurator_access",
+    const tokens = await client.signup({
+      namespace: NS,
+      database: DB,
+      access: AC,
       variables: { username, email, password },
     })
-    console.log("[auth] signup success")
-    localStorage.setItem(AUTH_TOKEN_KEY, token.access)
-    if (token.refresh) {
-      localStorage.setItem(AUTH_REFRESH_KEY, token.refresh)
-    }
-    localStorage.setItem(AUTH_EMAIL_KEY, email)
-    await client.authenticate(token.access)
-    await client.use({ namespace: "remex", database: "remex" })
+
+    // Store the access token
+    sessionStorage.setItem(ACCESS_TOKEN_KEY, tokens.access)
+    sessionStorage.setItem(AUTH_EMAIL_KEY, email)
+
+    await client.use({ namespace: NS, database: DB })
+
+    // Mint a server-side refresh token
+    await mintRefreshToken(client)
+
+    // Load the user record
     await loadCurrentUser(client, email)
-    console.log("[auth] signup() complete, user:", state.value.user)
     authReady.value = true
   }
 
   async function logout(): Promise<void> {
-    try {
-      await client.invalidate()
-    } catch {
-      // ignore cleanup errors
-    }
-    clearAuth()
+    await clearAuthSession(client)
   }
 
   return {

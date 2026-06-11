@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { watch, ref, computed } from "vue"
-import { RouterView, useRoute } from "vue-router"
+import { RouterView, useRoute, useRouter } from "vue-router"
 import AppSidebar from "@/components/AppSidebar.vue"
 import { provideSurreal } from "@/lib/surreal"
 import { authReady, tryRestoreSession } from "@/lib/auth"
-import { useAuthGuard } from "@/lib/authGuard"
+import { useAuthGuard, setupGlobalInactivityListeners } from "@/lib/authGuard"
 
 const route = useRoute()
+const router = useRouter()
 const showApp = ref(false)
 const connectionError = ref<string | null>(null)
 const isAuthPage = computed(() =>
@@ -22,8 +23,8 @@ const { client, isSuccess, isError, connect, error } = provideSurreal({
   autoConnect: false,
 })
 
-// Mount the global auth guard: handles token refresh and auth error redirects
-const { scheduleRefresh } = useAuthGuard(client)
+// Mount the global auth guard: handles token rotation and auth error redirects
+const { scheduleRotation } = useAuthGuard(client)
 
 connect().catch(() => { })
 
@@ -31,8 +32,9 @@ watch(isSuccess, async (connected) => {
   if (connected) {
     const restored = await tryRestoreSession(client)
     if (restored) {
-      // Session restored from localStorage — schedule proactive token refresh
-      scheduleRefresh()
+      // Session restored from sessionStorage — schedule token rotation and inactivity tracking
+      scheduleRotation()
+      setupGlobalInactivityListeners(client, router)
     }
   }
 })

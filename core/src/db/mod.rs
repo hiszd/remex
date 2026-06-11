@@ -74,6 +74,7 @@ pub async fn migrate(db: &Surreal<Any>) -> Result<(), DbError> {
   model::groups::Group::migrate(&remex).await?;
   model::jobs::Job::migrate(&remex).await?;
   model::users::User::migrate(&remex).await?;
+  model::refresh_tokens::RefreshToken::migrate(&remex).await?;
   model::audit::AuditLog::migrate(&remex).await?;
   let config = db.clone();
   config.use_ns("remex").use_db("config").await?;
