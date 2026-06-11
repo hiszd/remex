@@ -23,6 +23,7 @@ pub struct SessionData {
   pub db_addr: Option<String>,
   pub tkn: Option<BearerGrantResponse>,
   pub secret: Option<String>,
+  pub groups: Vec<surrealdb::types::RecordId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, SurrealValue, Clone)]
@@ -34,6 +35,7 @@ pub struct Session {
   pub db_addr: Option<String>,
   pub tkn: Option<BearerGrantResponse>,
   pub secret: Option<String>,
+  pub groups: Vec<surrealdb::types::RecordId>,
 }
 
 impl Session {
@@ -47,8 +49,9 @@ impl Session {
         DEFINE FIELD IF NOT EXISTS client_name ON TABLE session TYPE string;
         DEFINE FIELD IF NOT EXISTS hardware_hash ON TABLE session TYPE string;
         DEFINE FIELD IF NOT EXISTS db_addr ON TABLE session TYPE option<string>;
-        DEFINE FIELD IF NOT EXISTS tkn ON TABLE session TYPE object FLEXIBLE;
+        DEFINE FIELD IF NOT EXISTS tkn ON TABLE session TYPE option<object> FLEXIBLE;
         DEFINE FIELD IF NOT EXISTS secret ON TABLE session TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS groups ON TABLE session TYPE array<record<group>>;
       ",
     )
     .await?

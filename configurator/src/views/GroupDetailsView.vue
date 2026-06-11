@@ -5,8 +5,9 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/vue-query"
 import { getGroupById, deleteGroup, updateGroup, getClients, getJobs, getJobsForGroup } from "@/lib/api"
 import { useSurrealClient } from "@/lib/surreal"
 import { formatDate } from "@/utils/date"
-import AssignmentManager from "@/components/AssignmentManager.vue"
 import IconJob from "@/components/icons/IconJob.vue"
+import MultiSelector, { type selectItem } from "@/components/MultiSelector.vue"
+import { toSelectItem } from "@/lib/utils"
 import { extractEnumVariant, formatEnumVariant } from "@/lib/model"
 import type { RecordId } from "surrealdb"
 
@@ -21,11 +22,13 @@ const showDeleteModal = ref(false)
 const { data: group, isLoading: loadingGroup, isError: groupError } = useQuery({
   queryKey: ["group", groupId],
   queryFn: () => getGroupById(client, groupId),
+  select: (data) => Object.freeze(data),
 })
 
 const { data: allClients } = useQuery({
   queryKey: ["clients"],
   queryFn: () => getClients(client),
+  select: (data) => Object.freeze(data),
 })
 
 const { data: allJobs } = useQuery({
@@ -43,12 +46,12 @@ const selectedItems = computed(() => {
     if (memberIds.has(String(c.id))) {
       acc.push({
         id: c.id,
-        name: c.client_name,
-        type: 'client' as const,
+        display_name: c.client_name,
+        item: c,
       })
     }
     return acc
-  }, [] as { id: RecordId, name: string, type: 'client' | 'group' | 'job' }[]);
+  }, [] as selectItem[]);
 
   return sel ? sel : [];
 })
@@ -70,9 +73,8 @@ const assignedJobs = computed(() => {
 const jobItems = computed(() => {
   return assignedJobs.value.map(job => ({
     id: job.id,
-    name: job.job_name,
-    type: 'job' as const,
-    selected: true,
+    display_name: job.job_name,
+    item: job,
     renderIcon: () => h(IconJob),
     renderContent: () => h('div', { class: 'assignment-badges' }, [
       h('span', {
@@ -114,14 +116,16 @@ const handleMembersCancel = () => {
   isEditingMembers.value = false
 }
 
-const handleViewDetails = (item: any) => {
-  if (item.type === 'client') {
-    router.push(`/clients/${item.id}`)
+const handleViewClientDetails = (item: selectItem) => {
+  if (String(item.id.table) === 'client') {
+    router.push(`/clients/${String(item.id)}`)
   }
 }
 
-const handleJobViewDetails = (item: any) => {
-  router.push(`/jobs/${item.id}`)
+const handleViewJobDetails = (item: selectItem) => {
+  if (String(item.id.table) === 'job') {
+    router.push(`/jobs/${String(item.id)}`)
+  }
 }
 </script>
 
@@ -178,10 +182,9 @@ const handleJobViewDetails = (item: any) => {
           <button v-if="!isEditingMembers" @click="isEditingMembers = true" class="btn-secondary">Edit Members</button>
         </div>
 
-        <AssignmentManager :selectedItems="selectedItems" :allItems="isEditingMembers ? allItems : undefined"
-          :show-group-members="false" empty-view-text="No clients assigned to this group"
-          empty-edit-text="No clients available" @submit="handleMembersSubmit" @cancel="handleMembersCancel"
-          @view-details="handleViewDetails" />
+        <MultiSelector :selectedItems="selectedItems" :allItems="allClients?.map(toSelectItem)"
+          :mode="isEditingMembers ? 'edit' : 'view'" :showMembers="true" emptyText="No clients assigned"
+          @submit="handleMembersSubmit" @cancel="handleMembersCancel" @viewDetails="handleViewClientDetails" />
       </section>
 
       <section class="assignments-section card">
@@ -189,8 +192,8 @@ const handleJobViewDetails = (item: any) => {
           <h2>Assigned Jobs ({{ assignedJobs.length }})</h2>
         </div>
 
-        <AssignmentManager :selectedItems="jobItems" :show-group-members="false"
-          empty-view-text="No jobs assigned to this group" @view-details="handleJobViewDetails" />
+        <MultiSelector :selectedItems="jobItems" :mode="'view'" :showMembers="true" emptyText="No jobs assigned"
+          @viewDetails="handleViewJobDetails" />
       </section>
     </div>
 

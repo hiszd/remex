@@ -21,6 +21,7 @@ pub struct GroupData {
   pub group_name: String,
   pub created_at: surrealdb::types::Datetime,
   pub updated_at: surrealdb::types::Datetime,
+  pub members: Vec<surrealdb::types::RecordId>,
 }
 
 #[derive(Serialize, Deserialize, Clone, SurrealValue)]
@@ -29,6 +30,7 @@ pub struct Group {
   pub group_name: String,
   pub created_at: surrealdb::types::Datetime,
   pub updated_at: surrealdb::types::Datetime,
+  pub members: Vec<surrealdb::types::RecordId>,
 }
 
 impl Group {

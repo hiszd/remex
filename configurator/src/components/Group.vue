@@ -3,11 +3,11 @@ import { formatDate } from "@/utils/date"
 import { type Group } from "@/lib/model"
 import { Hero } from "@/styles/color/hero"
 
-const props = defineProps<{
+const { group } = defineProps<{
   group: Group
 }>()
 
-const created = formatDate(props.group.created_at)
+const created = formatDate(group.created_at)
 </script>
 
 <template>

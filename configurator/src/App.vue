@@ -57,12 +57,28 @@ watch(authReady, (ready) => {
   <div v-else-if="!isAuthPage" class="app-layout">
     <AppSidebar />
     <main class="main-content">
-      <RouterView />
+      <Suspense>
+        <RouterView />
+        <template #fallback>
+          <div class="state-card">
+            <div class="spinner" />
+            <p class="state-text">Loading...</p>
+          </div>
+        </template>
+      </Suspense>
     </main>
   </div>
 
   <div v-else class="auth-layout">
-    <RouterView />
+    <Suspense>
+      <RouterView />
+      <template #fallback>
+        <div class="state-card">
+          <div class="spinner" />
+          <p class="state-text">Loading...</p>
+        </div>
+      </template>
+    </Suspense>
   </div>
 </template>
 

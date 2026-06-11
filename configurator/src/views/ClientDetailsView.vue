@@ -16,16 +16,19 @@ const clientId = route.params.id as string
 const { data: client, isLoading, isError } = useQuery({
   queryKey: ["client", clientId],
   queryFn: () => getClientById(surreal, clientId),
+  select: (data) => Object.freeze(data),
 })
 
 const { data: jobs } = useQuery({
   queryKey: ["jobs"],
   queryFn: () => getJobs(surreal),
+  select: (data) => Object.freeze(data),
 })
 
 const { data: groups } = useQuery({
   queryKey: ["groups"],
   queryFn: () => getGroups(surreal),
+  select: (data) => Object.freeze(data),
 })
 
 const assignedJobs = computed(() => {

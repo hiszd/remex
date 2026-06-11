@@ -3,22 +3,26 @@ import { getClients, getJobs, getGroups, getJobsForClient, getGroupsForClient } 
 import { useQuery } from "@tanstack/vue-query"
 import { useSurrealClient } from "@/lib/surreal"
 import Client1 from "@/components/Client1.vue"
+import QueryState from "@/components/QueryState.vue"
 
 const client = useSurrealClient()
 
 const { data: clients, isLoading, isError, error } = useQuery({
   queryKey: ["clients"],
   queryFn: () => getClients(client),
+  select: (data) => Object.freeze(data),
 })
 
 const { data: jobs } = useQuery({
   queryKey: ["jobs"],
   queryFn: () => getJobs(client),
+  select: (data) => Object.freeze(data),
 })
 
 const { data: groups } = useQuery({
   queryKey: ["groups"],
   queryFn: () => getGroups(client),
+  select: (data) => Object.freeze(data),
 })
 </script>
 
@@ -31,30 +35,24 @@ const { data: groups } = useQuery({
       </p>
     </header>
 
-    <div v-if="isLoading" class="state-card">
-      <div class="spinner" />
-      <p class="state-text">Loading clients...</p>
-    </div>
-
-    <div v-else-if="isError" class="state-card state-error">
-      <p class="state-label">Something went wrong</p>
-      <p class="state-text">{{ error }}</p>
-    </div>
-
-    <div v-else-if="!clients || clients.length === 0" class="state-card state-empty">
-      <p class="state-label">No clients yet</p>
-      <p class="state-text">Clients will appear here once they connect.</p>
-    </div>
-
-    <div v-else class="card-grid">
-      <Client1
-        v-for="c in clients"
-        :client="c"
-        :key="String(c.id)"
-        :job-count="jobs && groups ? getJobsForClient(c.id, jobs, groups).length : 0"
-        :group-count="groups ? getGroupsForClient(c.id, groups).length : 0"
-      />
-    </div>
+    <QueryState
+      :is-loading="isLoading"
+      :is-error="isError"
+      :error="error"
+      :is-empty="!clients || clients.length === 0"
+      empty-label="No clients yet"
+      empty-subtext="Clients will appear here once they connect."
+    >
+      <div class="card-grid">
+        <Client1
+          v-for="c in clients"
+          :client="c"
+          :key="String(c.id)"
+          :job-count="jobs && groups ? getJobsForClient(c.id, jobs, groups).length : 0"
+          :group-count="groups ? getGroupsForClient(c.id, groups).length : 0"
+        />
+      </div>
+    </QueryState>
   </div>
 </template>
 

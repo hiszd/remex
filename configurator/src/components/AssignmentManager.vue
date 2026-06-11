@@ -16,7 +16,13 @@ export interface AssignmentItem {
   renderContent?: (item: AssignmentItem) => VNode
 }
 
-const props = withDefaults(defineProps<{
+const {
+  selectedItems,
+  allItems,
+  showGroupMembers = false,
+  emptyViewText = 'Nothing is currently assigned',
+  emptyEditText = '',
+} = withDefaults(defineProps<{
   selectedItems: AssignmentItem[]
   allItems?: AssignmentItem[]
   showGroupMembers?: boolean
@@ -36,8 +42,8 @@ const emit = defineEmits<{
 
 const localSelections = ref<Map<string, boolean>>(new Map())
 
-const effectiveMode = computed(() => props.allItems ? 'edit' : 'view')
-watch(() => props.selectedItems, (newItems) => {
+const effectiveMode = computed(() => allItems ? 'edit' : 'view')
+watch(() => selectedItems, (newItems) => {
   const newMap = new Map<string, boolean>()
   newItems.forEach(item => {
     newMap.set(String(item.id), true)
@@ -47,15 +53,15 @@ watch(() => props.selectedItems, (newItems) => {
 
 const isSelected = (id: RecordId): boolean => {
   if (effectiveMode.value === 'view') {
-    return props.selectedItems.find(item => String(item.id) === String(id)) ? true : false
+    return selectedItems.find(item => String(item.id) === String(id)) ? true : false
   }
   return localSelections.value.get(String(id)) ?? false
 }
 
 const isMemberSelected = (clientId: RecordId): boolean => {
-  if (!props.showGroupMembers) return false
+  if (!showGroupMembers) return false
 
-  for (const item of props.selectedItems) {
+  for (const item of selectedItems) {
     if (item.type === 'group' && item.members) {
       const groupSelected = effectiveMode.value === 'view'
         ? true
@@ -82,7 +88,7 @@ const handleSubmit = () => {
   const selectedIds: RecordId[] = []
   localSelections.value.forEach((selected, idStr) => {
     if (selected) {
-      const item = props.allItems?.find(i => String(i.id) === idStr)
+      const item = allItems?.find(i => String(i.id) === idStr)
       if (item) {
         selectedIds.push(item.id)
       }
@@ -101,9 +107,9 @@ const handleViewDetails = (item: AssignmentItem) => {
 
 const displayItems = computed(() => {
   if (effectiveMode.value === 'view') {
-    return props.selectedItems
+    return selectedItems
   }
-  return props.allItems ? props.allItems : []
+  return allItems ? allItems : []
 })
 
 const hasItems = computed(() => displayItems.value.length > 0)

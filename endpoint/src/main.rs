@@ -106,6 +106,7 @@ async fn main() -> Result<(), Error> {
               db_addr: None,
               tkn: None,
               secret: None,
+              groups: vec![],
             },
             &db::get_local_endpoint().await?,
           )
@@ -124,6 +125,7 @@ async fn main() -> Result<(), Error> {
             db_addr: None,
             tkn: None,
             secret: None,
+            groups: vec![],
           },
           &db::get_local_endpoint().await?,
         )

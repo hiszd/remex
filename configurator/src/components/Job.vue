@@ -4,7 +4,7 @@ import { formatDate } from "@/utils/date"
 import { type Job, extractEnumVariant, formatEnumVariant } from "@/lib/model"
 import { Hero } from "@/styles/color/hero"
 
-const props = defineProps<{
+const { job } = defineProps<{
   job: Job
   isExpanded?: boolean
 }>()
@@ -13,11 +13,11 @@ defineEmits<{
   (e: "toggle-expand"): void
 }>()
 
-const created = formatDate(props.job.created_at)
-const statusVariant = computed(() => extractEnumVariant(props.job.execution_status))
+const created = formatDate(job.created_at)
+const statusVariant = computed(() => extractEnumVariant(job.execution_status))
 const statusDisplay = computed(() => formatEnumVariant(statusVariant.value))
-const enabledVariant = computed(() => extractEnumVariant(props.job.enabled))
-const typeVariant = computed(() => extractEnumVariant(props.job.job_type))
+const enabledVariant = computed(() => extractEnumVariant(job.enabled))
+const typeVariant = computed(() => extractEnumVariant(job.job_type))
 </script>
 
 <template>

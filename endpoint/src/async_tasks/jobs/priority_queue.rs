@@ -7,6 +7,7 @@ use std::{
 
 use remex_core::db::model::{
   executions::ExecutionStatus,
+  groups::Group,
   jobs::{
     Enabled,
     Job,
@@ -136,6 +137,35 @@ pub async fn job_scheduler_loop(
       }
     }
   }
+}
+
+pub async fn sync_groups(client_id: &str) -> Result<Vec<Group>, crate::Error> {
+  println!("Syncing groups from remote...");
+  tracing::info!("Syncing groups from remote database");
+
+  let groups: Vec<Group> = get_remote_remex()
+    .await?
+    .query(format!("SELECT * FROM group WHERE members CONTAINS {client_id};"))
+    .await?
+    .check()?
+    .take(0)?;
+
+  tracing::debug!("Fetched {} groups from remote", groups.len());
+
+  let id: surrealdb::types::RecordId = surrealdb::types::RecordId::parse_simple(client_id).unwrap();
+
+  let mut grpmems: Vec<Group> = Vec::new();
+
+  for group in groups {
+    if !group.members.contains(&id) {
+      tracing::debug!("Skipping group (not assigned): {}", group.group_name);
+      continue;
+    }
+
+    grpmems.push(group);
+  }
+
+  Ok(grpmems)
 }
 
 pub async fn sync_and_refill_queue(
@@ -284,23 +314,25 @@ async fn run_command(cmd: &str) -> Result<(String, &str, std::process::ExitStatu
 }
 
 async fn execute_job(job: Job) -> Result<(), crate::Error> {
-  use remex_core::db::model::executions::{
-    Execution,
-    ExecutionData,
-    ExecutionStatus,
+  use remex_core::db::{
+    model::executions::{
+      Execution,
+      ExecutionData,
+      ExecutionStatus,
+    },
+    DbOperator,
   };
-  use remex_core::db::DbOperator;
 
   println!("Executing job: {}", job.job_name);
 
   let (output_str, command_str, exit_status) = run_command(&job.job_command).await.unwrap();
-  
+
   let execution_status = if exit_status.success() {
     ExecutionStatus::Completed
   } else {
     ExecutionStatus::Failed
   };
-  
+
   let time_start = surrealdb::types::Datetime::now();
   let client_id = surrealdb::types::RecordId::parse_simple("client:self").unwrap();
   let execution = ExecutionData {
@@ -415,16 +447,36 @@ pub async fn monitor_jobs(
       ctx_lock.session.client_id.clone().unwrap()
     };
 
+    let mut groups = {
+      let ctx_lock = ctx.lock().await;
+      ctx_lock.session.groups.clone()
+    };
+
     if !initial_sync_done {
       tracing::info!("First connection to remote, syncing jobs from remote");
-      if let Err(e) = sync_and_refill_queue(&job_injection_tx, &client_id).await {
-        tracing::warn!("Failed to sync from remote: {}", e);
-      } else {
-        initial_sync_done = true;
+      match sync_groups(&client_id).await {
+        Ok(g) => {
+          tracing::debug!("Synced {} groups from remote", g.len());
+          {
+            let mut ctx_lock = ctx.lock().await;
+            g.iter()
+              .for_each(|g| ctx_lock.session.groups.push(g.id.clone()));
+            groups = g.iter().map(|g| g.id.clone()).collect();
+          };
+          if let Err(e) = sync_and_refill_queue(&job_injection_tx, &client_id).await {
+            tracing::warn!("Failed to sync from remote: {}", e);
+          } else {
+            initial_sync_done = true;
+          }
+        }
+        Err(e) => {
+          tracing::warn!("Failed to sync groups from remote: {}", e);
+        }
       }
     }
 
     let mut stream = remote_db.select::<Vec<Job>>("job").live().await?;
+    let mut groupstream = remote_db.select::<Vec<Group>>("group").live().await?;
 
     tracing::info!("Monitoring jobs loop starting");
     loop {
@@ -436,7 +488,8 @@ pub async fn monitor_jobs(
               let id: surrealdb::types::RecordId =
               surrealdb::types::RecordId::parse_simple(&client_id).unwrap();
 
-              if !notification.data.assignments.contains(&id) {
+              if !notification.data.assignments.contains(&id) &&  !notification.data.assignments.iter().any(|g| groups.contains(g)) {
+                tracing::debug!("Job {} not assigned to this client, skipping", notification.data.job_name);
                 continue;
               }
               match notification.action {
@@ -496,6 +549,75 @@ pub async fn monitor_jobs(
             }
             None => {
               tracing::warn!("Job notification stream ended, recreating");
+              break;
+            }
+          }
+        }
+        group_notification = groupstream.next() => {
+          tracing::debug!("Group notification received");
+          match group_notification {
+            Some(Ok(notification)) => {
+              match notification.action {
+                Action::Create => {
+                  println!("Group created in remote: {}", notification.data.group_name);
+                  tracing::debug!("Group created: {}", notification.data.group_name);
+                  if !notification.data.members.contains(&surrealdb::types::RecordId::parse_simple(&client_id).unwrap()) {
+                    tracing::debug!("Group {} not assigned to this client, skipping", notification.data.group_name);
+                    continue;
+                  }
+                  {
+                    let mut ctx_lock = ctx.lock().await;
+                    ctx_lock.session.groups.push(notification.data.id.clone());
+                  }
+                  groups.push(notification.data.id.clone());
+                }
+                Action::Update => {
+                  println!("Group updated in remote: {}", notification.data.group_name);
+                  tracing::debug!("Group updated: {}", notification.data.group_name);
+                  if !notification.data.members.contains(&surrealdb::types::RecordId::parse_simple(&client_id).unwrap()) {
+                    tracing::debug!("Group {} not assigned to this client, skipping", notification.data.group_name);
+                    {
+                      let mut ctx_lock = ctx.lock().await;
+                      ctx_lock.session.groups.retain(|g| g != &notification.data.id);
+                    }
+                    groups.retain(|g| g != &notification.data.id);
+                    continue;
+                  }
+                  {
+                    let mut ctx_lock = ctx.lock().await;
+                    ctx_lock.session.groups.retain(|g| g != &notification.data.id);
+                    ctx_lock.session.groups.push(notification.data.id.clone());
+                  }
+                  groups.retain(|g| g != &notification.data.id);
+                  groups.push(notification.data.id.clone());
+                }
+                Action::Delete => {
+                  println!("Group removed from remote: {}", notification.data.group_name);
+                  tracing::debug!("Group removed from remote: {}", notification.data.group_name);
+                  {
+                    let mut ctx_lock = ctx.lock().await;
+                    ctx_lock.session.groups.retain(|g| g != &notification.data.id);
+                  }
+                  groups.retain(|g| g != &notification.data.id);
+                }
+                Action::Killed => {
+                  println!("Group removed from remote: {}", notification.data.group_name);
+                  tracing::debug!("Group removed from remote: {}", notification.data.group_name);
+                  {
+                    let mut ctx_lock = ctx.lock().await;
+                    ctx_lock.session.groups.retain(|g| g != &notification.data.id);
+                  }
+                  groups.retain(|g| g != &notification.data.id);
+                }
+              }
+              println!("Group updated in remote: {}", notification.data.group_name);
+              tracing::debug!("Group updated: {}", notification.data.group_name);
+            }
+            Some(Err(err)) => {
+              tracing::error!("Error: {:#?}", err);
+            }
+            None => {
+              tracing::warn!("Group notification stream ended, recreating");
               break;
             }
           }

@@ -3,12 +3,14 @@ import { getGroups } from "@/lib/api"
 import { useQuery } from "@tanstack/vue-query"
 import { useSurrealClient } from "@/lib/surreal"
 import GroupComponent from "@/components/Group.vue"
+import QueryState from "@/components/QueryState.vue"
 
 const client = useSurrealClient()
 
 const { data: groups, isLoading, isError, error } = useQuery({
   queryKey: ["groups"],
   queryFn: () => getGroups(client),
+  select: (data) => Object.freeze(data),
 })
 </script>
 
@@ -24,28 +26,22 @@ const { data: groups, isLoading, isError, error } = useQuery({
       </p>
     </header>
 
-    <div v-if="isLoading" class="state-card">
-      <div class="spinner" />
-      <p class="state-text">Loading groups...</p>
-    </div>
-
-    <div v-else-if="isError" class="state-card state-error">
-      <p class="state-label">Something went wrong</p>
-      <p class="state-text">{{ error }}</p>
-    </div>
-
-    <div v-else-if="!groups || groups.length === 0" class="state-card state-empty">
-      <p class="state-label">No groups yet</p>
-      <p class="state-text">Groups will appear here once they are created.</p>
-    </div>
-
-    <div v-else class="card-grid">
-      <GroupComponent
-        v-for="group in groups"
-        :group="group"
-        :key="String(group.id)"
-      />
-    </div>
+    <QueryState
+      :is-loading="isLoading"
+      :is-error="isError"
+      :error="error"
+      :is-empty="!groups || groups.length === 0"
+      empty-label="No groups yet"
+      empty-subtext="Groups will appear here once they are created."
+    >
+      <div class="card-grid">
+        <GroupComponent
+          v-for="group in groups"
+          :group="group"
+          :key="String(group.id)"
+        />
+      </div>
+    </QueryState>
   </div>
 </template>
 

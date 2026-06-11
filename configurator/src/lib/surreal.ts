@@ -23,11 +23,11 @@ interface SurrealState {
 const SurrealKey: InjectionKey<SurrealState> = Symbol("surreal");
 
 export function provideSurreal(options: SurrealOptions) {
-  const instance = options.client ?? new Surreal({
+  const instance = options.client ?? markRaw(new Surreal({
     codecOptions: {
       valueDecodeVisitor: (value) => (value instanceof Value ? markRaw(value) : value),
     },
-  });
+  }));
 
   const { mutateAsync, isPending, isSuccess, isError, error, reset } = useMutation({
     mutationFn: () => instance.connect(options.endpoint, options.params),

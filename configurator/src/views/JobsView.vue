@@ -3,12 +3,14 @@ import { getJobs } from "@/lib/api"
 import { useQuery } from "@tanstack/vue-query"
 import { useSurrealClient } from "@/lib/surreal"
 import JobComponent from "@/components/Job.vue"
+import QueryState from "@/components/QueryState.vue"
 
 const client = useSurrealClient()
 
 const { data: jobs, isLoading, isError, error } = useQuery({
   queryKey: ["jobs"],
   queryFn: () => getJobs(client),
+  select: (data) => Object.freeze(data),
 })
 </script>
 
@@ -24,26 +26,20 @@ const { data: jobs, isLoading, isError, error } = useQuery({
       </p>
     </header>
 
-    <div v-if="isLoading" class="state-card">
-      <div class="spinner" />
-      <p class="state-text">Loading jobs...</p>
-    </div>
-
-    <div v-else-if="isError" class="state-card state-error">
-      <p class="state-label">Something went wrong</p>
-      <p class="state-text">{{ error }}</p>
-    </div>
-
-    <div v-else-if="!jobs || jobs.length === 0" class="state-card state-empty">
-      <p class="state-label">No jobs found</p>
-      <p class="state-text">Jobs will appear here once they are created.</p>
-    </div>
-
-    <div v-else class="card-grid">
-      <div v-for="job in jobs" :key="String(job.id)">
-        <JobComponent :job="job" />
+    <QueryState
+      :is-loading="isLoading"
+      :is-error="isError"
+      :error="error"
+      :is-empty="!jobs || jobs.length === 0"
+      empty-label="No jobs found"
+      empty-subtext="Jobs will appear here once they are created."
+    >
+      <div class="card-grid">
+        <div v-for="job in jobs" :key="String(job.id)">
+          <JobComponent :job="job" />
+        </div>
       </div>
-    </div>
+    </QueryState>
   </div>
 </template>
 

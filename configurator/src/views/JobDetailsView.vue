@@ -2,17 +2,16 @@
 import { ref, computed } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/vue-query"
-import { getJobById, updateJob, deleteJob, getClients, getGroups, getClientById, getGroupById } from "@/lib/api"
+import { getJobById, updateJob, deleteJob, getClients, getGroups } from "@/lib/api"
 import { useSurrealClient } from "@/lib/surreal"
 import { formatDate } from "@/utils/date"
 import {
   extractEnumVariant,
   formatEnumVariant,
   makeEnabled,
-  type Client,
   type EnabledVariant,
 } from "@/lib/model"
-import AssignmentManager, { type AssignmentItem } from "@/components/AssignmentManager.vue"
+import MultiSelector, { type selectItem } from "@/components/MultiSelector.vue"
 import type { RecordId } from "surrealdb"
 
 const route = useRoute()
@@ -25,109 +24,76 @@ const showDeleteModal = ref(false)
 
 const { data: job, isLoading: loadingJob, isError: jobError } = useQuery({
   queryKey: ["job", jobId],
-  queryFn: () => getJobById(client, jobId),
+  queryFn: async () => {
+    const jb = await getJobById(client, jobId)
+    if (!jb) throw new Error(`Could not find job with id ${jobId}`)
+    return jb
+  },
+  select: (data) => Object.freeze(data),
+  retry: 3,
+})
+
+const { data: allClients } = useQuery({
+  queryKey: ["clients"],
+  queryFn: () => getClients(client),
+  select: (data) => Object.freeze(data),
+})
+
+const { data: allGroups } = useQuery({
+  queryKey: ["groups"],
+  queryFn: () => getGroups(client),
+  select: (data) => Object.freeze(data),
 })
 
 const getAssignments = computed(() => {
-  let assignments: AssignmentItem[] = []
-  for (const id of job.value?.assignments ?? []) {
-    if (String(id).startsWith("client")) {
-      const { data } = useQuery({
-        queryKey: ["job", jobId],
-        queryFn: () => getClientById(client, String(id)),
-      });
-      if (data?.value) {
-        assignments.push(
-          {
-            id: data.value.id,
-            name: data.value.client_name,
-            type: 'client'
-          }
-        )
-      } else {
-        console.error(`Could not find client with id ${id}`)
+  if (!job.value || !allClients.value || !allGroups.value) return []
+
+  const assignments: selectItem[] = []
+  for (const id of job.value.assignments ?? []) {
+    const idStr = String(id)
+    if (idStr.startsWith("client:")) {
+      const found = allClients.value.find(c => String(c.id) === idStr)
+      if (found) {
+        assignments.push({ id: found.id, display_name: found.client_name, item: found })
       }
-    } else {
-      const { data } = useQuery({
-        queryKey: ["job", jobId],
-        queryFn: () => {
-          try {
-            return getGroupById(client, String(id))
-          } catch (e) {
-            console.error(e)
-          }
-        },
-      });
-      if (data?.value) {
-        let members = []
-        members = data.value.members?.reduce((acc, m) => {
-          const { data: d } = useQuery({
-            queryKey: ["job", jobId],
-            queryFn: () => getClientById(client, String(m)),
-          });
-          if (d?.value) {
-            acc.push(d.value)
-          }
-          return acc
-        }, [] as Client[])
-        if (members.length != data.value?.members?.length) {
-          console.error(`Could not find members for group with id ${id}`)
-          console.error(`${data.value.members} != ${members}`)
-        }
-        assignments.push({
-          id: data.value.id,
-          name: data.value.group_name,
-          type: 'group',
-          members,
-        })
-      } else {
-        console.error(`Could not find group with id ${id}`)
+    } else if (idStr.startsWith("group:")) {
+      const found = allGroups.value.find(g => String(g.id) === idStr)
+      if (found) {
+        const members = allClients.value.filter(c =>
+          found.members.some(m => String(m) === String(c.id))
+        )
+        assignments.push({ id: found.id, display_name: found.group_name, item: found, members: members.map(m => { return { id: m.id, display_name: m.client_name, item: m } }) })
       }
     }
   }
-  console.log("assignments: ", assignments)
-  return assignments;
-});
+  return assignments
+})
 
 const getAll = computed(() => {
-  let all: AssignmentItem[] = [];
-  const { data: clntdata } = useQuery({
-    queryKey: ["jobClients", jobId],
-    queryFn: () => getClients(client),
-    enabled: isEditingAssignments,
-  });
-  if (clntdata?.value) {
-    all.concat(clntdata?.value.map(c => {
-      return {
-        id: c.id,
-        name: c.client_name,
-        type: 'client'
-      }
-    }))
-  }
-  const { data: grpdata } = useQuery({
-    queryKey: ["jobGroups", jobId],
-    queryFn: () => getGroups(client),
-    enabled: isEditingAssignments,
-  });
-  if (grpdata?.value) {
-    all.concat(grpdata?.value.map(g => {
-      return {
-        id: g.id,
-        name: g.group_name,
-        type: 'group',
-        members: g.members.reduce((acc, m) => {
-          const d = clntdata?.value?.find(c => String(c.id) == String(m.id))
-          if (d) {
-            acc.push(d)
-          }
-          return acc
-        }, [] as Client[])
-      }
-    }));
-  }
-  return all;
-});
+  if (!allClients.value || !allGroups.value) return []
+
+  const all: selectItem[] = []
+
+  all.push(...allClients.value.map(c => ({
+    id: c.id,
+    display_name: c.client_name,
+    item: c,
+  })))
+
+  all.push(...allGroups.value.map(g => {
+    const members = allClients.value!.filter(c =>
+      g.members.some(m => String(m) === String(c.id))
+    )
+    return {
+      id: g.id,
+      display_name: g.group_name,
+      item: g,
+      members: members.map(m => { return { id: m.id, display_name: m.client_name, item: m } }),
+    }
+  }))
+
+  return all
+})
 
 const statusVariant = computed(() =>
   job.value ? extractEnumVariant(job.value.execution_status) : ""
@@ -207,10 +173,10 @@ const handleAssignmentCancel = () => {
   isEditingAssignments.value = false
 }
 
-const handleViewDetails = (item: any) => {
-  if (item.type === 'client') {
+const handleViewAssignmentDetails = (item: selectItem) => {
+  if (String(item.id.table) === 'client') {
     router.push(`/clients/${item.id}`)
-  } else if (item.type === 'group') {
+  } else if (String(item.id.table) === 'group') {
     router.push(`/groups/${item.id}`)
   }
 }
@@ -318,10 +284,9 @@ const handleViewDetails = (item: any) => {
             Assignments</button>
         </div>
 
-        <AssignmentManager :selectedItems="getAssignments" :allItems="isEditingAssignments ? getAll : undefined"
-          :show-group-members="true" empty-view-text="No clients or groups assigned"
-          empty-edit-text="No clients or groups available" @submit="handleAssignmentSubmit"
-          @cancel="handleAssignmentCancel" @view-details="handleViewDetails" />
+        <MultiSelector :selectedItems="getAssignments" :allItems="getAll" :mode="isEditingAssignments ? 'edit' : 'view'"
+          :showMembers="true" emptyText="No clients or groups assigned" @submit="handleAssignmentSubmit"
+          @cancel="handleAssignmentCancel" @viewDetails="handleViewAssignmentDetails" />
       </section>
     </div>
 

@@ -11,16 +11,19 @@ const client = useSurrealClient()
 const { data: jobs } = useQuery({
   queryKey: ["jobs"],
   queryFn: () => getJobs(client),
+  select: (data) => Object.freeze(data),
 })
 
 const { data: groups } = useQuery({
   queryKey: ["groups"],
   queryFn: () => getGroups(client),
+  select: (data) => Object.freeze(data),
 })
 
 const { data: clients } = useQuery({
   queryKey: ["clients"],
   queryFn: () => getClients(client),
+  select: (data) => Object.freeze(data),
 })
 
 const recentJobs = computed(() => {

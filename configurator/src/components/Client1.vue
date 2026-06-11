@@ -3,7 +3,7 @@ import { formatDate } from "@/utils/date"
 import { Hero } from "@/styles/color/hero"
 import type { Client } from "@/lib/model"
 
-const props = withDefaults(defineProps<{
+const { client, jobCount = 0, groupCount = 0 } = withDefaults(defineProps<{
   client: Client
   jobCount?: number
   groupCount?: number
@@ -12,8 +12,8 @@ const props = withDefaults(defineProps<{
   groupCount: 0
 })
 
-const created = formatDate(props.client.created_at)
-const lastSeen = props.client.last_seen ? formatDate(props.client.last_seen) : "Never"
+const created = formatDate(client.created_at)
+const lastSeen = client.last_seen ? formatDate(client.last_seen) : "Never"
 </script>
 
 <template>

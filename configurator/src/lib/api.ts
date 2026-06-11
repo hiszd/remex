@@ -111,9 +111,14 @@ export async function getClients(client: Surreal): Promise<Client[]> {
 export async function getClientById(
   client: Surreal,
   id: string
-): Promise<Client | null> {
+): Promise<Client> {
   const result = await client.select<Client>(rid(id))
-  return (result as unknown as Client) ?? null
+  if (!result) {
+    console.error("[api] getClientById failed:", id)
+    throw new Error(`Client not found: ${id}`)
+  } else {
+    return (result as unknown as Client)
+  }
 }
 
 /* ── Helpers ── */
@@ -142,4 +147,16 @@ export function getJobsForGroup(groupId: RecordId, jobs: Job[]): Job[] {
   return jobs.filter(job =>
     job.assignments.some(a => String(a) === String(groupId))
   )
+}
+
+export async function getClientsForGroup(client: Surreal, group: Group): Promise<Client[]> {
+  console.log("getClientsForGroup", { group })
+  console.log("group.members", group.members)
+  const cids = group.members.map(m => String(m));
+  const clients = await client.query<Client[]>("SELECT * FROM client WHERE id IN $cids", { cids }).collect()
+  if (!clients) {
+    throw new Error("Failed to get clients for group")
+  } else {
+    return clients
+  }
 }

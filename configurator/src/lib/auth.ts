@@ -1,4 +1,4 @@
-import { ref, computed } from "vue"
+import { ref, shallowRef, computed } from "vue"
 import { useSurrealClient } from "@/lib/surreal"
 import type { Surreal } from "surrealdb"
 import type { User } from "@/lib/model"
@@ -10,7 +10,7 @@ interface AuthState {
   user: User | null
 }
 
-const state = ref<AuthState>({ user: null })
+const state = shallowRef<AuthState>({ user: null })
 export const isAuthenticatedGlob = computed(() => state.value.user !== null)
 export const authReady = ref(false)
 
