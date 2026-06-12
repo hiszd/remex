@@ -31,7 +31,11 @@ impl User {
   pub async fn migrate(db: &Surreal<Any>) -> Result<(), DbError> {
     let query = r#"
       USE NS remex DB remex;
-      DEFINE TABLE IF NOT EXISTS user SCHEMAFULL;
+      DEFINE TABLE IF NOT EXISTS user SCHEMAFULL
+        PERMISSIONS FOR select FULL,
+                  FOR create FULL,
+                  FOR update WHERE id = $auth.id,
+                  FOR delete NONE;
       DEFINE FIELD IF NOT EXISTS username ON TABLE user TYPE string;
       DEFINE FIELD IF NOT EXISTS email ON TABLE user TYPE string;
       DEFINE FIELD IF NOT EXISTS password ON TABLE user TYPE string VALUE crypto::argon2::generate($value);

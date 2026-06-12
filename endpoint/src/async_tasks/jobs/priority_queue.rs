@@ -171,6 +171,7 @@ pub async fn sync_groups(client_id: &str) -> Result<Vec<Group>, crate::Error> {
 pub async fn sync_and_refill_queue(
   job_injection_tx: &tokio::sync::mpsc::Sender<JobQueueMessage>,
   client_id: &str,
+  groups: &[surrealdb::types::RecordId],
 ) -> Result<(), crate::Error> {
   println!("Syncing jobs from remote...");
   tracing::info!("Syncing jobs from remote database");
@@ -188,7 +189,7 @@ pub async fn sync_and_refill_queue(
 
   let mut queued_count = 0;
   for job in jobs {
-    if !job.assignments.contains(&id) {
+    if !job.assignments.contains(&id) && !groups.iter().any(|g| job.assignments.contains(g)) {
       tracing::debug!("Skipping job (not assigned): {}", job.job_name);
       continue;
     }
@@ -277,19 +278,20 @@ pub async fn load_jobs_from_local_db(
   Ok(())
 }
 
-pub async fn refill_queue_from_remote(
-  job_injection_tx: &tokio::sync::mpsc::Sender<JobQueueMessage>,
-  client_id: &str,
-) -> Result<(), crate::Error> {
-  println!("Refilling job queue from remote...");
-  tracing::info!("Refilling queue from remote database");
-
-  let _ = job_injection_tx.send(JobQueueMessage::SyncFromRemote).await;
-
-  tokio::time::sleep(Duration::from_millis(50)).await;
-
-  sync_and_refill_queue(job_injection_tx, client_id).await
-}
+// pub async fn refill_queue_from_remote(
+//   job_injection_tx: &tokio::sync::mpsc::Sender<JobQueueMessage>,
+//   client_id: &str,
+//   groups: Vec<surrealdb::types::RecordId>,
+// ) -> Result<(), crate::Error> {
+//   println!("Refilling job queue from remote...");
+//   tracing::info!("Refilling queue from remote database");
+//
+//   let _ = job_injection_tx.send(JobQueueMessage::SyncFromRemote).await;
+//
+//   tokio::time::sleep(Duration::from_millis(50)).await;
+//
+//   sync_and_refill_queue(job_injection_tx, client_id, groups).await
+// }
 
 /// Runs a command and returns the output as (output, command, exit_code)
 async fn run_command(cmd: &str) -> Result<(String, &str, std::process::ExitStatus), crate::Error> {
@@ -463,7 +465,7 @@ pub async fn monitor_jobs(
               .for_each(|g| ctx_lock.session.groups.push(g.id.clone()));
             groups = g.iter().map(|g| g.id.clone()).collect();
           };
-          if let Err(e) = sync_and_refill_queue(&job_injection_tx, &client_id).await {
+          if let Err(e) = sync_and_refill_queue(&job_injection_tx, &client_id, &groups).await {
             tracing::warn!("Failed to sync from remote: {}", e);
           } else {
             initial_sync_done = true;
@@ -612,6 +614,10 @@ pub async fn monitor_jobs(
               }
               println!("Group updated in remote: {}", notification.data.group_name);
               tracing::debug!("Group updated: {}", notification.data.group_name);
+
+              if let Err(e) = sync_and_refill_queue(&job_injection_tx, &client_id, &groups).await {
+                tracing::warn!("Failed to sync from remote: {}", e);
+              }
             }
             Some(Err(err)) => {
               tracing::error!("Error: {:#?}", err);

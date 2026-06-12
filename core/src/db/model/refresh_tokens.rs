@@ -12,7 +12,11 @@ impl RefreshToken {
     db.query(
       r"
         USE NS remex DB remex;
-        DEFINE TABLE IF NOT EXISTS refresh_token SCHEMAFULL;
+        DEFINE TABLE IF NOT EXISTS refresh_token SCHEMAFULL
+          PERMISSIONS FOR select WHERE user = $auth.id,
+                    FOR create WHERE user = $auth.id,
+                    FOR update WHERE user = $auth.id,
+                    FOR delete WHERE user = $auth.id;
         DEFINE FIELD IF NOT EXISTS user ON TABLE refresh_token TYPE record<user>;
         DEFINE FIELD IF NOT EXISTS token ON TABLE refresh_token TYPE string;
         DEFINE FIELD IF NOT EXISTS expires ON TABLE refresh_token TYPE datetime;

@@ -47,7 +47,6 @@ import {
   clearAuth,
   clearAuthSession,
   rotateRefreshToken,
-  isAccessTokenExpired,
 } from "@/lib/auth"
 
 /** Inactivity timeout in milliseconds (15 minutes) */

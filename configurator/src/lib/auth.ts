@@ -1,6 +1,6 @@
 import { ref, shallowRef, computed } from "vue"
 import { useSurrealClient } from "@/lib/surreal"
-import type { Surreal } from "surrealdb"
+import { RecordId, type Surreal } from "surrealdb"
 import type { User } from "@/lib/model"
 
 /** sessionStorage key for the JWT access token */
@@ -33,6 +33,26 @@ export function getTokenExpiry(token: string): Date | null {
     if (parts.length !== 3) return null
     const payload = JSON.parse(atob(parts[1]))
     return payload.exp ? new Date(payload.exp * 1000) : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Extract the authenticated user's record ID from the JWT access token.
+ * SurrealDB record access tokens include an `ID` claim with the record ID
+ * (e.g., "user:xyz"). Returns a RecordId object for use in queries.
+ */
+function getUserIdFromToken(token: string): RecordId | null {
+  try {
+    const parts = token.split(".")
+    if (parts.length !== 3) return null
+    const payload = JSON.parse(atob(parts[1]))
+    const id = payload.ID
+    if (!id || typeof id !== "string") return null
+    const sep = id.indexOf(":")
+    if (sep === -1) return null
+    return new RecordId(id.slice(0, sep), id.slice(sep + 1))
   } catch {
     return null
   }
@@ -75,7 +95,10 @@ async function loadCurrentUser(client: Surreal, email: string): Promise<void> {
         { email }
       )
       .collect()
-    const user = (r as unknown[])[0] as User | undefined
+
+    // collect() returns [results]. For SELECT, results is an array of records.
+    const records = Array.isArray(r) ? (r[0] as unknown[]) : []
+    const user = records[0] as User | undefined
     if (user) {
       state.value = { user }
     }
@@ -89,25 +112,30 @@ async function loadCurrentUser(client: Surreal, email: string): Promise<void> {
  * Mint a new server-side refresh token after a successful signin.
  * Stores the token in sessionStorage and returns it.
  */
-export async function mintRefreshToken(client: Surreal): Promise<string> {
-  const result = await client
+export async function mintRefreshToken(client: Surreal, accessToken: string): Promise<string> {
+  const userId = getUserIdFromToken(accessToken)
+  if (!userId) {
+    throw new Error("Failed to extract user ID from access token")
+  }
+
+  const tokenStr = Array.from(crypto.getRandomValues(new Uint8Array(48)))
+    .map(b => b.toString(36))
+    .join("")
+    .slice(0, 64)
+
+  const createResult = await client
     .query(
-      `{
-        LET $token_str = rand::string(64);
-        CREATE refresh_token SET
-          user = $auth,
-          token = $token_str,
-          expires = time::now() + 7d;
-        RETURN $token_str;
-      }`
+      "CREATE refresh_token SET user = $user_id, token = $token_val, expires = time::now() + 7d",
+      { user_id: userId, token_val: tokenStr }
     )
     .collect()
 
-  const token = (result as unknown[])[0] as string | undefined
-  if (!token) throw new Error("Failed to provision session token context")
+  if (!createResult || (Array.isArray(createResult) && createResult.length === 0)) {
+    throw new Error("Failed to create refresh_token record")
+  }
 
-  sessionStorage.setItem(REFRESH_TOKEN_KEY, token)
-  return token
+  sessionStorage.setItem(REFRESH_TOKEN_KEY, tokenStr)
+  return tokenStr
 }
 
 /**
@@ -120,33 +148,44 @@ export async function rotateRefreshToken(client: Surreal): Promise<string> {
   if (!oldToken) throw new Error("No active refresh token found in storage")
 
   // Re-authenticate the connection using the token exchange parameter
-  await client.signin({
+  const tokens = await client.signin({
     namespace: NS,
     database: DB,
     access: AC,
     variables: { refresh_token: oldToken },
   })
 
-  const result = await client
+  // Extract user ID from the new access token
+  const userId = getUserIdFromToken(tokens.access)
+  if (!userId) {
+    throw new Error("Failed to extract user ID from rotated access token")
+  }
+
+  // Invalidate old token
+  await client.query(
+    "UPDATE refresh_token SET active = false, revoked_at = time::now() WHERE token = $old_token",
+    { old_token: oldToken }
+  )
+
+  // Generate new token and create record
+  const tokenStr = Array.from(crypto.getRandomValues(new Uint8Array(48)))
+    .map(b => b.toString(36))
+    .join("")
+    .slice(0, 64)
+
+  const createResult = await client
     .query(
-      `{
-        UPDATE refresh_token SET active = false, revoked_at = time::now() WHERE token = $old_token;
-        LET $new_token_str = rand::string(64);
-        CREATE refresh_token SET
-          user = $auth,
-          token = $new_token_str,
-          expires = time::now() + 7d;
-        RETURN $new_token_str;
-      }`,
-      { old_token: oldToken }
+      "CREATE refresh_token SET user = $user_id, token = $token_val, expires = time::now() + 7d",
+      { user_id: userId, token_val: tokenStr }
     )
     .collect()
 
-  const newToken = (result as unknown[])[0] as string | undefined
-  if (!newToken) throw new Error("Token rotation rejected by database engine")
+  if (!createResult || (Array.isArray(createResult) && createResult.length === 0)) {
+    throw new Error("Token rotation rejected by database engine")
+  }
 
-  sessionStorage.setItem(REFRESH_TOKEN_KEY, newToken)
-  return newToken
+  sessionStorage.setItem(REFRESH_TOKEN_KEY, tokenStr)
+  return tokenStr
 }
 
 /**
@@ -234,7 +273,7 @@ export function useAuth() {
     await client.use({ namespace: NS, database: DB })
 
     // Mint a server-side refresh token
-    await mintRefreshToken(client)
+    await mintRefreshToken(client, tokens.access)
 
     // Load the user record
     await loadCurrentUser(client, email)
@@ -260,7 +299,7 @@ export function useAuth() {
     await client.use({ namespace: NS, database: DB })
 
     // Mint a server-side refresh token
-    await mintRefreshToken(client)
+    await mintRefreshToken(client, tokens.access)
 
     // Load the user record
     await loadCurrentUser(client, email)
