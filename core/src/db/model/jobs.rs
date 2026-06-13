@@ -54,6 +54,7 @@ pub struct JobData {
   pub enabled: Enabled,
   pub job_shell: String,
   pub job_command: String,
+  pub timeout: Option<surrealdb::types::Duration>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, SurrealValue)]
@@ -66,6 +67,7 @@ pub struct Job {
   pub execution_status: ExecutionStatus,
   pub enabled: Enabled,
   pub assignments: Vec<surrealdb::types::RecordId>,
+  pub timeout: Option<surrealdb::types::Duration>,
   pub created_at: surrealdb::types::Datetime,
   pub updated_at: surrealdb::types::Datetime,
 }
@@ -80,6 +82,8 @@ impl Job {
         DEFINE FIELD IF NOT EXISTS job_name ON TABLE job TYPE string;
         DEFINE FIELD IF NOT EXISTS job_shell ON TABLE job TYPE string;
         DEFINE FIELD IF NOT EXISTS job_command ON TABLE job TYPE string;
+
+        DEFINE FIELD IF NOT EXISTS timeout ON TABLE job TYPE option<duration>;
 
         DEFINE FIELD IF NOT EXISTS job_type ON TABLE job TYPE object FLEXIBLE;
         DEFINE FIELD IF NOT EXISTS execution_status ON TABLE job TYPE object COMPUTED

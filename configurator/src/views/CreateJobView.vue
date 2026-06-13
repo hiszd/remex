@@ -14,6 +14,7 @@ const form = ref({
   job_name: "",
   job_shell: "/bin/bash",
   job_command: "",
+  timeout: "",
   enabled: "Draft" as EnabledVariant,
 })
 
@@ -29,6 +30,7 @@ const mutation = useMutation({
       job_type: { Instant: {} },
       enabled: { [data.enabled]: {} } as Record<string, Record<string, never>>,
       assignments: [],
+      timeout: data.timeout || null,
     }),
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: ["jobs"] })
@@ -99,6 +101,17 @@ const handleSubmit = async () => {
           rows="4"
           required
         ></textarea>
+      </div>
+
+      <div class="form-section">
+        <label for="timeout" class="form-label">Timeout (optional)</label>
+        <input
+          id="timeout"
+          v-model="form.timeout"
+          type="text"
+          class="form-input"
+          placeholder="e.g. 5m, 1h, 30s (leave empty for no timeout)"
+        />
       </div>
 
       <div class="form-section">

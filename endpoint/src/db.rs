@@ -44,5 +44,6 @@ pub mod remex;
 pub async fn migrate(db: &Surreal<Db>) -> Result<(), DbError> {
   endpoint::Session::migrate(db).await?;
   remex::JobCache::migrate(db).await?;
+  remex::ExecutionCache::migrate(db).await?;
   Ok(())
 }

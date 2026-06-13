@@ -39,6 +39,7 @@ export interface Job {
   execution_status: ExecutionStatus
   enabled: Enabled
   assignments: RecordId[]
+  timeout: string | null
   created_at: string
   updated_at: string
 }
@@ -150,6 +151,7 @@ export const FIELD_LABELS: Record<string, string> = {
   exit_code: "Exit Code",
   execution_start: "Started",
   execution_end: "Ended",
+  timeout: "Timeout",
   username: "Username",
   email: "Email",
 }

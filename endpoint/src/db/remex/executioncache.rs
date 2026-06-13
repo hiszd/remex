@@ -19,6 +19,7 @@ use surrealdb::{
 pub struct ExecutionCacheData {
   pub execution_id: String,
   pub execution_info: model::executions::Execution,
+  pub synced: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, SurrealValue, Clone)]
@@ -26,17 +27,18 @@ pub struct ExecutionCache {
   pub id: surrealdb::types::RecordId,
   pub execution_id: String,
   pub execution_info: model::executions::Execution,
+  pub synced: bool,
 }
 
 impl ExecutionCache {
   pub async fn migrate(db: &Surreal<Db>) -> Result<(), DbError> {
-    // this will create the table in the database if it does not already exist
     db.query(
       r"
         USE NS remex DB remex;
         DEFINE TABLE IF NOT EXISTS execution SCHEMAFULL;
         DEFINE FIELD IF NOT EXISTS execution_id ON TABLE execution TYPE string;
         DEFINE FIELD IF NOT EXISTS execution_info ON TABLE execution TYPE object FLEXIBLE;
+        DEFINE FIELD IF NOT EXISTS synced ON TABLE execution TYPE bool DEFAULT false;
       ",
     )
     .await?

@@ -74,6 +74,12 @@ enum Error {
   StdIo(#[from] std::io::Error),
   #[error("No Database Connection")]
   NoDatabaseConnection(String),
+  #[error("Shell not found: {0}")]
+  ShellNotFound(String),
+  #[error("Command timed out")]
+  CommandTimeout,
+  #[error("Invalid client ID: {0}")]
+  InvalidClientId(String),
 }
 
 #[actix_web::main]
@@ -163,6 +169,9 @@ async fn main() -> Result<(), Error> {
 
   tracing::info!("Spawning jobs monitor task");
   tokio::spawn(async_tasks::jobs::monitor_jobs(ctx.clone(), job_injection_tx.clone()));
+
+  tracing::info!("Spawning execution sync loop");
+  tokio::spawn(async_tasks::jobs::execution_sync_loop(ctx.clone()));
 
   // spawn threads to request new jobs and execute them outside of the reconnection loop
   // so they keep generating messages even when the connection is down.

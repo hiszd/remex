@@ -109,6 +109,7 @@ const editForm = ref({
   job_shell: "",
   job_command: "",
   job_type: "",
+  timeout: "",
   enabled: "Draft" as EnabledVariant,
 })
 
@@ -121,6 +122,7 @@ const startEditing = () => {
       job_shell: job.value.job_shell,
       job_command: job.value.job_command,
       job_type: extractEnumVariant(job.value.job_type),
+      timeout: job.value.timeout ?? "",
       enabled: extractEnumVariant(job.value.enabled) as EnabledVariant,
     }
     isEditing.value = true
@@ -133,6 +135,7 @@ const updateMutation = useMutation({
       job_name: updatedJob.job_name,
       job_shell: updatedJob.job_shell,
       job_command: updatedJob.job_command,
+      timeout: updatedJob.timeout || null,
       enabled: makeEnabled(updatedJob.enabled as EnabledVariant),
     }),
   onSuccess: () => {
@@ -228,6 +231,10 @@ const handleViewAssignmentDetails = (item: selectItem) => {
             <textarea v-model="editForm.job_command" class="form-input" rows="4" required></textarea>
           </div>
           <div class="form-group">
+            <label class="form-label">Timeout (optional)</label>
+            <input type="text" v-model="editForm.timeout" class="form-input" placeholder="e.g. 5m, 1h, 30s" />
+          </div>
+          <div class="form-group">
             <label class="form-label">State</label>
             <select v-model="editForm.enabled" class="form-input">
               <option value="Draft">Draft</option>
@@ -256,6 +263,10 @@ const handleViewAssignmentDetails = (item: selectItem) => {
             <div class="info-item">
               <span class="label">Type</span>
               <span class="value">{{ extractEnumVariant(job.job_type) }}</span>
+            </div>
+            <div class="info-item">
+              <span class="label">Timeout</span>
+              <span class="value">{{ job.timeout ?? "No timeout" }}</span>
             </div>
             <div class="info-item">
               <span class="label">Created At</span>

@@ -38,8 +38,8 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub enum JobQueueMessage {
-  Immediate { job: Job },
-  Scheduled { job: Job, execution_time: Instant },
+  Immediate { job: Job, client_id: String },
+  Scheduled { job: Job, execution_time: Instant, client_id: String },
   Remove { id: RecordId },
   SyncFromRemote,
 }
@@ -48,6 +48,7 @@ pub enum JobQueueMessage {
 struct ScheduledJob {
   execution_time: Instant,
   job: Job,
+  client_id: String,
 }
 
 impl Ord for ScheduledJob {
@@ -64,8 +65,7 @@ impl PartialEq for ScheduledJob {
   }
 }
 
-impl Eq for ScheduledJob {
-}
+impl Eq for ScheduledJob {}
 
 pub async fn job_scheduler_loop(
   mut rx: tokio::sync::mpsc::Receiver<JobQueueMessage>,
@@ -87,27 +87,40 @@ pub async fn job_scheduler_loop(
     tokio::select! {
       Some(injection) = rx.recv() => {
       match injection {
-        JobQueueMessage::Immediate { job } => {
+        JobQueueMessage::Immediate { job, client_id } => {
           tracing::debug!("Immediate job received: {}", job.job_name);
+          let job_id = job.id.clone();
           let job_clone = job.clone();
+          let client_id_clone = client_id.clone();
           tokio::spawn(async move {
-            if let Err(e) = execute_job(job_clone).await {
+            if should_skip_job(&job_id).await {
+              tracing::debug!("Skipping immediate job {} (recent execution exists)", job_clone.job_name);
+              return;
+            }
+            if let Err(e) = execute_job(job_clone, &client_id_clone).await {
               tracing::error!("Job execution failed Immediate: {}", e);
             }
           });
         }
-        JobQueueMessage::Scheduled { job, execution_time } => {
+        JobQueueMessage::Scheduled { job, execution_time, client_id } => {
           tracing::debug!("Scheduled job received: {} at {:?}", job.job_name, execution_time);
           if execution_time > now {
             tracing::debug!("Job queued: {} at {:?}", job.job_name, execution_time);
             heap.push(ScheduledJob {
               execution_time,
               job,
+              client_id,
             });
           } else {
+            let job_id = job.id.clone();
             let job_clone = job.clone();
+            let client_id_clone = client_id.clone();
             tokio::spawn(async move {
-              if let Err(e) = execute_job(job_clone).await {
+              if should_skip_job(&job_id).await {
+                tracing::debug!("Skipping scheduled job {} (recent execution exists)", job_clone.job_name);
+                return;
+              }
+              if let Err(e) = execute_job(job_clone, &client_id_clone).await {
                 tracing::error!("Job execution failed: {}", e);
               }
             });
@@ -127,9 +140,15 @@ pub async fn job_scheduler_loop(
       _ = sleep_fut, if next_fire.is_some() => {
         if let Some(scheduled) = heap.pop() {
           tracing::debug!("Scheduled job firing: {}", scheduled.job.job_name);
+          let job_id = scheduled.job.id.clone();
           let job_clone = scheduled.job.clone();
+          let client_id_clone = scheduled.client_id.clone();
           tokio::spawn(async move {
-            if let Err(e) = execute_job(job_clone).await {
+            if should_skip_job(&job_id).await {
+              tracing::debug!("Skipping heap-fired job {} (recent execution exists)", job_clone.job_name);
+              return;
+            }
+            if let Err(e) = execute_job(job_clone, &client_id_clone).await {
               tracing::error!("Job execution failed: {}", e);
             }
           });
@@ -200,13 +219,17 @@ pub async fn sync_and_refill_queue(
         .send(JobQueueMessage::Scheduled {
           job,
           execution_time: exec_time,
+          client_id: client_id.to_string(),
         })
         .await;
       queued_count += 1;
     } else {
       tracing::debug!("Injecting immediate job: {}", job.job_name);
       let _ = job_injection_tx
-        .send(JobQueueMessage::Immediate { job })
+        .send(JobQueueMessage::Immediate {
+          job,
+          client_id: client_id.to_string(),
+        })
         .await;
       queued_count += 1;
     }
@@ -231,6 +254,7 @@ pub async fn clear_local_job_cache() {
 
 pub async fn load_jobs_from_local_db(
   job_injection_tx: &tokio::sync::mpsc::Sender<JobQueueMessage>,
+  client_id: &str,
 ) -> Result<(), crate::Error> {
   println!("Loading cached jobs from local database...");
   tracing::info!("Loading jobs from local database cache");
@@ -264,11 +288,15 @@ pub async fn load_jobs_from_local_db(
         .send(JobQueueMessage::Scheduled {
           job,
           execution_time: exec_time,
+          client_id: client_id.to_string(),
         })
         .await;
     } else {
       let _ = job_injection_tx
-        .send(JobQueueMessage::Immediate { job })
+        .send(JobQueueMessage::Immediate {
+          job,
+          client_id: client_id.to_string(),
+        })
         .await;
     }
   }
@@ -293,73 +321,333 @@ pub async fn load_jobs_from_local_db(
 //   sync_and_refill_queue(job_injection_tx, client_id, groups).await
 // }
 
-/// Runs a command and returns the output as (output, command, exit_code)
-async fn run_command(cmd: &str) -> Result<(String, &str, std::process::ExitStatus), crate::Error> {
-  println!("Running command: {}", cmd);
-  // tracing::debug!("Running command: {} -c {}", job.job_shell, job.job_command);
-  tracing::debug!("Running command: {}", cmd);
-  let output = tokio::process::Command::new("echo")
-    .arg(&cmd)
-    .output()
-    .await;
-
-  let out = output?;
-  let stdout = String::from_utf8_lossy(out.stdout.as_slice()).to_string();
-  let stderr = String::from_utf8_lossy(out.stderr.as_slice()).to_string();
-  tracing::debug!(
-    "Command exit code: {:?}, stdout: {} , stderr: {} ",
-    out.status.code(),
-    String::from_utf8_lossy(out.stdout.as_slice()),
-    String::from_utf8_lossy(out.stderr.as_slice())
-  );
-  Ok((format!("out: {}\nerr: {}", stdout, stderr), cmd, out.status))
+/// Validates that the shell executable exists on the system.
+fn validate_shell(shell: &str) -> Result<(), crate::Error> {
+  use std::path::Path;
+  let path = Path::new(shell);
+  if !path.exists() {
+    return Err(crate::Error::ShellNotFound(shell.to_string()));
+  }
+  if !path.is_file() {
+    return Err(crate::Error::ShellNotFound(shell.to_string()));
+  }
+  Ok(())
 }
 
-async fn execute_job(job: Job) -> Result<(), crate::Error> {
+/// Runs a command using the specified shell and returns (stdout+stderr, exit_status).
+/// Applies an optional timeout.
+async fn run_command(
+  shell: &str,
+  cmd: &str,
+  timeout: Option<Duration>,
+) -> Result<(String, std::process::ExitStatus), crate::Error> {
+  println!("Running command: {} -c {}", shell, cmd);
+  tracing::debug!("Running command: {} -c {}", shell, cmd);
+
+  let output_fut = tokio::process::Command::new(shell)
+    .arg("-c")
+    .arg(cmd)
+    .output();
+
+  let result = if let Some(dur) = timeout {
+    match tokio::time::timeout(dur, output_fut).await {
+      Ok(Ok(output)) => output,
+      Ok(Err(e)) => return Err(crate::Error::from(e)),
+      Err(_) => {
+        return Err(crate::Error::CommandTimeout);
+      }
+    }
+  } else {
+    output_fut.await?
+  };
+
+  let stdout = String::from_utf8_lossy(&result.stdout).to_string();
+  let stderr = String::from_utf8_lossy(&result.stderr).to_string();
+  tracing::debug!(
+    "Command exit code: {:?}, stdout: {}, stderr: {}",
+    result.status.code(),
+    stdout,
+    stderr
+  );
+  Ok((format!("out: {}\nerr: {}", stdout, stderr), result.status))
+}
+
+async fn execute_job(job: Job, client_id: &str) -> Result<(), crate::Error> {
+  use crate::db::remex::ExecutionCache;
   use remex_core::db::{
     model::executions::{
       Execution,
-      ExecutionData,
       ExecutionStatus,
     },
     DbOperator,
   };
 
   println!("Executing job: {}", job.job_name);
+  tracing::info!("Executing job: {} on client {}", job.job_name, client_id);
 
-  let (output_str, command_str, exit_status) = run_command(&job.job_command).await.unwrap();
+  let time_start = surrealdb::types::Datetime::now();
+  let client_id_record = surrealdb::types::RecordId::parse_simple(client_id)
+    .map_err(|e| crate::Error::InvalidClientId(e.to_string()))?;
 
+  // Convert timeout from SurrealDB Duration to std::time::Duration
+  let timeout = job.timeout.as_ref().map(|d| {
+    let secs = d.as_secs().max(1);
+    Duration::from_secs(secs as u64)
+  });
+
+  // Step 1: Create execution record with Running status in local cache
+  let running_execution = Execution {
+    id: surrealdb::types::RecordId::parse_simple(format!("execution:{}", uuid::Uuid::new_v4()).as_str()).unwrap(),
+    job_id: Some(job.id.clone()),
+    client_id: client_id_record.clone(),
+    status: ExecutionStatus::Running,
+    output: String::new(),
+    command: job.job_command.clone(),
+    exit_code: String::new(),
+    execution_start: Some(time_start.clone()),
+    execution_end: None,
+    created_at: surrealdb::types::Datetime::now(),
+    updated_at: surrealdb::types::Datetime::now(),
+  };
+
+  let mut cache_entry = crate::db::remex::ExecutionCacheData {
+    execution_id: running_execution.id.to_sql(),
+    execution_info: running_execution,
+    synced: false,
+  };
+
+  let db = get_local_remex().await?;
+  let created = ExecutionCache::create(cache_entry, &db).await?
+    .ok_or_else(|| crate::Error::DbError(remex_core::db::DbError::OperationFailed(
+      "Failed to create execution cache record".to_string(),
+    )))?;
+
+  tracing::debug!("Created execution cache: {} with status Running", created.id.to_sql());
+
+  // Step 2: Validate shell exists
+  if let Err(e) = validate_shell(&job.job_shell) {
+    tracing::error!("Shell validation failed for job {}: {}", job.job_name, e);
+    let time_end = surrealdb::types::Datetime::now();
+    let mut completed = created;
+    completed.execution_info.status = ExecutionStatus::Failed;
+    completed.execution_info.output = format!("Shell not found: {}\n{}", job.job_shell, e);
+    completed.execution_info.exit_code = "127".to_string();
+    completed.execution_info.execution_end = Some(time_end);
+    completed.execution_info.updated_at = surrealdb::types::Datetime::now();
+    completed.push(&db).await?;
+    return Err(e);
+  }
+
+  // Step 3: Execute command
+  let (output_str, exit_status) = match run_command(&job.job_shell, &job.job_command, timeout).await {
+    Ok(result) => result,
+    Err(crate::Error::CommandTimeout) => {
+      tracing::warn!("Job {} timed out", job.job_name);
+      let time_end = surrealdb::types::Datetime::now();
+      let mut completed = created;
+      completed.execution_info.status = ExecutionStatus::TimedOut;
+      completed.execution_info.output = format!("Command timed out after {:?}", timeout);
+      completed.execution_info.exit_code = "-1".to_string();
+      completed.execution_info.execution_end = Some(time_end);
+      completed.execution_info.updated_at = surrealdb::types::Datetime::now();
+      completed.push(&db).await?;
+      return Ok(());
+    }
+    Err(e) => {
+      tracing::error!("Command execution failed for job {}: {}", job.job_name, e);
+      let time_end = surrealdb::types::Datetime::now();
+      let mut completed = created;
+      completed.execution_info.status = ExecutionStatus::Failed;
+      completed.execution_info.output = format!("Execution error: {}", e);
+      completed.execution_info.exit_code = "1".to_string();
+      completed.execution_info.execution_end = Some(time_end);
+      completed.execution_info.updated_at = surrealdb::types::Datetime::now();
+      completed.push(&db).await?;
+      return Err(e);
+    }
+  };
+
+  // Step 4: Update execution with final status
   let execution_status = if exit_status.success() {
     ExecutionStatus::Completed
   } else {
     ExecutionStatus::Failed
   };
 
-  let time_start = surrealdb::types::Datetime::now();
-  let client_id = surrealdb::types::RecordId::parse_simple("client:self").unwrap();
-  let execution = ExecutionData {
-    job_id: Some(job.id.clone()),
-    client_id,
-    status: execution_status,
-    output: output_str,
-    command: command_str.to_string(),
-    exit_code: exit_status.code().unwrap_or(0).to_string(),
-    execution_start: Some(time_start.clone()),
-    execution_end: Some(surrealdb::types::Datetime::now()),
-    created_at: Some(surrealdb::types::Datetime::now()),
-    updated_at: Some(surrealdb::types::Datetime::now()),
-  };
+  let time_end = surrealdb::types::Datetime::now();
+  let mut completed = created;
+  completed.execution_info.status = execution_status;
+  completed.execution_info.output = output_str;
+  completed.execution_info.exit_code = exit_status.code().unwrap_or(0).to_string();
+  completed.execution_info.execution_end = Some(time_end);
+  completed.execution_info.updated_at = surrealdb::types::Datetime::now();
+  completed.push(&db).await?;
 
-  let db = crate::db::get_local_remex().await?;
-  Execution::create(execution, &db).await?;
+  tracing::info!(
+    "Job {} completed with status: {:?}",
+    job.job_name,
+    completed.execution_info.status
+  );
 
   Ok(())
+}
+
+/// Background loop that syncs unsynced local executions to the remote database.
+/// Runs every 30 seconds. Only pushes when remote DB is connected.
+pub async fn execution_sync_loop(ctx: Arc<Mutex<crate::Context>>) -> Result<(), crate::Error> {
+  use remex_core::db::DbOperator;
+
+  let mut last_cleanup = std::time::Instant::now();
+  const CLEANUP_INTERVAL: Duration = Duration::from_secs(86400); // 24 hours
+
+  loop {
+    tokio::time::sleep(Duration::from_secs(30)).await;
+
+    // Periodic cleanup of old synced executions (every 24 hours)
+    if last_cleanup.elapsed() >= CLEANUP_INTERVAL {
+      last_cleanup = std::time::Instant::now();
+      if let Err(e) = cleanup_old_executions().await {
+        tracing::warn!("Execution cleanup failed: {}", e);
+      }
+    }
+
+    let is_connected = {
+      let ctx_lock = ctx.lock().await;
+      ctx_lock.state.remote_db_connected == ConnState::Connected
+    };
+
+    if !is_connected {
+      tracing::debug!("Remote DB not connected, skipping execution sync");
+      continue;
+    }
+
+    let db = match get_local_remex().await {
+      Ok(d) => d,
+      Err(e) => {
+        tracing::warn!("Failed to get local DB for execution sync: {}", e);
+        continue;
+      }
+    };
+
+    // Query unsynced executions
+    let unsynced: Vec<crate::db::remex::ExecutionCache> = match db
+      .query("USE NS remex DB remex; SELECT * FROM execution WHERE synced = false;")
+      .await
+    {
+      Ok(res) => match res.check() {
+        Ok(mut r) => r.take(1)?,
+        Err(e) => {
+          tracing::warn!("Failed to query unsynced executions: {}", e);
+          continue;
+        }
+      },
+      Err(e) => {
+        tracing::warn!("Failed to query unsynced executions: {}", e);
+        continue;
+      }
+    };
+
+    if unsynced.is_empty() {
+      continue;
+    }
+
+    tracing::info!("Syncing {} unsynced executions to remote", unsynced.len());
+
+    let remote_db = match get_remote_remex().await {
+      Ok(d) => d,
+      Err(e) => {
+        tracing::warn!("Failed to get remote DB for execution sync: {}", e);
+        continue;
+      }
+    };
+
+    for entry in unsynced {
+      let exec = entry.execution_info.clone();
+
+      // Push execution to remote DB
+      match remote_db
+        .query("CREATE execution CONTENT $data")
+        .bind(("data", exec))
+        .await
+      {
+        Ok(result) => {
+          match result.check() {
+            Ok(_) => {
+              // Mark as synced
+              let exec_id = entry.execution_id.clone();
+              let mut synced_entry = entry;
+              synced_entry.synced = true;
+              if let Err(e) = synced_entry.push(&db).await {
+                tracing::warn!("Failed to mark execution as synced: {}", e);
+              } else {
+                tracing::debug!("Synced execution: {}", exec_id);
+              }
+            }
+            Err(e) => {
+              tracing::warn!("Failed to push execution to remote: {}", e);
+            }
+          }
+        }
+        Err(e) => {
+          tracing::warn!("Failed to push execution to remote: {}", e);
+        }
+      }
+    }
+  }
+}
+
+/// Deletes synced executions older than 7 days to prevent unbounded storage growth.
+async fn cleanup_old_executions() -> Result<(), crate::Error> {
+  let db = get_local_remex().await?;
+
+  let result = db
+    .query(
+      "USE NS remex DB remex; DELETE execution WHERE synced = true AND created_at < time::now() - 7d;"
+    )
+    .await?
+    .check()?;
+
+  tracing::info!("Execution cleanup completed: {:?}", result);
+  Ok(())
+}
+
+/// Checks if a job has a recent execution in the local cache to prevent duplicate runs.
+/// Returns true if the job should be skipped.
+pub async fn should_skip_job(job_id: &RecordId) -> bool {
+  let db = match get_local_remex().await {
+    Ok(d) => d,
+    Err(_) => return false,
+  };
+
+  // Look for any execution of this job within the last 5 minutes
+  let recent: Vec<crate::db::remex::ExecutionCache> = match db
+    .query(
+      r"USE NS remex DB remex;
+        SELECT * FROM execution
+        WHERE execution_info.job_id = $job_id
+          AND execution_info.execution_start > time::now() - 5m
+        LIMIT 1;"
+    )
+    .bind(("job_id", job_id.to_sql()))
+    .await
+  {
+    Ok(res) => match res.check() {
+      Ok(mut r) => match r.take(1) {
+        Ok(v) => v,
+        Err(_) => return false,
+      },
+      Err(_) => return false,
+    },
+    Err(_) => return false,
+  };
+
+  !recent.is_empty()
 }
 
 async fn execute_job_old(job: Job) -> Result<(), crate::Error> {
   println!("Executing job: {}", job.job_name);
 
-  let remote_db = get_remote_remex().await?;
+  let _remote_db = get_remote_remex().await?;
   tracing::debug!("Running command: {} -c {}", job.job_shell, job.job_command);
   let output = tokio::process::Command::new("echo")
     .arg(&job.job_command)
@@ -433,7 +721,11 @@ pub async fn monitor_jobs(
 
     if !is_connected {
       tracing::debug!("Remote DB not connected, loading jobs from local cache");
-      if let Err(e) = load_jobs_from_local_db(&job_injection_tx).await {
+      let client_id = {
+        let ctx_lock = ctx.lock().await;
+        ctx_lock.session.client_id.clone().unwrap_or_default()
+      };
+      if let Err(e) = load_jobs_from_local_db(&job_injection_tx, &client_id).await {
         tracing::warn!("Failed to load from local cache: {}", e);
       }
       tokio::time::sleep(Duration::from_secs(5)).await;
@@ -498,15 +790,18 @@ pub async fn monitor_jobs(
                 Action::Create => {
                   tracing::debug!("Job created: {:#?}", notification.data.job_name);
                   let job = notification.data.clone();
+                  let cid = client_id.clone();
 
                   if let Some(exec_time) = calculate_execution_time(&job.job_type) {
                     let _ = job_injection_tx.send(JobQueueMessage::Scheduled {
                       job,
                       execution_time: exec_time,
+                      client_id: cid,
                     }).await;
                   } else {
                     let _ = job_injection_tx.send(JobQueueMessage::Immediate {
                       job,
+                      client_id: cid,
                     }).await;
                   }
                 }
@@ -522,14 +817,17 @@ pub async fn monitor_jobs(
                       .await;
 
                     let job = notification.data.clone();
+                    let cid = client_id.clone();
                     if let Some(exec_time) = calculate_execution_time(&job.job_type) {
                       let _ = job_injection_tx.send(JobQueueMessage::Scheduled {
                         job,
                         execution_time: exec_time,
+                        client_id: cid,
                       }).await;
                     } else {
                       let _ = job_injection_tx.send(JobQueueMessage::Immediate {
                         job,
+                        client_id: cid,
                       }).await;
                     }
 
