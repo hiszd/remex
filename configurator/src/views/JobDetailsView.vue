@@ -130,14 +130,18 @@ const startEditing = () => {
 }
 
 const updateMutation = useMutation({
-  mutationFn: (updatedJob: Partial<typeof editForm.value>) =>
-    updateJob(client, jobId, {
+  mutationFn: (updatedJob: Partial<typeof editForm.value>) => {
+    const payload: Record<string, unknown> = {
       job_name: updatedJob.job_name,
       job_shell: updatedJob.job_shell,
       job_command: updatedJob.job_command,
-      timeout: updatedJob.timeout || null,
       enabled: makeEnabled(updatedJob.enabled as EnabledVariant),
-    }),
+    }
+    if (updatedJob.timeout) {
+      payload.timeout = updatedJob.timeout
+    }
+    return updateJob(client, jobId, payload)
+  },
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: ["job", jobId] })
     isEditing.value = false

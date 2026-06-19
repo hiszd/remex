@@ -14,10 +14,14 @@ use remex_core::db::model::{
     JobType,
   },
 };
-use surrealdb::types::{
-  Action,
-  RecordId,
-  ToSql,
+use surrealdb::{
+  engine::local::Db,
+  types::{
+    Action,
+    RecordId,
+    ToSql,
+  },
+  Surreal,
 };
 use tokio::{
   sync::Mutex,
@@ -38,9 +42,18 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub enum JobQueueMessage {
-  Immediate { job: Job, client_id: String },
-  Scheduled { job: Job, execution_time: Instant, client_id: String },
-  Remove { id: RecordId },
+  Immediate {
+    job: Job,
+    client_id: String,
+  },
+  Scheduled {
+    job: Job,
+    execution_time: Instant,
+    client_id: String,
+  },
+  Remove {
+    id: RecordId,
+  },
   SyncFromRemote,
 }
 
@@ -65,7 +78,8 @@ impl PartialEq for ScheduledJob {
   }
 }
 
-impl Eq for ScheduledJob {}
+impl Eq for ScheduledJob {
+}
 
 pub async fn job_scheduler_loop(
   mut rx: tokio::sync::mpsc::Receiver<JobQueueMessage>,
@@ -192,6 +206,8 @@ pub async fn sync_and_refill_queue(
   client_id: &str,
   groups: &[surrealdb::types::RecordId],
 ) -> Result<(), crate::Error> {
+  use remex_core::db::DbOperator;
+
   println!("Syncing jobs from remote...");
   tracing::info!("Syncing jobs from remote database");
 
@@ -212,6 +228,49 @@ pub async fn sync_and_refill_queue(
       tracing::debug!("Skipping job (not assigned): {}", job.job_name);
       continue;
     }
+
+    let job_id_str = job.id.to_sql();
+    let local_db = get_local_remex().await?;
+
+    // Check if job already exists in local cache
+    let existing: Vec<crate::db::remex::JobCache> = match local_db
+      .query(
+        "USE NS remex DB remex; SELECT * FROM job WHERE job_id = $job_id LIMIT 1;"
+      )
+      .bind(("job_id", job_id_str.clone()))
+      .await
+    {
+      Ok(res) => match res.check() {
+        Ok(mut r) => r.take(1)?,
+        Err(_) => vec![],
+      },
+      Err(_) => vec![],
+    };
+
+    let completed = if let Some(cached) = existing.first() {
+      // Job exists locally — compare updated_at to detect offline modifications
+      let local_updated = cached.job_info.updated_at;
+      let remote_updated = job.updated_at;
+      if local_updated != remote_updated {
+        tracing::debug!(
+          "Job {} was modified while offline, resetting completion status",
+          job.job_name
+        );
+        false // Job changed, needs re-run
+      } else {
+        cached.completed // Preserve existing completion status
+      }
+    } else {
+      false // New job, needs to run
+    };
+
+    // Upsert the job in local cache
+    let cache_entry = crate::db::remex::JobCacheData {
+      job_id: job_id_str.clone(),
+      job_info: job.clone(),
+      completed,
+    };
+    let _ = crate::db::remex::JobCache::create(cache_entry, &local_db).await;
 
     if let Some(exec_time) = calculate_execution_time(&job.job_type) {
       tracing::debug!("Injecting scheduled job: {} at {:?}", job.job_name, exec_time);
@@ -373,7 +432,6 @@ async fn run_command(
 }
 
 async fn execute_job(job: Job, client_id: &str) -> Result<(), crate::Error> {
-  use crate::db::remex::ExecutionCache;
   use remex_core::db::{
     model::executions::{
       Execution,
@@ -381,6 +439,8 @@ async fn execute_job(job: Job, client_id: &str) -> Result<(), crate::Error> {
     },
     DbOperator,
   };
+
+  use crate::db::remex::ExecutionCache;
 
   println!("Executing job: {}", job.job_name);
   tracing::info!("Executing job: {} on client {}", job.job_name, client_id);
@@ -397,7 +457,10 @@ async fn execute_job(job: Job, client_id: &str) -> Result<(), crate::Error> {
 
   // Step 1: Create execution record with Running status in local cache
   let running_execution = Execution {
-    id: surrealdb::types::RecordId::parse_simple(format!("execution:{}", uuid::Uuid::new_v4()).as_str()).unwrap(),
+    id: surrealdb::types::RecordId::parse_simple(
+      format!("execution:{}", uuid::Uuid::new_v4()).as_str(),
+    )
+    .unwrap(),
     job_id: Some(job.id.clone()),
     client_id: client_id_record.clone(),
     status: ExecutionStatus::Running,
@@ -417,10 +480,13 @@ async fn execute_job(job: Job, client_id: &str) -> Result<(), crate::Error> {
   };
 
   let db = get_local_remex().await?;
-  let created = ExecutionCache::create(cache_entry, &db).await?
-    .ok_or_else(|| crate::Error::DbError(remex_core::db::DbError::OperationFailed(
-      "Failed to create execution cache record".to_string(),
-    )))?;
+  let created = ExecutionCache::create(cache_entry, &db)
+    .await?
+    .ok_or_else(|| {
+      crate::Error::DbError(remex_core::db::DbError::OperationFailed(
+        "Failed to create execution cache record".to_string(),
+      ))
+    })?;
 
   tracing::debug!("Created execution cache: {} with status Running", created.id.to_sql());
 
@@ -439,7 +505,8 @@ async fn execute_job(job: Job, client_id: &str) -> Result<(), crate::Error> {
   }
 
   // Step 3: Execute command
-  let (output_str, exit_status) = match run_command(&job.job_shell, &job.job_command, timeout).await {
+  let (output_str, exit_status) = match run_command(&job.job_shell, &job.job_command, timeout).await
+  {
     Ok(result) => result,
     Err(crate::Error::CommandTimeout) => {
       tracing::warn!("Job {} timed out", job.job_name);
@@ -468,7 +535,8 @@ async fn execute_job(job: Job, client_id: &str) -> Result<(), crate::Error> {
   };
 
   // Step 4: Update execution with final status
-  let execution_status = if exit_status.success() {
+  let is_completed = exit_status.success();
+  let execution_status = if is_completed {
     ExecutionStatus::Completed
   } else {
     ExecutionStatus::Failed
@@ -483,6 +551,13 @@ async fn execute_job(job: Job, client_id: &str) -> Result<(), crate::Error> {
   completed.execution_info.updated_at = surrealdb::types::Datetime::now();
   completed.push(&db).await?;
 
+  // Step 5: If successful, mark the job as completed in JobCache
+  if is_completed {
+    if let Err(e) = mark_job_completed(&db, &job.id).await {
+      tracing::warn!("Failed to mark job as completed in cache: {}", e);
+    }
+  }
+
   tracing::info!(
     "Job {} completed with status: {:?}",
     job.job_name,
@@ -492,24 +567,51 @@ async fn execute_job(job: Job, client_id: &str) -> Result<(), crate::Error> {
   Ok(())
 }
 
+/// Marks a job as completed in the local JobCache.
+async fn mark_job_completed(db: &Surreal<Db>, job_id: &RecordId) -> Result<(), crate::Error> {
+  db.query(
+    r"
+      USE NS remex DB remex;
+      LET $cached = (SELECT * FROM job WHERE job_id = $job_id LIMIT 1)[0];
+      IF $cached != NONE {
+        UPDATE $cached.id SET completed = true;
+      };
+    ",
+  )
+  .bind(("job_id", job_id.to_sql()))
+  .await?
+  .check()?;
+  Ok(())
+}
+
+/// Marks a job as not completed in the local JobCache (e.g., when the job is updated).
+pub async fn mark_job_incomplete(job_id: &RecordId) -> Result<(), crate::Error> {
+  let db = get_local_remex().await?;
+  db.query(
+    r"
+      USE NS remex DB remex;
+      LET $cached = (SELECT * FROM job WHERE job_id = $job_id LIMIT 1)[0];
+      IF $cached != NONE {
+        UPDATE $cached.id SET completed = false;
+      };
+    ",
+  )
+  .bind(("job_id", job_id.to_sql()))
+  .await?
+  .check()?;
+  Ok(())
+}
+
 /// Background loop that syncs unsynced local executions to the remote database.
 /// Runs every 30 seconds. Only pushes when remote DB is connected.
+/// Also handles periodic cleanup of old synced executions (every 6 hours, tracked via last_action).
 pub async fn execution_sync_loop(ctx: Arc<Mutex<crate::Context>>) -> Result<(), crate::Error> {
   use remex_core::db::DbOperator;
 
-  let mut last_cleanup = std::time::Instant::now();
-  const CLEANUP_INTERVAL: Duration = Duration::from_secs(86400); // 24 hours
+  const CLEANUP_INTERVAL_SECS: u64 = 6 * 3600; // 6 hours
 
   loop {
     tokio::time::sleep(Duration::from_secs(30)).await;
-
-    // Periodic cleanup of old synced executions (every 24 hours)
-    if last_cleanup.elapsed() >= CLEANUP_INTERVAL {
-      last_cleanup = std::time::Instant::now();
-      if let Err(e) = cleanup_old_executions().await {
-        tracing::warn!("Execution cleanup failed: {}", e);
-      }
-    }
 
     let is_connected = {
       let ctx_lock = ctx.lock().await;
@@ -528,6 +630,38 @@ pub async fn execution_sync_loop(ctx: Arc<Mutex<crate::Context>>) -> Result<(), 
         continue;
       }
     };
+
+    // Check if cleanup should run (every 6 hours, tracked via last_action table)
+    match crate::db::last_action::LastAction::should_skip(
+      &db,
+      "cleanup_executions",
+      CLEANUP_INTERVAL_SECS,
+    )
+    .await
+    {
+      Ok(false) => {
+        // Cleanup hasn't run in 6+ hours, run it
+        if let Err(e) = cleanup_old_executions(&db).await {
+          tracing::warn!("Execution cleanup failed: {}", e);
+        } else {
+          if let Err(e) =
+            crate::db::last_action::LastAction::record(&db, "cleanup_executions").await
+          {
+            tracing::warn!("Failed to record cleanup timestamp: {}", e);
+          }
+          // Also purge old last_action records
+          if let Err(e) = crate::db::last_action::LastAction::cleanup_old(&db).await {
+            tracing::warn!("Failed to purge old last_action records: {}", e);
+          }
+        }
+      }
+      Ok(true) => {
+        // tracing::debug!("Execution cleanup already ran recently, skipping");
+      }
+      Err(e) => {
+        tracing::warn!("Failed to check last_action for cleanup: {}", e);
+      }
+    }
 
     // Query unsynced executions
     let unsynced: Vec<crate::db::remex::ExecutionCache> = match db
@@ -563,6 +697,15 @@ pub async fn execution_sync_loop(ctx: Arc<Mutex<crate::Context>>) -> Result<(), 
 
     for entry in unsynced {
       let exec = entry.execution_info.clone();
+      let exec_id = entry.execution_id.clone();
+
+      // Mark as synced BEFORE pushing to remote to prevent duplicate syncs
+      let mut synced_entry = entry;
+      synced_entry.synced = true;
+      if let Err(e) = synced_entry.push(&db).await {
+        tracing::warn!("Failed to mark execution as synced before push: {}", e);
+        continue;
+      }
 
       // Push execution to remote DB
       match remote_db
@@ -570,26 +713,24 @@ pub async fn execution_sync_loop(ctx: Arc<Mutex<crate::Context>>) -> Result<(), 
         .bind(("data", exec))
         .await
       {
-        Ok(result) => {
-          match result.check() {
-            Ok(_) => {
-              // Mark as synced
-              let exec_id = entry.execution_id.clone();
-              let mut synced_entry = entry;
-              synced_entry.synced = true;
-              if let Err(e) = synced_entry.push(&db).await {
-                tracing::warn!("Failed to mark execution as synced: {}", e);
-              } else {
-                tracing::debug!("Synced execution: {}", exec_id);
-              }
-            }
-            Err(e) => {
-              tracing::warn!("Failed to push execution to remote: {}", e);
-            }
+        Ok(result) => match result.check() {
+          Ok(_) => {
+            tracing::debug!("Synced execution: {}", exec_id);
           }
-        }
+          Err(e) => {
+            tracing::warn!("Failed to push execution to remote, reverting synced flag: {}", e);
+            // Revert synced flag so it will be retried next cycle
+            let mut reverted = synced_entry;
+            reverted.synced = false;
+            let _ = reverted.push(&db).await;
+          }
+        },
         Err(e) => {
-          tracing::warn!("Failed to push execution to remote: {}", e);
+          tracing::warn!("Failed to push execution to remote, reverting synced flag: {}", e);
+          // Revert synced flag so it will be retried next cycle
+          let mut reverted = synced_entry;
+          reverted.synced = false;
+          let _ = reverted.push(&db).await;
         }
       }
     }
@@ -597,9 +738,7 @@ pub async fn execution_sync_loop(ctx: Arc<Mutex<crate::Context>>) -> Result<(), 
 }
 
 /// Deletes synced executions older than 7 days to prevent unbounded storage growth.
-async fn cleanup_old_executions() -> Result<(), crate::Error> {
-  let db = get_local_remex().await?;
-
+async fn cleanup_old_executions(db: &Surreal<Db>) -> Result<(), crate::Error> {
   let result = db
     .query(
       "USE NS remex DB remex; DELETE execution WHERE synced = true AND created_at < time::now() - 7d;"
@@ -611,7 +750,7 @@ async fn cleanup_old_executions() -> Result<(), crate::Error> {
   Ok(())
 }
 
-/// Checks if a job has a recent execution in the local cache to prevent duplicate runs.
+/// Checks if a job has been completed in the local JobCache to prevent duplicate runs.
 /// Returns true if the job should be skipped.
 pub async fn should_skip_job(job_id: &RecordId) -> bool {
   let db = match get_local_remex().await {
@@ -619,15 +758,9 @@ pub async fn should_skip_job(job_id: &RecordId) -> bool {
     Err(_) => return false,
   };
 
-  // Look for any execution of this job within the last 5 minutes
-  let recent: Vec<crate::db::remex::ExecutionCache> = match db
-    .query(
-      r"USE NS remex DB remex;
-        SELECT * FROM execution
-        WHERE execution_info.job_id = $job_id
-          AND execution_info.execution_start > time::now() - 5m
-        LIMIT 1;"
-    )
+  // Check JobCache for completed status
+  let cached: Vec<crate::db::remex::JobCache> = match db
+    .query("USE NS remex DB remex; SELECT * FROM job WHERE job_id = $job_id LIMIT 1;")
     .bind(("job_id", job_id.to_sql()))
     .await
   {
@@ -641,7 +774,8 @@ pub async fn should_skip_job(job_id: &RecordId) -> bool {
     Err(_) => return false,
   };
 
-  !recent.is_empty()
+  // Skip only if the job is marked as completed
+  cached.first().map(|c| c.completed).unwrap_or(false)
 }
 
 async fn execute_job_old(job: Job) -> Result<(), crate::Error> {
@@ -788,9 +922,47 @@ pub async fn monitor_jobs(
               }
               match notification.action {
                 Action::Create => {
+                  use remex_core::db::DbOperator;
                   tracing::debug!("Job created: {:#?}", notification.data.job_name);
                   let job = notification.data.clone();
                   let cid = client_id.clone();
+                  let job_id = job.id.clone();
+
+                  // Check if job already exists in local cache (e.g., from re-sync)
+                  let db = match get_local_remex().await {
+                    Ok(d) => d,
+                    Err(e) => {
+                      tracing::warn!("Failed to get local DB for job cache: {}", e);
+                      return Ok(());
+                    }
+                  };
+                  let existing: Vec<crate::db::remex::JobCache> = match db
+                    .query(
+                      "USE NS remex DB remex; SELECT * FROM job WHERE job_id = $job_id LIMIT 1;"
+                    )
+                    .bind(("job_id", job_id.to_sql()))
+                    .await
+                  {
+                    Ok(res) => match res.check() {
+                      Ok(mut r) => r.take(1)?,
+                      Err(_) => vec![],
+                    },
+                    Err(_) => vec![],
+                  };
+
+                  if existing.is_empty() {
+                    // New job, cache locally with completed = false
+                    let job_id_str = job_id.to_sql();
+                    let cache_entry = crate::db::remex::JobCacheData {
+                      job_id: job_id_str.clone(),
+                      job_info: job.clone(),
+                      completed: false,
+                    };
+                    let _ = crate::db::remex::JobCache::create(cache_entry, &db).await;
+                  }
+
+                  // Mark as incomplete in local cache (new job needs to run)
+                  let _ = mark_job_incomplete(&job_id).await;
 
                   if let Some(exec_time) = calculate_execution_time(&job.job_type) {
                     let _ = job_injection_tx.send(JobQueueMessage::Scheduled {
@@ -806,8 +978,50 @@ pub async fn monitor_jobs(
                   }
                 }
                 Action::Update => {
+                  use remex_core::db::DbOperator;
                   println!("Job updated in remote: {}", notification.data.job_name);
                   tracing::debug!("Job updated: {}", notification.data.job_name);
+
+                  let job_id = notification.data.id.clone();
+                  let updated_job = notification.data.clone();
+
+                  // Update the cached job info and mark as incomplete
+                  let db = match get_local_remex().await {
+                    Ok(d) => d,
+                    Err(e) => {
+                      tracing::warn!("Failed to get local DB for job cache: {}", e);
+                      return Ok(());
+                    }
+                  };
+                  let existing: Vec<crate::db::remex::JobCache> = match db
+                    .query(
+                      "USE NS remex DB remex; SELECT * FROM job WHERE job_id = $job_id LIMIT 1;"
+                    )
+                    .bind(("job_id", job_id.to_sql()))
+                    .await
+                  {
+                    Ok(res) => match res.check() {
+                      Ok(mut r) => r.take(1)?,
+                      Err(_) => vec![],
+                    },
+                    Err(_) => vec![],
+                  };
+
+                  if let Some(cached) = existing.first() {
+                    // Update the cached job info with new data, reset completed
+                    let mut updated = cached.clone();
+                    updated.job_info = updated_job.clone();
+                    updated.completed = false;
+                    let _ = updated.push(&db).await;
+                  } else {
+                    // Job wasn't cached yet, create it
+                    let cache_entry = crate::db::remex::JobCacheData {
+                      job_id: job_id.to_sql(),
+                      job_info: updated_job.clone(),
+                      completed: false,
+                    };
+                    let _ = crate::db::remex::JobCache::create(cache_entry, &db).await;
+                  }
 
                   if notification.data.enabled == Enabled::Enabled {
                     let _ = job_injection_tx

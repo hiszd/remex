@@ -39,10 +39,12 @@ pub async fn get_remote_remex() -> Result<Surreal<Client>, DbError> {
 }
 
 pub mod endpoint;
+pub mod last_action;
 pub mod remex;
 
 pub async fn migrate(db: &Surreal<Db>) -> Result<(), DbError> {
   endpoint::Session::migrate(db).await?;
+  last_action::LastAction::migrate(db).await?;
   remex::JobCache::migrate(db).await?;
   remex::ExecutionCache::migrate(db).await?;
   Ok(())

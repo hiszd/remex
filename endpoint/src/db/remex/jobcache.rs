@@ -19,6 +19,7 @@ use surrealdb::{
 pub struct JobCacheData {
   pub job_id: String,
   pub job_info: model::jobs::Job,
+  pub completed: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, SurrealValue, Clone)]
@@ -26,17 +27,18 @@ pub struct JobCache {
   pub id: surrealdb::types::RecordId,
   pub job_id: String,
   pub job_info: model::jobs::Job,
+  pub completed: bool,
 }
 
 impl JobCache {
   pub async fn migrate(db: &Surreal<Db>) -> Result<(), DbError> {
-    // this will create the table in the database if it does not already exist
     db.query(
       r"
         USE NS remex DB remex;
         DEFINE TABLE IF NOT EXISTS job SCHEMAFULL;
         DEFINE FIELD IF NOT EXISTS job_id ON TABLE job TYPE string;
         DEFINE FIELD IF NOT EXISTS job_info ON TABLE job TYPE object FLEXIBLE;
+        DEFINE FIELD IF NOT EXISTS completed ON TABLE job TYPE bool DEFAULT false;
       ",
     )
     .await?

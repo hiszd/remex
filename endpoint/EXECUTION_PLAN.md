@@ -59,7 +59,7 @@ The endpoint executes jobs independently (offline-first) and reports execution r
 
 **4.1. Duplicate prevention** — before queuing a job, check local `ExecutionCache` for a recent execution of the same job. If one exists within the job's recurring interval (or already completed for one-shot), skip it.
 
-**4.2. Cleanup of synced executions** — after an execution is synced, it's marked `synced = true`. A periodic cleanup task (daily) deletes synced executions older than 7 days. This prevents unbounded local storage growth while keeping enough history for duplicate prevention.
+**4.2. Cleanup of synced executions** — after an execution is synced, it's marked `synced = true`. A periodic cleanup task (every 6 hours, tracked via `last_action` table) deletes synced executions older than 7 days. This prevents unbounded local storage growth while keeping enough history for duplicate prevention. The `last_action` table auto-purges records older than 72 hours.
 
 **4.3. No "closed" status needed** — the combination of `synced` flag + time-based cleanup handles the lifecycle cleanly. The scheduler's duplicate check uses a rolling window, so old synced executions being deleted doesn't cause re-runs.
 
@@ -68,7 +68,7 @@ The endpoint executes jobs independently (offline-first) and reports execution r
 ```
 Job triggered (scheduler/live query)
   ↓
-Check local ExecutionCache for recent execution (duplicate prevention)
+Check local ExecutionCache for recent execution (duplicate prevention, 5min window)
   ↓
 Create Execution with status=Running in local DB
   ↓
@@ -82,9 +82,13 @@ Push unsynced executions to remote DB
   ↓
 Mark local execution as synced=true
   ↓
-[Background: cleanup task daily]
+[Background: cleanup task every 6h, tracked via last_action table]
   ↓
 Delete synced executions older than 7 days
+  ↓
+[last_action table auto-purge every cleanup cycle]
+  ↓
+Delete last_action records older than 72 hours
 ```
 
 ## Key Design Decisions

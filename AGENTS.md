@@ -581,3 +581,17 @@ On job, client, and group tables for CREATE/UPDATE/DELETE operations.
 - Create/update/delete records
 - Verify audit_log entries are created
 - Test querying audit_log for specific records
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in GitHub using the `gh` CLI. External PRs are not treated as a triage surface. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Using default canonical triage labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Multi-context monorepo layout. See `docs/agents/domain.md`.

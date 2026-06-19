@@ -22,16 +22,20 @@ const isSubmitting = ref(false)
 const submitError = ref<string | null>(null)
 
 const mutation = useMutation({
-  mutationFn: (data: typeof form.value) =>
-    createJob(client, {
+  mutationFn: (data: typeof form.value) => {
+    const payload: Record<string, unknown> = {
       job_name: data.job_name,
       job_shell: data.job_shell,
       job_command: data.job_command,
       job_type: { Instant: {} },
       enabled: { [data.enabled]: {} } as Record<string, Record<string, never>>,
       assignments: [],
-      timeout: data.timeout || null,
-    }),
+    }
+    if (data.timeout) {
+      payload.timeout = data.timeout
+    }
+    return createJob(client, payload)
+  },
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: ["jobs"] })
     router.push("/jobs")
