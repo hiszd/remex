@@ -3,7 +3,6 @@ members = ["core", "server", "endpoint", "macros"]
 resolver = "2"
 
 [workspace.dependencies]
-heapless = "0.9.2"
 chrono = { version = "0.4.38", features = ["serde"] }
 tokio = { version = "1.38.1", features = ["full"] }
 tracing = { version = "0.1.40", features = ["async-await"] }

@@ -5,7 +5,6 @@ authors = ["Zion Koyl<hiszd1@gmail.com>"]
 edition = "2021"
 
 [dependencies]
-heapless = { workspace = true }
 chrono = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

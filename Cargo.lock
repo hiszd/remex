@@ -2136,16 +2136,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "heapless"
-version = "0.9.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25ba4bd83f9415b58b4ed8dc5714c76e626a105be4646c02630ad730ad3b5aa4"
-dependencies = [
- "hash32 0.3.1",
- "stable_deref_trait",
-]
-
-[[package]]
 name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3705,7 +3695,6 @@ dependencies = [
  "dotenvy",
  "futures",
  "futures-util",
- "heapless 0.9.3",
  "rand 0.10.1",
  "remex-macros",
  "serde",
@@ -3741,7 +3730,6 @@ dependencies = [
  "futures",
  "futures-util",
  "gethostname",
- "heapless 0.9.3",
  "machine-uid",
  "rand 0.10.1",
  "remex-core",
@@ -3782,7 +3770,6 @@ dependencies = [
  "dotenvy",
  "futures",
  "futures-util",
- "heapless 0.9.3",
  "rand 0.10.1",
  "remex-core",
  "serde",

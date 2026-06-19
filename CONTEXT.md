@@ -19,6 +19,9 @@ A static, user-curated collection of Endpoints. Used to assign Jobs to multiple 
 ### Endpoint
 The physical or virtual machine where the Remex software agent is deployed. It executes jobs and reports status back to the core system. *(Note: Currently represented as the `client` table in the database; slated for migration to `endpoint`)*.
 
+### Synchronization
+The process of pushing locally-cached execution records from an Endpoint to the core database. The Endpoint runs a background sync task that periodically polls its local database for unsynchronized records and pushes them to the remote database. This is a one-way push: the Endpoint never pulls execution records from the core. Synchronization does not cover pulling jobs or group assignments, which are handled by live queries.
+
 ### Job
 An instruction or payload that specifies work to be done. A Job passes through three states: **Draft** (initial creation, not yet active), **Enabled** (active and assigned to Endpoints), and **Disabled** (paused). Only Enabled Jobs trigger executions on their assigned Endpoints.
 

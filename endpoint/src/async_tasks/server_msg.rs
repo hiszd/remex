@@ -1,59 +1,65 @@
-use std::sync::Arc;
-
-use futures::{
-  SinkExt,
-  StreamExt,
-};
-use remex_core::{
-  codec::{
-    self,
-    ClientRequest,
-    DisconnectReason,
-    ServerResponse,
-  },
-  db::{
-    DbError,
-    DbOperator,
-  },
-};
+use futures::{SinkExt, StreamExt};
+use remex_core::codec::{self, ClientRequest, DisconnectReason, ServerResponse};
+use remex_core::db::{BearerGrantResponse, DbOperator};
+use surrealdb::engine::local::Db;
 use surrealdb::types::ToSql;
-use tokio::{
-  net::TcpStream,
-  sync::Mutex,
-};
+use surrealdb::Surreal;
 
-use crate::{
-  utils,
-  ConnState,
-};
+use crate::async_tasks::jobs::monitor::MonitorCommand;
+use crate::utils;
+
+struct MsgState {
+  client_id: Option<surrealdb::types::RecordId>,
+  client_name: String,
+  hardware_hash: String,
+  secret: Option<String>,
+  authenticated: bool,
+}
 
 pub async fn server_msg_loop(
-  ctx: Arc<Mutex<crate::Context>>,
   args_secret: Option<String>,
   args_server: String,
   args_port: String,
-  mut client_request_rx: tokio::sync::mpsc::Receiver<ClientRequest>,
-) -> Result<(), DbError> {
-  // Buffer to hold a message that was popped but failed to send due to disconnect
-  let mut pending_request: Option<codec::ClientRequest> = None;
+  db_token_tx: tokio::sync::mpsc::Sender<(BearerGrantResponse, String)>,
+  monitor_cmd_tx: tokio::sync::mpsc::Sender<MonitorCommand>,
+) -> Result<(), remex_core::db::DbError> {
+  let local_endpoint = crate::db::get_local_endpoint().await?;
+
+  let session = load_or_create_session(&local_endpoint).await;
+  let mut state = MsgState {
+    client_id: session
+      .client_id
+      .clone()
+      .and_then(|s| surrealdb::types::RecordId::parse_simple(&s).ok()),
+    client_name: session.client_name,
+    hardware_hash: session.hardware_hash,
+    secret: session.secret,
+    authenticated: false,
+  };
+
+  let mut pending_request: Option<ClientRequest> = None;
 
   loop {
     println!("Connecting to server");
-    let st = TcpStream::connect(format!("{}:{}", args_server, args_port)).await;
+    let st = tokio::net::TcpStream::connect(format!("{}:{}", args_server, args_port)).await;
     match st {
       Err(e) => {
-        tracing::warn!("Failed to connect to server {}.\nTrying again in 5 seconds", e);
+        tracing::warn!(
+          "Failed to connect to server {}.\nTrying again in 5 seconds",
+          e
+        );
         tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
       }
       Ok(stream) => {
         tracing::info!("Connected to server. Setting up codec");
         let mut framed = actix_codec::Framed::new(stream, codec::ServerCodec);
-        let local_endpoint = crate::db::get_local_endpoint().await?;
 
-        // Flush pending request from a previous failed send before entering the main loop
         if let Some(req) = pending_request.take() {
           if let Err(e) = framed.send(req.clone()).await {
-            tracing::error!("Failed to send pending request: {}\n Trying again in 5 seconds", e);
+            tracing::error!(
+              "Failed to send pending request: {}\n Trying again in 5 seconds",
+              e
+            );
             pending_request = Some(req);
             continue;
           }
@@ -62,10 +68,8 @@ pub async fn server_msg_loop(
         loop {
           tokio::select! {
           msg = framed.next() => {
-
             if let Some(msg) = msg {
-              let mut ctx_lock = ctx.lock().await;
-              let authenticated = ctx_lock.authenticated;
+              let authenticated = state.authenticated;
 
               match msg {
                 Ok(msg) => {
@@ -76,32 +80,31 @@ pub async fn server_msg_loop(
                       }
                       if !authenticated {
                         tracing::debug!("Attempting to authenticate");
-                        match utils::derive_auth(ctx_lock.session.secret.as_ref(), args_secret.as_ref()) {
+                        let auth_type = utils::derive_auth(state.secret.as_ref(), args_secret.as_ref());
+                        match auth_type {
                           Ok(1) => {
-                            if let Err(e) = framed.send(
-                              remex_core::codec::ClientRequest::SigninClient(
-                                ctx_lock.session.secret.clone().unwrap(),
-                                ctx_lock.session.client_name.clone(),
-                                surrealdb::types::RecordId::parse_simple(&ctx_lock.session.client_id.clone().unwrap()).unwrap(),
-                                ctx_lock.session.hardware_hash.clone(),
-                              )
-                            ).await {
-                              tracing::error!("Failed to queue Identify request: {}", e);
-                            } else {
-                              ctx_lock.state.server_connected = ConnState::Connecting;
+                            if let Some(ref secret) = state.secret {
+                              if let Some(ref client_id) = state.client_id {
+                                if let Err(e) = framed.send(ClientRequest::SigninClient(
+                                  secret.clone(),
+                                  state.client_name.clone(),
+                                  client_id.clone(),
+                                  state.hardware_hash.clone(),
+                                )).await {
+                                  tracing::error!("Failed to queue Signin request: {}", e);
+                                }
+                              }
                             }
                           }
                           Ok(2) => {
-                            if let Err(e) = framed.send(
-                              remex_core::codec::ClientRequest::SignupClient(
-                                args_secret.clone().unwrap().clone(),
-                                ctx_lock.session.client_name.clone(),
-                                ctx_lock.session.hardware_hash.clone(),
-                              )
-                            ).await {
-                              tracing::error!("Failed to queue Identify request: {}", e);
-                            } else {
-                              ctx_lock.state.server_connected = ConnState::Connecting;
+                            if let Some(ref args_secret) = args_secret {
+                              if let Err(e) = framed.send(ClientRequest::SignupClient(
+                                args_secret.clone(),
+                                state.client_name.clone(),
+                                state.hardware_hash.clone(),
+                              )).await {
+                                tracing::error!("Failed to queue Signup request: {}", e);
+                              }
                             }
                           }
                           Ok(k) => {
@@ -117,19 +120,11 @@ pub async fn server_msg_loop(
                     }
                     (ServerResponse::Disconnect(reason), _) => {
                       match reason {
-                        DisconnectReason::AuthFailed => {
+                        DisconnectReason::AuthFailed | DisconnectReason::InvalidClientId => {
                           tracing::error!("Authentication failed. Removing stored credentials and quitting. Please restart with a valid --secret.");
                           local_endpoint.query("DELETE session;").await.unwrap();
-                          ctx_lock.authenticated = false;
-                          if ctx_lock.server_secret.is_none() {
-                            std::process::exit(1);
-                          }
-                        }
-                        DisconnectReason::InvalidClientId => {
-                          tracing::error!("Invalid client ID. Removing stored credentials and quitting. Please restart with a valid --secret.");
-                          local_endpoint.query("USE NS remex DB endpoint; DELETE session;").await.unwrap();
-                          ctx_lock.authenticated = false;
-                          if ctx_lock.server_secret.is_none() {
+                          state.authenticated = false;
+                          if args_secret.is_none() {
                             std::process::exit(1);
                           }
                         }
@@ -144,39 +139,33 @@ pub async fn server_msg_loop(
                         }
                       }
                     }
-                    (
-                      ServerResponse::SignedIn(token, secret, server_url),
-                      _,
-                    ) => {
+                    (ServerResponse::SignedIn(token, secret, server_url), _) => {
                       println!("Signed in and received token: {}", &token.grant.key);
-                      if let Some(s) = secret {
-                        ctx_lock.session.secret = Some(s);
+                      state.secret = secret;
+                      state.authenticated = true;
+                      persist_session(&local_endpoint, &state).await;
+
+                      let _ = db_token_tx.send((token, server_url.clone())).await;
+                      if let Some(ref cid) = state.client_id {
+                        let _ = monitor_cmd_tx.send(MonitorCommand::SetClientId(cid.to_sql())).await;
                       }
-                      ctx_lock.session.tkn = Some(token.clone());
-                      ctx_lock.state.server_connected = ConnState::Connected;
-                      ctx_lock.session.db_addr = Some(server_url);
-                      ctx_lock.authenticated = true;
-                      ctx_lock.session.push(&local_endpoint).await.unwrap();
                     }
-                    (
-                      ServerResponse::SignedUp(client_id, token, secret, server_url),
-                      _,
-                    ) => {
+                    (ServerResponse::SignedUp(client_id, token, secret, server_url), _) => {
                       println!("Signed up and received token: {}", &token.grant.key);
-                      ctx_lock.session.secret = Some(secret);
-                      ctx_lock.session.tkn = Some(token.clone());
-                      ctx_lock.session.client_id = Some(client_id.to_sql());
-                      ctx_lock.state.server_connected = ConnState::Connected;
-                      ctx_lock.session.db_addr = Some(server_url);
-                      ctx_lock.authenticated = true;
-                      ctx_lock.session.push(&local_endpoint).await.unwrap();
+                      state.secret = Some(secret);
+                      state.client_id = Some(client_id.clone());
+                      state.authenticated = true;
+                      persist_session(&local_endpoint, &state).await;
+
+                      let _ = db_token_tx.send((token, server_url.clone())).await;
+                      let _ = monitor_cmd_tx
+                        .send(MonitorCommand::SetClientId(client_id.to_sql())).await;
                     }
                     #[allow(unreachable_patterns)]
                     s => {
                       tracing::debug!("Ignored server response: {:#?}", &s);
                     }
                   }
-
                 }
                 Err(e) => {
                   tracing::error!("Failed to receive server message: {}", e);
@@ -184,26 +173,12 @@ pub async fn server_msg_loop(
               }
             } else {
               println!("Server disconnected");
-              let mut c = ctx.lock().await;
-              c.state.server_connected = ConnState::Reconnecting;
-              c.authenticated = false;
-              tracing::info!("Changed connection state: {:?}", c.state.server_connected);
+              state.authenticated = false;
+              tracing::info!("Server disconnected");
               tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
               break;
             }
           }
-            msg = client_request_rx.recv() => {
-              if let Some(m) = msg {
-                if let Err(e) = framed.send(m.clone()).await {
-                  tracing::error!("Failed to send server message: {}", e);
-                  pending_request = Some(m);
-                  break;
-                }
-              } else {
-                tracing::debug!("Server message channel closed");
-                break;
-              };
-            }
           }
         }
       }
@@ -211,124 +186,59 @@ pub async fn server_msg_loop(
   }
 }
 
-// pub async fn process_server_msg(
-//   ctx: Arc<Mutex<crate::Context>>,
-//   args_secret: Option<String>,
-//   mut client_request_rx: tokio::sync::mpsc::Receiver<ClientRequest>,
-//   mut client_request_tx: tokio::sync::mpsc::Sender<ClientRequest>,
-// ) {
-//   loop {
-//     tokio::select! {
-//       msg = client_request_rx.recv() => {
-//         let Some(msg) = msg else {
-//           tracing::info!("Server message channel closed");
-//           return;
-//         };
-//
-//         let mut ctx_lock = ctx.lock().await;
-//         let authenticated = ctx_lock.session.tkn.is_some();
-//
-//         match (msg, authenticated) {
-//           (ServerResponse::Ping, _) => {
-//             tracing::info!("Received Ping");
-//             if let Err(e) = client_request_tx.try_send(ClientRequest::Ping) {
-//               tracing::error!("Failed to queue Ping reply: {}", e);
-//             }
-//             if !authenticated {
-//               tracing::info!("Attempting to authenticate");
-//               match utils::derive_auth(ctx_lock.session.secret.as_ref(), args_secret.as_ref()) {
-//                             Ok(1) => {
-//               if let Err(e) = client_request_tx.try_send(
-//                 remex_core::codec::ClientRequest::SigninClient(
-//                   ctx_lock.session.secret.clone().unwrap(),
-//                   ctx_lock.session.client_name.clone(),
-//                   surrealdb::types::RecordId::parse_simple(&ctx_lock.session.client_id.clone().unwrap()).unwrap(),
-//                   ctx_lock.session.hardware_hash.clone(),
-//                     )
-//               ) {
-//                 tracing::error!("Failed to queue Identify request: {}", e);
-//               } else {
-//                 ctx_lock.state = crate::State::Authenticating;
-//               }
-//                             }
-//                 Ok(2) => {
-//                   if let Err(e) = client_request_tx.try_send(
-//                 remex_core::codec::ClientRequest::SignupClient(
-//                   args_secret.clone().unwrap().clone(),
-//                   ctx_lock.session.client_name.clone(),
-//                   ctx_lock.session.hardware_hash.clone(),
-//                     )
-//               ) {
-//                 tracing::error!("Failed to queue Identify request: {}", e);
-//               } else {
-//                 ctx_lock.state = crate::State::Authenticating;
-//               }
-//                 }
-//                 Ok(k) => {
-//                   tracing::error!("Invalid auth derivation: {}", k);
-//                   std::process::exit(1);
-//                 }
-//                 Err(e) => {
-//                   tracing::error!("{}", e);
-//                   std::process::exit(1);
-//                 }
-//               }
-//             }
-//           }
-//           (ServerResponse::Disconnect(reason), _) => {
-//             match reason {
-//               DisconnectReason::AuthFailed => {
-//                 tracing::error!("Authentication failed. Removing stored credentials and quitting. Please restart with a valid --secret.");
-//                 let _ = crate::fs::id::remove_id();
-//                 let _ = crate::fs::secret::remove_secret();
-//                 std::process::exit(1);
-//               }
-//               DisconnectReason::InvalidClientId => {
-//                 tracing::error!("Invalid client ID. Removing stored credentials and quitting. Please restart with a valid --secret.");
-//                 let _ = crate::fs::id::remove_id();
-//                 let _ = crate::fs::secret::remove_secret();
-//                 std::process::exit(1);
-//               }
-//               DisconnectReason::DuplicateClient => {
-//                 tracing::error!("Duplicate client ID");
-//               }
-//               DisconnectReason::HeartbeatFailed => {
-//                 tracing::error!("Heartbeat failed");
-//               }
-//               DisconnectReason::Unknown(e) => {
-//                 tracing::error!("Unknown disconnect reason: {}", e);
-//               }
-//             }
-//           }
-//           (
-//             ServerResponse::SignedIn(token, secret),
-//             _,
-//           ) => {
-//             tracing::info!("Authenticated and received token: {}", &token.grant.key);
-//             if let Some(s) = secret {
-//               ctx_lock.session.secret = Some(s);
-//             }
-//             ctx_lock.session.tkn = Some(token.clone());
-//             ctx_lock.state = crate::State::Connected;
-//             ctx_lock.session.push(&crate::LOCAL_DB).await.unwrap();
-//           }
-//           (
-//             ServerResponse::SignedUp(client_id, token, secret),
-//             _,
-//           ) => {
-//             tracing::info!("Authenticated and received token: {}", &token.grant.key);
-//             ctx_lock.session.secret = Some(secret);
-//             ctx_lock.session.tkn = Some(token.clone());
-//             ctx_lock.session.client_id = Some(client_id.to_sql());
-//             ctx_lock.state = crate::State::Connected;
-//             ctx_lock.session.push(&crate::LOCAL_DB).await.unwrap();
-//           }
-//           #[allow(unreachable_patterns)]
-//           s => {
-//             tracing::info!("Ignored server response: {:#?}", &s);
-//           }
-//         }
-//       }
-//     }
-//   }
-// }
+async fn load_or_create_session(
+  local_endpoint: &Surreal<Db>,
+) -> crate::db::endpoint::Session {
+  match local_endpoint
+    .query("SELECT * FROM session ORDER BY updated_at DESC LIMIT 1;")
+    .await
+  {
+    Ok(s) => match s.check() {
+      Ok(mut s) => match s.take(1).unwrap_or(None) {
+        Some(session) => session,
+        None => create_new_session(local_endpoint).await,
+      },
+      Err(e) => {
+        tracing::error!("Failed to check session: {}", e);
+        create_new_session(local_endpoint).await
+      }
+    },
+    Err(e) => {
+      tracing::error!("Failed to query session: {}\n Creating a new one instead", e);
+      create_new_session(local_endpoint).await
+    }
+  }
+}
+
+async fn create_new_session(
+  local_endpoint: &Surreal<Db>,
+) -> crate::db::endpoint::Session {
+  crate::db::endpoint::Session::create(
+    crate::db::endpoint::SessionData {
+      client_id: None,
+      hardware_hash: Some(machine_uid::get().unwrap()),
+      client_name: Some(gethostname::gethostname().to_string_lossy().to_string()),
+      db_addr: None,
+      tkn: None,
+      secret: None,
+      groups: vec![],
+    },
+    local_endpoint,
+  )
+  .await
+  .unwrap()
+  .unwrap()
+}
+
+async fn persist_session(local_endpoint: &Surreal<Db>, state: &MsgState) {
+  let data = crate::db::endpoint::SessionData {
+    client_id: state.client_id.as_ref().map(|id| id.to_sql()),
+    hardware_hash: Some(state.hardware_hash.clone()),
+    client_name: Some(state.client_name.clone()),
+    db_addr: None,
+    tkn: None,
+    secret: state.secret.clone(),
+    groups: vec![],
+  };
+  let _ = crate::db::endpoint::Session::create(data, local_endpoint).await;
+}
