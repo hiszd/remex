@@ -47,7 +47,7 @@ impl ExecutionCache {
   }
 }
 
-impl remex_core::db::DbOperator<ExecutionCache, ExecutionCacheData> for ExecutionCache {
+impl remex_core::db::LegacyDbOperator<ExecutionCache, ExecutionCacheData> for ExecutionCache {
   async fn create(
     obj: ExecutionCacheData,
     db: &Surreal<Db>,

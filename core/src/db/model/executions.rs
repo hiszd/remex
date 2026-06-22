@@ -109,7 +109,7 @@ impl Execution {
   }
 }
 
-impl crate::db::DbOperator<Execution, ExecutionData> for Execution {
+impl crate::db::LegacyDbOperator<Execution, ExecutionData> for Execution {
   async fn create(obj: ExecutionData, db: &Surreal<Db>) -> Result<Option<Execution>, DbError> {
     let s: Option<Execution> = db
       .query(

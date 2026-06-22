@@ -1,6 +1,6 @@
 use futures::{SinkExt, StreamExt};
 use remex_core::codec::{self, ClientRequest, DisconnectReason, ServerResponse};
-use remex_core::db::{BearerGrantResponse, DbOperator};
+use remex_core::db::{BearerGrantResponse, LegacyDbOperator};
 use surrealdb::engine::local::Db;
 use surrealdb::types::ToSql;
 use surrealdb::Surreal;

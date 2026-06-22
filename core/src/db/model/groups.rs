@@ -67,7 +67,7 @@ impl Group {
   }
 }
 
-impl crate::db::DbOperator<Group, GroupData> for Group {
+impl crate::db::LegacyDbOperator<Group, GroupData> for Group {
   async fn create(obj: GroupData, db: &Surreal<Db>) -> Result<Option<Group>, DbError> {
     let s: Option<Group> = db
       .query(

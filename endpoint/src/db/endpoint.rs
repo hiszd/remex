@@ -60,7 +60,7 @@ impl Session {
   }
 }
 
-impl remex_core::db::DbOperator<Session, SessionData> for Session {
+impl remex_core::db::LegacyDbOperator<Session, SessionData> for Session {
   async fn create(obj: SessionData, db: &Surreal<Db>) -> Result<Option<Session>, DbError> {
     let s: Option<Session> = db
       .query(

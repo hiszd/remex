@@ -3,14 +3,8 @@ use serde::{
   Serialize,
 };
 use surrealdb::{
-  engine::{
-    any::Any,
-    local::Db,
-  },
-  types::{
-    SurrealValue,
-    ToSql,
-  },
+  engine::any::Any,
+  types::SurrealValue,
   Surreal,
 };
 
@@ -123,65 +117,24 @@ impl Job {
   }
 }
 
-impl crate::db::DbOperator<Job, JobData> for Job {
-  async fn create(obj: JobData, db: &Surreal<Db>) -> Result<Option<Job>, DbError> {
-    let s: Option<Job> = db
-      .query(
-        r"
-        USE NS remex DB remex;
-        CREATE job CONTENT $data
-      ",
-      )
-      .bind(("data", obj))
-      .await?
-      .check()?
-      .take(1)?;
-    if let Some(job) = s {
-      Ok(Some(job.clone()))
-    } else {
-      Err(DbError::OperationFailed("Failed to create job".to_string()))
+impl From<(String, JobData)> for Job {
+  fn from((id, data): (String, JobData)) -> Self {
+    Job {
+      id: surrealdb::types::RecordId::new("job", id.as_str()),
+      job_name: data.job_name,
+      job_shell: data.job_shell,
+      job_command: data.job_command,
+      job_type: data.job_type,
+      execution_status: data.execution_status,
+      enabled: data.enabled,
+      timeout: data.timeout,
+      assignments: Vec::new(),
+      created_at: surrealdb::types::Datetime::default(),
+      updated_at: surrealdb::types::Datetime::default(),
     }
-  }
-  async fn read(id: String, db: &Surreal<Db>) -> Result<Option<Job>, DbError> {
-    Ok(
-      db.query("USE NS remex DB remex; SELECT * FROM job:$id;")
-        .bind(("id", id))
-        .await?
-        .check()?
-        .take(1)?,
-    )
-  }
-  async fn push(&mut self, db: &Surreal<Db>) -> Result<(), DbError> {
-    let s: Option<Job> = db
-      .query("USE NS remex DB remex; UPSERT $id CONTENT $data")
-      .bind(("id", self.id.to_sql()))
-      .bind(("data", self.clone()))
-      .await?
-      .check()?
-      .take(1)?;
-    if let Some(job) = s {
-      *self = job;
-      Ok(())
-    } else {
-      Err(DbError::OperationFailed("Failed to upsert job".to_string()))
-    }
-  }
-
-  async fn pull(&self, db: &Surreal<Db>) -> Result<Option<Job>, DbError> {
-    Ok(
-      db.query("USE NS remex DB remex; SELECT * from $id;")
-        .bind(("id", self.id.to_sql()))
-        .await?
-        .check()?
-        .take(1)?,
-    )
-  }
-
-  async fn delete(&self, db: &Surreal<Db>) -> Result<(), DbError> {
-    db.query("USE NS remex DB remex; DELETE $id;")
-      .bind(("id", self.id.to_sql()))
-      .await?
-      .check()?;
-    Ok(())
   }
 }
+
+use crate::impl_surreal_db_operator;
+
+impl_surreal_db_operator!(pub SurrealJobRepo, Job, JobData, "job", "remex", "remex");

@@ -78,7 +78,7 @@ impl Client {
   }
 }
 
-impl crate::db::DbOperator<Client, ClientData> for Client {
+impl crate::db::LegacyDbOperator<Client, ClientData> for Client {
   async fn create(obj: ClientData, db: &Surreal<Db>) -> Result<Option<Client>, DbError> {
     let s: Option<Client> = db
       .query(

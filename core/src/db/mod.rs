@@ -1,4 +1,5 @@
 use actix::MessageResponse;
+use async_trait::async_trait;
 use serde::{
   Deserialize,
   Serialize,
@@ -17,6 +18,7 @@ use surrealdb::{
   Surreal,
 };
 
+pub mod adapters;
 pub mod connection;
 pub mod model;
 
@@ -30,16 +32,8 @@ pub enum DbError {
   NoDatabaseConnection(String),
 }
 
-/// Trait for database operations
-///
-/// The ReturnType is the return type of the operation, which would be the entire record. Id included
-/// The InputType is the input type of the operation, or the data to be inserted. Id not included
-/// DBOperator<ReturnType, InputType>
-///
-/// Example:
-/// ```rust
-/// ```
-pub trait DbOperator<T, U>
+/// Legacy trait — replaced by the object-safe `DbOperator` trait.
+pub trait LegacyDbOperator<T, U>
 where
   T: surrealdb::types::SurrealValue,
   U: surrealdb::types::SurrealValue,
@@ -64,6 +58,26 @@ where
     &self,
     db: &Surreal<Db>,
   ) -> impl std::future::Future<Output = Result<(), DbError>> + Send;
+}
+
+/// Object-safe database operator seam.
+///
+/// Methods take `&self` so the trait can be used as a trait object
+/// (`Box<dyn DbOperator<Record = X, Input = Y>>`), allowing callers
+/// to swap in an in-memory adapter for testing.
+#[async_trait]
+pub trait DbOperator: Send + Sync {
+  type Record: Send + Sync + 'static;
+  type Input: Send + Sync + 'static;
+
+  /// Insert a new record from input data. Returns the created record (with id).
+  async fn create(&self, input: Self::Input) -> Result<Self::Record, DbError>;
+  /// Fetch a record by string id. Returns `None` if not found.
+  async fn read(&self, id: &str) -> Result<Option<Self::Record>, DbError>;
+  /// Replace a record's content. Returns the updated record.
+  async fn update(&self, id: &str, input: Self::Input) -> Result<Self::Record, DbError>;
+  /// Delete a record by string id.
+  async fn delete(&self, id: &str) -> Result<(), DbError>;
 }
 
 pub async fn migrate(db: &Surreal<Any>) -> Result<(), DbError> {
@@ -109,7 +123,7 @@ pub struct BearerGrantResponse {
 #[derive(Serialize, Deserialize, Debug, SurrealValue, Clone)]
 pub struct GrantDetails {
   pub id: String,
-  pub key: String, // This is the actual token string for the client
+  pub key: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, SurrealValue, Clone)]

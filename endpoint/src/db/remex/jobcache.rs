@@ -47,7 +47,7 @@ impl JobCache {
   }
 }
 
-impl remex_core::db::DbOperator<JobCache, JobCacheData> for JobCache {
+impl remex_core::db::LegacyDbOperator<JobCache, JobCacheData> for JobCache {
   async fn create(obj: JobCacheData, db: &Surreal<Db>) -> Result<Option<JobCache>, DbError> {
     let s: Option<JobCache> = db
       .query(

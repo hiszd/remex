@@ -3,7 +3,7 @@ use std::time::Duration;
 use remex_core::db::{
   model::groups::Group,
   model::jobs::Job,
-  DbOperator,
+  LegacyDbOperator,
 };
 use surrealdb::{engine::remote::ws::Client, types::RecordId, Surreal};
 use surrealdb::types::ToSql;

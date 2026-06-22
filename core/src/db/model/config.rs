@@ -67,7 +67,7 @@ impl Config {
   }
 }
 
-impl crate::db::DbOperator<Config, ConfigData> for Config {
+impl crate::db::LegacyDbOperator<Config, ConfigData> for Config {
   async fn create(obj: ConfigData, db: &Surreal<Db>) -> Result<Option<Config>, DbError> {
     let s: Option<Config> = db
       .query(

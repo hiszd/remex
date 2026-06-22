@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use remex_core::db::{
   model::executions::{Execution, ExecutionStatus},
-  DbOperator,
+  LegacyDbOperator,
 };
 use surrealdb::{engine::local::Db, types::RecordId, Surreal};
 use surrealdb::types::ToSql;
