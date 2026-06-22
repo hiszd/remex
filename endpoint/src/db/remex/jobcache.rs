@@ -8,12 +8,11 @@ use serde::{
 };
 use surrealdb::{
   engine::local::Db,
-  types::{
-    SurrealValue,
-    ToSql,
-  },
+  types::SurrealValue,
   Surreal,
 };
+
+use remex_core::impl_surreal_db_operator;
 
 #[derive(Debug, Serialize, Deserialize, SurrealValue, Clone)]
 pub struct JobCacheData {
@@ -30,7 +29,25 @@ pub struct JobCache {
   pub completed: bool,
 }
 
+impl From<(String, JobCacheData)> for JobCache {
+  fn from((id, data): (String, JobCacheData)) -> Self {
+    JobCache {
+      id: surrealdb::types::RecordId::new("job", id.as_str()),
+      job_id: data.job_id,
+      job_info: data.job_info,
+      completed: data.completed,
+    }
+  }
+}
+
 impl JobCache {
+  pub fn cache_id(&self) -> String {
+    match &self.id.key {
+      surrealdb::types::RecordIdKey::String(s) => s.clone(),
+      _ => panic!("expected string key"),
+    }
+  }
+
   pub async fn migrate(db: &Surreal<Db>) -> Result<(), DbError> {
     db.query(
       r"
@@ -47,65 +64,4 @@ impl JobCache {
   }
 }
 
-impl remex_core::db::LegacyDbOperator<JobCache, JobCacheData> for JobCache {
-  async fn create(obj: JobCacheData, db: &Surreal<Db>) -> Result<Option<JobCache>, DbError> {
-    let s: Option<JobCache> = db
-      .query(
-        r"
-        USE NS remex DB remex;
-        CREATE job CONTENT $data;
-      ",
-      )
-      .bind(("data", obj))
-      .await?
-      .check()?
-      .take(1)?;
-    if let Some(job) = s {
-      Ok(Some(job.clone()))
-    } else {
-      Err(DbError::OperationFailed("Failed to create job".to_string()))
-    }
-  }
-  async fn read(id: String, db: &Surreal<Db>) -> Result<Option<JobCache>, DbError> {
-    Ok(
-      db.query("USE NS remex DB remex; SELECT * FROM job WHERE id = $id;")
-        .bind(("id", id))
-        .await?
-        .check()?
-        .take(1)?,
-    )
-  }
-  async fn push(&mut self, db: &Surreal<Db>) -> Result<(), DbError> {
-    tracing::debug!("Pushing job: {}", serde_json::to_string_pretty(self).unwrap());
-    let s: Option<JobCache> = db
-      .query(format!("USE NS remex DB remex; UPSERT job:{} CONTENT $data;", self.id.key.to_sql()))
-      .bind(("data", self.clone()))
-      .await?
-      .check()?
-      .take(1)?;
-    if let Some(job) = s {
-      *self = job.clone();
-      Ok(())
-    } else {
-      Err(DbError::OperationFailed("Failed to upsert job".to_string()))
-    }
-  }
-
-  async fn pull(&self, db: &Surreal<Db>) -> Result<Option<JobCache>, DbError> {
-    Ok(
-      db.query("USE NS remex DB remex; SELECT * FROM job WHERE id = $id;")
-        .bind(("id", self.id.key.clone()))
-        .await?
-        .check()?
-        .take(1)?,
-    )
-  }
-
-  async fn delete(&self, db: &Surreal<Db>) -> Result<(), DbError> {
-    db.query("USE NS remex DB remex; DELETE job WHERE id = $id;")
-      .bind(("id", self.id.key.clone()))
-      .await?
-      .check()?;
-    Ok(())
-  }
-}
+impl_surreal_db_operator!(pub SurrealJobCacheRepo, JobCache, JobCacheData, "job", "remex", "remex");

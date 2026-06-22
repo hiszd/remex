@@ -3,13 +3,15 @@ use std::time::Duration;
 use remex_core::db::{
   model::groups::Group,
   model::jobs::Job,
-  LegacyDbOperator,
+  DbOperator,
 };
 use surrealdb::{engine::remote::ws::Client, types::RecordId, Surreal};
 use surrealdb::types::ToSql;
 use tokio::sync::watch;
 
 use super::JobQueueMessage;
+
+use crate::db::remex::{ExecutionCacheData, SurrealExecutionCacheRepo};
 
 pub async fn sync_groups(
   client_id: &str,
@@ -46,7 +48,7 @@ pub async fn sync_and_refill_queue(
   groups: &[RecordId],
   remote_db: &Surreal<Client>,
 ) -> Result<(), crate::Error> {
-  use crate::db::remex::JobCache;
+  use crate::db::remex::{JobCache, JobCacheData, SurrealJobCacheRepo};
 
   println!("Syncing jobs from remote...");
   tracing::info!("Syncing jobs from remote database");
@@ -101,12 +103,13 @@ pub async fn sync_and_refill_queue(
       false
     };
 
-    let cache_entry = crate::db::remex::JobCacheData {
+    let cache_entry = JobCacheData {
       job_id: job_id_str.clone(),
       job_info: job.clone(),
       completed,
     };
-    let _ = JobCache::create(cache_entry, &local_db).await;
+    let repo = SurrealJobCacheRepo { db: local_db.clone() };
+    let _ = repo.create(cache_entry).await;
 
     if let Some(exec_time) = super::calculate_execution_time(&job.job_type) {
       tracing::debug!("Injecting scheduled job: {} at {:?}", job.job_name, exec_time);
@@ -226,13 +229,19 @@ pub async fn execution_sync_loop(
 
     tracing::info!("Syncing {} unsynced executions to remote", unsynced.len());
 
+    let repo = SurrealExecutionCacheRepo { db: db.clone() };
+
     for entry in unsynced {
       let exec = entry.execution_info.clone();
       let exec_id = entry.execution_id.clone();
+      let cache_id = entry.cache_id();
 
-      let mut synced_entry = entry;
-      synced_entry.synced = true;
-      if let Err(e) = synced_entry.push(&db).await {
+      let data = ExecutionCacheData {
+        execution_id: exec_id.clone(),
+        execution_info: exec.clone(),
+        synced: true,
+      };
+      if let Err(e) = repo.update(&cache_id, data).await {
         tracing::warn!("Failed to mark execution as synced before push: {}", e);
         continue;
       }
@@ -248,16 +257,22 @@ pub async fn execution_sync_loop(
           }
           Err(e) => {
             tracing::warn!("Failed to push execution to remote, reverting synced flag: {}", e);
-            let mut reverted = synced_entry;
-            reverted.synced = false;
-            let _ = reverted.push(&db).await;
+            let revert_data = ExecutionCacheData {
+              execution_id: exec_id,
+              execution_info: entry.execution_info.clone(),
+              synced: false,
+            };
+            let _ = repo.update(&cache_id, revert_data).await;
           }
         },
         Err(e) => {
           tracing::warn!("Failed to push execution to remote, reverting synced flag: {}", e);
-          let mut reverted = synced_entry;
-          reverted.synced = false;
-          let _ = reverted.push(&db).await;
+          let revert_data = ExecutionCacheData {
+            execution_id: exec_id,
+            execution_info: entry.execution_info.clone(),
+            synced: false,
+          };
+          let _ = repo.update(&cache_id, revert_data).await;
         }
       }
     }

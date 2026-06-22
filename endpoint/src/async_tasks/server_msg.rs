@@ -1,6 +1,6 @@
 use futures::{SinkExt, StreamExt};
 use remex_core::codec::{self, ClientRequest, DisconnectReason, ServerResponse};
-use remex_core::db::{BearerGrantResponse, LegacyDbOperator};
+use remex_core::db::{BearerGrantResponse, DbOperator};
 use surrealdb::engine::local::Db;
 use surrealdb::types::ToSql;
 use surrealdb::Surreal;
@@ -213,24 +213,23 @@ async fn load_or_create_session(
 async fn create_new_session(
   local_endpoint: &Surreal<Db>,
 ) -> crate::db::endpoint::Session {
-  crate::db::endpoint::Session::create(
-    crate::db::endpoint::SessionData {
-      client_id: None,
-      hardware_hash: Some(machine_uid::get().unwrap()),
-      client_name: Some(gethostname::gethostname().to_string_lossy().to_string()),
-      db_addr: None,
-      tkn: None,
-      secret: None,
-      groups: vec![],
-    },
-    local_endpoint,
-  )
+  use crate::db::endpoint::SurrealSessionRepo;
+  let repo = SurrealSessionRepo { db: local_endpoint.clone() };
+  repo.create(crate::db::endpoint::SessionData {
+    client_id: None,
+    hardware_hash: Some(machine_uid::get().unwrap()),
+    client_name: Some(gethostname::gethostname().to_string_lossy().to_string()),
+    db_addr: None,
+    tkn: None,
+    secret: None,
+    groups: vec![],
+  })
   .await
-  .unwrap()
   .unwrap()
 }
 
 async fn persist_session(local_endpoint: &Surreal<Db>, state: &MsgState) {
+  use crate::db::endpoint::SurrealSessionRepo;
   let data = crate::db::endpoint::SessionData {
     client_id: state.client_id.as_ref().map(|id| id.to_sql()),
     hardware_hash: Some(state.hardware_hash.clone()),
@@ -240,5 +239,6 @@ async fn persist_session(local_endpoint: &Surreal<Db>, state: &MsgState) {
     secret: state.secret.clone(),
     groups: vec![],
   };
-  let _ = crate::db::endpoint::Session::create(data, local_endpoint).await;
+  let repo = SurrealSessionRepo { db: local_endpoint.clone() };
+  let _ = repo.create(data).await;
 }

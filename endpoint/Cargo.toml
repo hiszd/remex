@@ -36,3 +36,4 @@ futures = { workspace = true }
 sha2 = { workspace = true }
 surrealdb.workspace = true
 thiserror = { workspace = true }
+async-trait.workspace = true

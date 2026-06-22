@@ -3,14 +3,8 @@ use serde::{
   Serialize,
 };
 use surrealdb::{
-  engine::{
-    any::Any,
-    local::Db,
-  },
-  types::{
-    SurrealValue,
-    ToSql,
-  },
+  engine::any::Any,
+  types::SurrealValue,
   Surreal,
 };
 
@@ -67,65 +61,18 @@ impl Group {
   }
 }
 
-impl crate::db::LegacyDbOperator<Group, GroupData> for Group {
-  async fn create(obj: GroupData, db: &Surreal<Db>) -> Result<Option<Group>, DbError> {
-    let s: Option<Group> = db
-      .query(
-        r"
-        USE NS remex DB remex;
-        CREATE group CONTENT $data
-      ",
-      )
-      .bind(("data", obj))
-      .await?
-      .check()?
-      .take(1)?;
-    if let Some(group) = s {
-      Ok(Some(group.clone()))
-    } else {
-      Err(DbError::OperationFailed("Failed to create group".to_string()))
+impl From<(String, GroupData)> for Group {
+  fn from((id, data): (String, GroupData)) -> Self {
+    Group {
+      id: surrealdb::types::RecordId::new("group", id.as_str()),
+      group_name: data.group_name,
+      created_at: data.created_at,
+      updated_at: data.updated_at,
+      members: data.members,
     }
-  }
-  async fn read(id: String, db: &Surreal<Db>) -> Result<Option<Group>, DbError> {
-    Ok(
-      db.query("USE NS remex DB remex; SELECT * FROM group WHERE id = $id;")
-        .bind(("id", id))
-        .await?
-        .check()?
-        .take(1)?,
-    )
-  }
-  async fn push(&mut self, db: &Surreal<Db>) -> Result<(), DbError> {
-    let s: Option<Group> = db
-      .query("USE NS remex DB remex; UPSERT $id CONTENT $data")
-      .bind(("id", self.id.to_sql()))
-      .bind(("data", self.clone()))
-      .await?
-      .check()?
-      .take(1)?;
-    if let Some(group) = s {
-      *self = group;
-      Ok(())
-    } else {
-      Err(DbError::OperationFailed("Failed to upsert group".to_string()))
-    }
-  }
-
-  async fn pull(&self, db: &Surreal<Db>) -> Result<Option<Group>, DbError> {
-    Ok(
-      db.query("USE NS remex DB remex; SELECT * FROM $id;")
-        .bind(("id", self.id.to_sql()))
-        .await?
-        .check()?
-        .take(1)?,
-    )
-  }
-
-  async fn delete(&self, db: &Surreal<Db>) -> Result<(), DbError> {
-    db.query("USE NS remex DB remex; DELETE $id;")
-      .bind(("id", self.id.to_sql()))
-      .await?
-      .check()?;
-    Ok(())
   }
 }
+
+use crate::impl_surreal_db_operator;
+
+impl_surreal_db_operator!(pub SurrealGroupRepo, Group, GroupData, "group", "remex", "remex");

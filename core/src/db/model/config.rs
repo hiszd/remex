@@ -3,14 +3,8 @@ use serde::{
   Serialize,
 };
 use surrealdb::{
-  engine::{
-    any::Any,
-    local::Db,
-  },
-  types::{
-    SurrealValue,
-    ToSql,
-  },
+  engine::any::Any,
+  types::SurrealValue,
   Surreal,
 };
 
@@ -67,65 +61,17 @@ impl Config {
   }
 }
 
-impl crate::db::LegacyDbOperator<Config, ConfigData> for Config {
-  async fn create(obj: ConfigData, db: &Surreal<Db>) -> Result<Option<Config>, DbError> {
-    let s: Option<Config> = db
-      .query(
-        r"
-        USE NS remex DB config;
-        CREATE config CONTENT $data
-      ",
-      )
-      .bind(("data", obj))
-      .await?
-      .check()?
-      .take(1)?;
-    if let Some(config) = s {
-      Ok(Some(config.clone()))
-    } else {
-      Err(DbError::OperationFailed("Failed to create config".to_string()))
+impl From<(String, ConfigData)> for Config {
+  fn from((id, data): (String, ConfigData)) -> Self {
+    Config {
+      id: surrealdb::types::RecordId::new("config", id.as_str()),
+      group_name: data.group_name,
+      created_at: data.created_at,
+      updated_at: data.updated_at,
     }
-  }
-  async fn read(id: String, db: &Surreal<Db>) -> Result<Option<Config>, DbError> {
-    Ok(
-      db.query("USE NS remex DB config; SELECT * FROM config WHERE id = $id;")
-        .bind(("id", id))
-        .await?
-        .check()?
-        .take(1)?,
-    )
-  }
-  async fn push(&mut self, db: &Surreal<Db>) -> Result<(), DbError> {
-    let s: Option<Config> = db
-      .query("USE NS remex DB config; UPSERT $id CONTENT $data")
-      .bind(("id", self.id.to_sql()))
-      .bind(("data", self.clone()))
-      .await?
-      .check()?
-      .take(1)?;
-    if let Some(config) = s {
-      *self = config;
-      Ok(())
-    } else {
-      Err(DbError::OperationFailed("Failed to upsert config".to_string()))
-    }
-  }
-
-  async fn pull(&self, db: &Surreal<Db>) -> Result<Option<Config>, DbError> {
-    Ok(
-      db.query("USE NS remex DB config; SELECT * FROM $id;")
-        .bind(("id", self.id.to_sql()))
-        .await?
-        .check()?
-        .take(1)?,
-    )
-  }
-
-  async fn delete(&self, db: &Surreal<Db>) -> Result<(), DbError> {
-    db.query("USE NS remex DB config; DELETE $id;")
-      .bind(("id", self.id.to_sql()))
-      .await?
-      .check()?;
-    Ok(())
   }
 }
+
+use crate::impl_surreal_db_operator;
+
+impl_surreal_db_operator!(pub SurrealConfigRepo, Config, ConfigData, "config", "remex", "config");

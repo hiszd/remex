@@ -3,11 +3,7 @@ use serde::{
   Serialize,
 };
 use surrealdb::{
-  engine::{
-    any::Any,
-    local::Db,
-  },
-  types::ToSql,
+  engine::any::Any,
   Surreal,
 };
 
@@ -78,65 +74,21 @@ impl Client {
   }
 }
 
-impl crate::db::LegacyDbOperator<Client, ClientData> for Client {
-  async fn create(obj: ClientData, db: &Surreal<Db>) -> Result<Option<Client>, DbError> {
-    let s: Option<Client> = db
-      .query(
-        r"
-        USE NS remex DB remex;
-        CREATE client CONTENT $data
-      ",
-      )
-      .bind(("data", obj))
-      .await?
-      .check()?
-      .take(1)?;
-    if let Some(client) = s {
-      Ok(Some(client.clone()))
-    } else {
-      Err(DbError::OperationFailed("Failed to create client".to_string()))
+impl From<(String, ClientData)> for Client {
+  fn from((id, data): (String, ClientData)) -> Self {
+    Client {
+      id: surrealdb::types::RecordId::new("client", id.as_str()),
+      client_name: data.client_name,
+      secret: data.secret,
+      hardware_hash: data.hardware_hash,
+      last_seen: data.last_seen,
+      connection_history: data.connection_history,
+      created_at: surrealdb::types::Datetime::default(),
+      updated_at: surrealdb::types::Datetime::default(),
     }
-  }
-  async fn read(id: String, db: &Surreal<Db>) -> Result<Option<Client>, DbError> {
-    Ok(
-      db.query("USE NS remex DB remex; SELECT * FROM client WHERE id = $id;")
-        .bind(("id", id))
-        .await?
-        .check()?
-        .take(1)?,
-    )
-  }
-  async fn push(&mut self, db: &Surreal<Db>) -> Result<(), DbError> {
-    let s: Option<Client> = db
-      .query("USE NS remex DB remex; UPSERT $id CONTENT $data")
-      .bind(("id", self.id.to_sql()))
-      .bind(("data", self.clone()))
-      .await?
-      .check()?
-      .take(1)?;
-    if let Some(client) = s {
-      *self = client;
-      Ok(())
-    } else {
-      Err(DbError::OperationFailed("Failed to upsert client".to_string()))
-    }
-  }
-
-  async fn pull(&self, db: &Surreal<Db>) -> Result<Option<Client>, DbError> {
-    Ok(
-      db.query("USE NS remex DB remex; SELECT * FROM $id;")
-        .bind(("id", self.id.to_sql()))
-        .await?
-        .check()?
-        .take(1)?,
-    )
-  }
-
-  async fn delete(&self, db: &Surreal<Db>) -> Result<(), DbError> {
-    db.query("USE NS remex DB remex; DELETE $id;")
-      .bind(("id", self.id.to_sql()))
-      .await?
-      .check()?;
-    Ok(())
   }
 }
+
+use crate::impl_surreal_db_operator;
+
+impl_surreal_db_operator!(pub SurrealClientRepo, Client, ClientData, "client", "remex", "remex");

@@ -2,12 +2,15 @@ use std::time::Duration;
 
 use remex_core::db::{
   model::executions::{Execution, ExecutionStatus},
-  LegacyDbOperator,
+  DbOperator,
 };
 use surrealdb::{engine::local::Db, types::RecordId, Surreal};
 use surrealdb::types::ToSql;
 
-use crate::db::{remex::ExecutionCache, get_local_remex};
+use crate::db::{
+  get_local_remex,
+  remex::{ExecutionCacheData, SurrealExecutionCacheRepo},
+};
 
 fn validate_shell(shell: &str) -> Result<(), crate::Error> {
   use std::path::Path;
@@ -129,33 +132,33 @@ pub async fn execute_job(job: remex_core::db::model::jobs::Job, client_id: &str)
     updated_at: surrealdb::types::Datetime::now(),
   };
 
-  let cache_entry = crate::db::remex::ExecutionCacheData {
+  let cache_entry = ExecutionCacheData {
     execution_id: running_execution.id.to_sql(),
     execution_info: running_execution,
     synced: false,
   };
 
   let db = get_local_remex().await?;
-  let created = ExecutionCache::create(cache_entry, &db)
-    .await?
-    .ok_or_else(|| {
-      crate::Error::DbError(remex_core::db::DbError::OperationFailed(
-        "Failed to create execution cache record".to_string(),
-      ))
-    })?;
+  let repo = SurrealExecutionCacheRepo { db: db.clone() };
+  let created = repo.create(cache_entry).await?;
+  let cache_id = created.cache_id();
 
   tracing::debug!("Created execution cache: {} with status Running", created.id.to_sql());
 
   if let Err(e) = validate_shell(&job.job_shell) {
     tracing::error!("Shell validation failed for job {}: {}", job.job_name, e);
     let time_end = surrealdb::types::Datetime::now();
-    let mut completed = created;
-    completed.execution_info.status = ExecutionStatus::Failed;
-    completed.execution_info.output = format!("Shell not found: {}\n{}", job.job_shell, e);
-    completed.execution_info.exit_code = "127".to_string();
-    completed.execution_info.execution_end = Some(time_end);
-    completed.execution_info.updated_at = surrealdb::types::Datetime::now();
-    completed.push(&db).await?;
+    let mut data = ExecutionCacheData {
+      execution_id: created.execution_id,
+      execution_info: created.execution_info,
+      synced: created.synced,
+    };
+    data.execution_info.status = ExecutionStatus::Failed;
+    data.execution_info.output = format!("Shell not found: {}\n{}", job.job_shell, e);
+    data.execution_info.exit_code = "127".to_string();
+    data.execution_info.execution_end = Some(time_end);
+    data.execution_info.updated_at = surrealdb::types::Datetime::now();
+    repo.update(&cache_id, data).await?;
     return Err(e);
   }
 
@@ -165,25 +168,33 @@ pub async fn execute_job(job: remex_core::db::model::jobs::Job, client_id: &str)
     Err(crate::Error::CommandTimeout) => {
       tracing::warn!("Job {} timed out", job.job_name);
       let time_end = surrealdb::types::Datetime::now();
-      let mut completed = created;
-      completed.execution_info.status = ExecutionStatus::TimedOut;
-      completed.execution_info.output = format!("Command timed out after {:?}", timeout);
-      completed.execution_info.exit_code = "-1".to_string();
-      completed.execution_info.execution_end = Some(time_end);
-      completed.execution_info.updated_at = surrealdb::types::Datetime::now();
-      completed.push(&db).await?;
+      let mut data = ExecutionCacheData {
+        execution_id: created.execution_id,
+        execution_info: created.execution_info,
+        synced: created.synced,
+      };
+      data.execution_info.status = ExecutionStatus::TimedOut;
+      data.execution_info.output = format!("Command timed out after {:?}", timeout);
+      data.execution_info.exit_code = "-1".to_string();
+      data.execution_info.execution_end = Some(time_end);
+      data.execution_info.updated_at = surrealdb::types::Datetime::now();
+      repo.update(&cache_id, data).await?;
       return Ok(());
     }
     Err(e) => {
       tracing::error!("Command execution failed for job {}: {}", job.job_name, e);
       let time_end = surrealdb::types::Datetime::now();
-      let mut completed = created;
-      completed.execution_info.status = ExecutionStatus::Failed;
-      completed.execution_info.output = format!("Execution error: {}", e);
-      completed.execution_info.exit_code = "1".to_string();
-      completed.execution_info.execution_end = Some(time_end);
-      completed.execution_info.updated_at = surrealdb::types::Datetime::now();
-      completed.push(&db).await?;
+      let mut data = ExecutionCacheData {
+        execution_id: created.execution_id,
+        execution_info: created.execution_info,
+        synced: created.synced,
+      };
+      data.execution_info.status = ExecutionStatus::Failed;
+      data.execution_info.output = format!("Execution error: {}", e);
+      data.execution_info.exit_code = "1".to_string();
+      data.execution_info.execution_end = Some(time_end);
+      data.execution_info.updated_at = surrealdb::types::Datetime::now();
+      repo.update(&cache_id, data).await?;
       return Err(e);
     }
   };
@@ -196,13 +207,17 @@ pub async fn execute_job(job: remex_core::db::model::jobs::Job, client_id: &str)
   };
 
   let time_end = surrealdb::types::Datetime::now();
-  let mut completed = created;
-  completed.execution_info.status = execution_status;
-  completed.execution_info.output = output_str;
-  completed.execution_info.exit_code = exit_status.code().unwrap_or(0).to_string();
-  completed.execution_info.execution_end = Some(time_end);
-  completed.execution_info.updated_at = surrealdb::types::Datetime::now();
-  completed.push(&db).await?;
+  let mut data = ExecutionCacheData {
+    execution_id: created.execution_id,
+    execution_info: created.execution_info,
+    synced: created.synced,
+  };
+  data.execution_info.status = execution_status.clone();
+  data.execution_info.output = output_str;
+  data.execution_info.exit_code = exit_status.code().unwrap_or(0).to_string();
+  data.execution_info.execution_end = Some(time_end);
+  data.execution_info.updated_at = surrealdb::types::Datetime::now();
+  repo.update(&cache_id, data).await?;
 
   if is_completed {
     if let Err(e) = mark_job_completed(&db, &job.id).await {
@@ -213,7 +228,7 @@ pub async fn execute_job(job: remex_core::db::model::jobs::Job, client_id: &str)
   tracing::info!(
     "Job {} completed with status: {:?}",
     job.job_name,
-    completed.execution_info.status
+    execution_status
   );
 
   Ok(())

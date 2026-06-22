@@ -8,12 +8,11 @@ use serde::{
 };
 use surrealdb::{
   engine::local::Db,
-  types::{
-    SurrealValue,
-    ToSql,
-  },
+  types::SurrealValue,
   Surreal,
 };
+
+use remex_core::impl_surreal_db_operator;
 
 #[derive(Debug, Serialize, Deserialize, SurrealValue, Clone)]
 pub struct ExecutionCacheData {
@@ -30,7 +29,25 @@ pub struct ExecutionCache {
   pub synced: bool,
 }
 
+impl From<(String, ExecutionCacheData)> for ExecutionCache {
+  fn from((id, data): (String, ExecutionCacheData)) -> Self {
+    ExecutionCache {
+      id: surrealdb::types::RecordId::new("execution", id.as_str()),
+      execution_id: data.execution_id,
+      execution_info: data.execution_info,
+      synced: data.synced,
+    }
+  }
+}
+
 impl ExecutionCache {
+  pub fn cache_id(&self) -> String {
+    match &self.id.key {
+      surrealdb::types::RecordIdKey::String(s) => s.clone(),
+      _ => panic!("expected string key"),
+    }
+  }
+
   pub async fn migrate(db: &Surreal<Db>) -> Result<(), DbError> {
     db.query(
       r"
@@ -47,71 +64,4 @@ impl ExecutionCache {
   }
 }
 
-impl remex_core::db::LegacyDbOperator<ExecutionCache, ExecutionCacheData> for ExecutionCache {
-  async fn create(
-    obj: ExecutionCacheData,
-    db: &Surreal<Db>,
-  ) -> Result<Option<ExecutionCache>, DbError> {
-    let s: Option<ExecutionCache> = db
-      .query(
-        r"
-        USE NS remex DB remex;
-        CREATE execution CONTENT $data;
-      ",
-      )
-      .bind(("data", obj))
-      .await?
-      .check()?
-      .take(1)?;
-    if let Some(execution) = s {
-      Ok(Some(execution.clone()))
-    } else {
-      Err(DbError::OperationFailed("Failed to create execution".to_string()))
-    }
-  }
-  async fn read(id: String, db: &Surreal<Db>) -> Result<Option<ExecutionCache>, DbError> {
-    Ok(
-      db.query("USE NS remex DB remex; SELECT * FROM execution WHERE id = $id;")
-        .bind(("id", id))
-        .await?
-        .check()?
-        .take(1)?,
-    )
-  }
-  async fn push(&mut self, db: &Surreal<Db>) -> Result<(), DbError> {
-    tracing::debug!("Pushing execution: {}", serde_json::to_string_pretty(self).unwrap());
-    let s: Option<ExecutionCache> = db
-      .query(format!(
-        "USE NS remex DB remex; UPSERT execution:{} CONTENT $data;",
-        self.id.key.to_sql()
-      ))
-      .bind(("data", self.clone()))
-      .await?
-      .check()?
-      .take(1)?;
-    if let Some(execution) = s {
-      *self = execution.clone();
-      Ok(())
-    } else {
-      Err(DbError::OperationFailed("Failed to upsert execution".to_string()))
-    }
-  }
-
-  async fn pull(&self, db: &Surreal<Db>) -> Result<Option<ExecutionCache>, DbError> {
-    Ok(
-      db.query("USE NS remex DB remex; SELECT * FROM execution WHERE id = $id;")
-        .bind(("id", self.id.key.clone()))
-        .await?
-        .check()?
-        .take(1)?,
-    )
-  }
-
-  async fn delete(&self, db: &Surreal<Db>) -> Result<(), DbError> {
-    db.query("USE NS remex DB remex; DELETE execution WHERE id = $id;")
-      .bind(("id", self.id.key.clone()))
-      .await?
-      .check()?;
-    Ok(())
-  }
-}
+impl_surreal_db_operator!(pub SurrealExecutionCacheRepo, ExecutionCache, ExecutionCacheData, "execution", "remex", "remex");

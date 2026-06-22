@@ -3,14 +3,8 @@ use serde::{
   Serialize,
 };
 use surrealdb::{
-  engine::{
-    any::Any,
-    local::Db,
-  },
-  types::{
-    SurrealValue,
-    ToSql,
-  },
+  engine::any::Any,
+  types::SurrealValue,
   Surreal,
 };
 
@@ -109,65 +103,24 @@ impl Execution {
   }
 }
 
-impl crate::db::LegacyDbOperator<Execution, ExecutionData> for Execution {
-  async fn create(obj: ExecutionData, db: &Surreal<Db>) -> Result<Option<Execution>, DbError> {
-    let s: Option<Execution> = db
-      .query(
-        r"
-        USE NS remex DB remex;
-        CREATE execution CONTENT $data
-      ",
-      )
-      .bind(("data", obj))
-      .await?
-      .check()?
-      .take(1)?;
-    if let Some(execution) = s {
-      Ok(Some(execution.clone()))
-    } else {
-      Err(DbError::OperationFailed("Failed to create execution".to_string()))
+impl From<(String, ExecutionData)> for Execution {
+  fn from((id, data): (String, ExecutionData)) -> Self {
+    Execution {
+      id: surrealdb::types::RecordId::new("execution", id.as_str()),
+      job_id: data.job_id,
+      client_id: data.client_id,
+      status: data.status,
+      output: data.output,
+      command: data.command,
+      exit_code: data.exit_code,
+      execution_start: data.execution_start,
+      execution_end: data.execution_end,
+      created_at: data.created_at.unwrap_or_default(),
+      updated_at: data.updated_at.unwrap_or_default(),
     }
-  }
-  async fn read(id: String, db: &Surreal<Db>) -> Result<Option<Execution>, DbError> {
-    Ok(
-      db.query("USE NS remex DB remex; SELECT * FROM execution WHERE id = $id;")
-        .bind(("id", id))
-        .await?
-        .check()?
-        .take(1)?,
-    )
-  }
-  async fn push(&mut self, db: &Surreal<Db>) -> Result<(), DbError> {
-    let s: Option<Execution> = db
-      .query("USE NS remex DB remex; UPSERT $id CONTENT $data")
-      .bind(("id", self.id.to_sql()))
-      .bind(("data", self.clone()))
-      .await?
-      .check()?
-      .take(1)?;
-    if let Some(execution) = s {
-      *self = execution;
-      Ok(())
-    } else {
-      Err(DbError::OperationFailed("Failed to upsert execution".to_string()))
-    }
-  }
-
-  async fn pull(&self, db: &Surreal<Db>) -> Result<Option<Execution>, DbError> {
-    Ok(
-      db.query("USE NS remex DB remex; SELECT * FROM $id;")
-        .bind(("id", self.id.to_sql()))
-        .await?
-        .check()?
-        .take(1)?,
-    )
-  }
-
-  async fn delete(&self, db: &Surreal<Db>) -> Result<(), DbError> {
-    db.query("USE NS remex DB remex; DELETE $id;")
-      .bind(("id", self.id.to_sql()))
-      .await?
-      .check()?;
-    Ok(())
   }
 }
+
+use crate::impl_surreal_db_operator;
+
+impl_surreal_db_operator!(pub SurrealExecutionRepo, Execution, ExecutionData, "execution", "remex", "remex");

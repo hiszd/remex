@@ -5,10 +5,7 @@ use serde::{
   Serialize,
 };
 use surrealdb::{
-  engine::{
-    any::Any,
-    local::Db,
-  },
+  engine::any::Any,
   types::{
     Datetime,
     RecordId,
@@ -30,34 +27,6 @@ pub enum DbError {
   OperationFailed(String),
   #[error("No Database Connection")]
   NoDatabaseConnection(String),
-}
-
-/// Legacy trait — replaced by the object-safe `DbOperator` trait.
-pub trait LegacyDbOperator<T, U>
-where
-  T: surrealdb::types::SurrealValue,
-  U: surrealdb::types::SurrealValue,
-{
-  fn create(
-    obj: U,
-    db: &Surreal<Db>,
-  ) -> impl std::future::Future<Output = Result<Option<T>, DbError>> + Send;
-  fn read(
-    id: String,
-    db: &Surreal<Db>,
-  ) -> impl std::future::Future<Output = Result<Option<T>, DbError>> + Send;
-  fn push(
-    &mut self,
-    db: &Surreal<Db>,
-  ) -> impl std::future::Future<Output = Result<(), DbError>> + Send;
-  fn pull(
-    &self,
-    db: &Surreal<Db>,
-  ) -> impl std::future::Future<Output = Result<Option<T>, DbError>> + Send;
-  fn delete(
-    &self,
-    db: &Surreal<Db>,
-  ) -> impl std::future::Future<Output = Result<(), DbError>> + Send;
 }
 
 /// Object-safe database operator seam.

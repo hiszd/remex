@@ -2,8 +2,10 @@ use std::time::Duration;
 
 use remex_core::db::{
   model::jobs::{Enabled, Job},
-  LegacyDbOperator,
+  DbOperator,
 };
+
+use crate::db::remex::{JobCacheData, SurrealJobCacheRepo};
 use surrealdb::{engine::remote::ws::Client, types::Action};
 use surrealdb::types::{RecordId, ToSql};
 use surrealdb::Surreal;
@@ -196,12 +198,13 @@ pub async fn run(
                   };
 
                   if existing.is_empty() {
-                    let cache_entry = crate::db::remex::JobCacheData {
+                    let cache_entry = JobCacheData {
                       job_id: job_id.to_sql(),
                       job_info: job.clone(),
                       completed: false,
                     };
-                    let _ = crate::db::remex::JobCache::create(cache_entry, &local_db).await;
+                    let repo = SurrealJobCacheRepo { db: local_db.clone() };
+                    let _ = repo.create(cache_entry).await;
                   }
 
                   let _ = mark_job_incomplete(&job_id).await;
@@ -233,6 +236,7 @@ pub async fn run(
                       return Ok(());
                     }
                   };
+                  let repo = SurrealJobCacheRepo { db: local_db.clone() };
                   let existing: Vec<crate::db::remex::JobCache> = match local_db
                     .query(
                       "USE NS remex DB remex; SELECT * FROM job WHERE job_id = $job_id LIMIT 1;"
@@ -248,17 +252,19 @@ pub async fn run(
                   };
 
                   if let Some(cached) = existing.first() {
-                    let mut updated = cached.clone();
-                    updated.job_info = updated_job.clone();
-                    updated.completed = false;
-                    let _ = updated.push(&local_db).await;
+                    let data = JobCacheData {
+                      job_id: cached.job_id.clone(),
+                      job_info: updated_job.clone(),
+                      completed: false,
+                    };
+                    let _ = repo.update(&cached.cache_id(), data).await;
                   } else {
-                    let cache_entry = crate::db::remex::JobCacheData {
+                    let cache_entry = JobCacheData {
                       job_id: job_id.to_sql(),
                       job_info: updated_job.clone(),
                       completed: false,
                     };
-                    let _ = crate::db::remex::JobCache::create(cache_entry, &local_db).await;
+                    let _ = repo.create(cache_entry).await;
                   }
 
                   if notification.data.enabled == Enabled::Enabled {
