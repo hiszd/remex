@@ -41,8 +41,23 @@ export async function updateJob(
   id: string,
   data: Partial<JobCreate>
 ): Promise<Job> {
-  const result = await client.update<Job>(rid(id)).merge(data)
-  return result as unknown as Job
+  const recordId = rid(id)
+  const keys = Object.keys(data)
+  if (keys.length === 0) throw new Error("No fields to update")
+
+  // Use SET instead of MERGE to replace object fields entirely
+  // (MERGE recursively merges object-typed enums like `enabled`)
+  const assignments = keys.map(k => `\`${k}\` = $${k}`).join(", ")
+  const [raw] = await client.query<Job[]>(
+    `UPDATE ${recordId} SET ${assignments} RETURN AFTER`,
+    data
+  ).collect()
+
+  const job = (raw as any)?.result?.[0] ?? raw
+  if (!job) {
+    throw new Error(`Failed to update job: ${id}`)
+  }
+  return job as unknown as Job
 }
 
 export async function deleteJob(

@@ -64,9 +64,7 @@ impl User {
         )
         DURATION FOR TOKEN 15m;
     "#;
-    tracing::info!("Running user migration");
     let result = db.query(query).await?;
-    tracing::info!("User migration result: {:?}", result);
     result.check()?;
     Ok(())
   }

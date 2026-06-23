@@ -210,11 +210,9 @@ async fn load_or_create_session(
   }
 }
 
-async fn create_new_session(
-  local_endpoint: &Surreal<Db>,
+pub(crate) async fn create_new_session_with_repo(
+  repo: &dyn DbOperator<Record = crate::db::endpoint::Session, Input = crate::db::endpoint::SessionData>,
 ) -> crate::db::endpoint::Session {
-  use crate::db::endpoint::SurrealSessionRepo;
-  let repo = SurrealSessionRepo { db: local_endpoint.clone() };
   repo.create(crate::db::endpoint::SessionData {
     client_id: None,
     hardware_hash: Some(machine_uid::get().unwrap()),
@@ -228,17 +226,152 @@ async fn create_new_session(
   .unwrap()
 }
 
-async fn persist_session(local_endpoint: &Surreal<Db>, state: &MsgState) {
+async fn create_new_session(
+  local_endpoint: &Surreal<Db>,
+) -> crate::db::endpoint::Session {
   use crate::db::endpoint::SurrealSessionRepo;
+  let repo = SurrealSessionRepo { db: local_endpoint.clone() };
+  create_new_session_with_repo(&repo).await
+}
+
+pub(crate) async fn persist_session_with_repo(
+  repo: &dyn DbOperator<Record = crate::db::endpoint::Session, Input = crate::db::endpoint::SessionData>,
+  client_id: Option<surrealdb::types::RecordId>,
+  client_name: &str,
+  hardware_hash: &str,
+  secret: &Option<String>,
+) -> String {
   let data = crate::db::endpoint::SessionData {
-    client_id: state.client_id.as_ref().map(|id| id.to_sql()),
-    hardware_hash: Some(state.hardware_hash.clone()),
-    client_name: Some(state.client_name.clone()),
+    client_id: client_id.as_ref().map(|id| id.to_sql()),
+    hardware_hash: Some(hardware_hash.to_string()),
+    client_name: Some(client_name.to_string()),
     db_addr: None,
     tkn: None,
-    secret: state.secret.clone(),
+    secret: secret.clone(),
     groups: vec![],
   };
+  repo.create(data).await.unwrap().session_id()
+}
+
+async fn persist_session(local_endpoint: &Surreal<Db>, state: &MsgState) {
+  use crate::db::endpoint::SurrealSessionRepo;
   let repo = SurrealSessionRepo { db: local_endpoint.clone() };
-  let _ = repo.create(data).await;
+  let _ = persist_session_with_repo(&repo, state.client_id.clone(), &state.client_name, &state.hardware_hash, &state.secret).await;
+}
+
+#[cfg(test)]
+mod tests {
+  use remex_core::db::DbOperator;
+  use remex_core::impl_in_memory_db_operator;
+  use surrealdb::types::ToSql;
+
+  use crate::db::endpoint::{Session, SessionData};
+
+  impl_in_memory_db_operator!(InMemorySessionRepo, Session, SessionData, "session");
+
+  #[tokio::test]
+  async fn create_new_session_sets_defaults() {
+    let repo = InMemorySessionRepo::new();
+    let session = super::create_new_session_with_repo(&repo).await;
+
+    assert!(!session.session_id().is_empty(), "session should have an id");
+    assert!(!session.client_name.is_empty(), "client_name should be non-empty");
+    assert!(!session.hardware_hash.is_empty(), "hardware_hash should be non-empty");
+    assert_eq!(session.client_id, None, "new session should have no client_id");
+    assert_eq!(session.secret, None, "new session should have no secret");
+    assert!(session.tkn.is_none(), "new session should have no token");
+  }
+
+  #[tokio::test]
+  async fn create_new_session_generates_unique_ids() {
+    let repo = InMemorySessionRepo::new();
+    let s1 = super::create_new_session_with_repo(&repo).await;
+    let s2 = super::create_new_session_with_repo(&repo).await;
+
+    assert_ne!(s1.session_id(), s2.session_id(), "each session must have a unique id");
+  }
+
+  #[tokio::test]
+  async fn persist_session_stores_state() {
+    let repo = InMemorySessionRepo::new();
+    let cid = surrealdb::types::RecordId::new("client", "test-client");
+
+    let id = super::persist_session_with_repo(
+      &repo,
+      Some(cid.clone()),
+      "test-machine",
+      "test-hash-abcd1234",
+      &Some("my-secret".to_string()),
+    ).await;
+
+    let persisted = repo.read(&id).await.unwrap().expect("session should exist");
+    assert_eq!(persisted.client_name, "test-machine");
+    assert_eq!(persisted.hardware_hash, "test-hash-abcd1234");
+    assert_eq!(persisted.secret, Some("my-secret".to_string()));
+    assert_eq!(
+      persisted.client_id,
+      Some(cid.to_sql()),
+      "client_id should be stored as string"
+    );
+  }
+
+  #[tokio::test]
+  async fn persist_session_without_client_id() {
+    let repo = InMemorySessionRepo::new();
+
+    let id = super::persist_session_with_repo(
+      &repo,
+      None,
+      "anonymous",
+      "hash-0000",
+      &None,
+    ).await;
+
+    let persisted = repo.read(&id).await.unwrap().expect("session should exist");
+    assert_eq!(persisted.client_id, None);
+    assert_eq!(persisted.client_name, "anonymous");
+    assert_eq!(persisted.hardware_hash, "hash-0000");
+  }
+
+  #[tokio::test]
+  async fn session_crud_roundtrip() {
+    let repo = InMemorySessionRepo::new();
+
+    let created = repo.create(SessionData {
+      client_id: Some("client:abc".to_string()),
+      client_name: Some("roundtrip-test".to_string()),
+      hardware_hash: Some("hash-xyz".to_string()),
+      db_addr: None,
+      tkn: None,
+      secret: Some("s3kr3t".to_string()),
+      groups: vec![],
+    }).await.unwrap();
+
+    let id = created.session_id();
+
+    let found = repo.read(&id).await.unwrap().expect("session should exist");
+    assert_eq!(found.client_name, "roundtrip-test");
+    assert_eq!(found.hardware_hash, "hash-xyz");
+    assert_eq!(found.secret, Some("s3kr3t".to_string()));
+
+    let updated = repo.update(&id, SessionData {
+      client_id: Some("client:abc".to_string()),
+      client_name: Some("updated-name".to_string()),
+      hardware_hash: Some("hash-xyz".to_string()),
+      db_addr: None,
+      tkn: None,
+      secret: Some("new-secret".to_string()),
+      groups: vec![],
+    }).await.unwrap();
+
+    assert_eq!(updated.client_name, "updated-name");
+    assert_eq!(updated.secret, Some("new-secret".to_string()));
+
+    let refetched = repo.read(&id).await.unwrap().expect("session should still exist");
+    assert_eq!(refetched.client_name, "updated-name");
+
+    repo.delete(&id).await.unwrap();
+    let gone = repo.read(&id).await.unwrap();
+    assert!(gone.is_none(), "session should be gone after delete");
+  }
 }

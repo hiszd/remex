@@ -4,12 +4,11 @@ use remex_core::db::{
   model::executions::{Execution, ExecutionStatus},
   DbOperator,
 };
-use surrealdb::{engine::local::Db, types::RecordId, Surreal};
 use surrealdb::types::ToSql;
 
 use crate::db::{
   get_local_remex,
-  remex::{ExecutionCacheData, SurrealExecutionCacheRepo},
+  remex::{ExecutionCacheData, SurrealExecutionCacheRepo, SurrealJobCacheRepo},
 };
 
 fn validate_shell(shell: &str) -> Result<(), crate::Error> {
@@ -55,50 +54,36 @@ async fn run_command(
   Ok((format!("out: {}\nerr: {}", stdout, stderr), result.status))
 }
 
-async fn should_skip_job(job_id: &RecordId) -> bool {
-  let db = match get_local_remex().await {
-    Ok(d) => d,
+async fn should_skip_job(
+  job_id: &str,
+  cache_repo: &dyn DbOperator<Record = crate::db::remex::JobCache, Input = crate::db::remex::JobCacheData>,
+) -> bool {
+  let caches = match cache_repo.list().await {
+    Ok(c) => c,
     Err(_) => return false,
   };
-
-  let cached: Vec<crate::db::remex::JobCache> = match db
-    .query(
-      "USE NS remex DB remex; SELECT * FROM job WHERE job_id = $job_id LIMIT 1;",
-    )
-    .bind(("job_id", job_id.to_sql()))
-    .await
-  {
-    Ok(res) => match res.check() {
-      Ok(mut r) => match r.take(1) {
-        Ok(v) => v,
-        Err(_) => return false,
-      },
-      Err(_) => return false,
-    },
-    Err(_) => return false,
-  };
-
-  cached.first().map(|c| c.completed).unwrap_or(false)
+  caches.iter().find(|c| c.job_id == job_id).map(|c| c.completed).unwrap_or(false)
 }
 
-async fn mark_job_completed(db: &Surreal<Db>, job_id: &RecordId) -> Result<(), crate::Error> {
-  db.query(
-    r"
-      USE NS remex DB remex;
-      LET $cached = (SELECT * FROM job WHERE job_id = $job_id LIMIT 1)[0];
-      IF $cached != NONE {
-        UPDATE $cached.id SET completed = true;
-      };
-    ",
-  )
-  .bind(("job_id", job_id.to_sql()))
-  .await?
-  .check()?;
+async fn mark_job_completed(
+  job_id: &str,
+  cache_repo: &dyn DbOperator<Record = crate::db::remex::JobCache, Input = crate::db::remex::JobCacheData>,
+) -> Result<(), crate::Error> {
+  let caches = cache_repo.list().await?;
+  if let Some(cache) = caches.iter().find(|c| c.job_id == job_id) {
+    let data = crate::db::remex::JobCacheData {
+      job_id: cache.job_id.clone(),
+      job_info: cache.job_info.clone(),
+      completed: true,
+    };
+    cache_repo.update(&cache.cache_id(), data).await?;
+  }
   Ok(())
 }
 
 pub async fn execute_job(job: remex_core::db::model::jobs::Job, client_id: &str) -> Result<(), crate::Error> {
-  if should_skip_job(&job.id).await {
+  let cache_repo = SurrealJobCacheRepo { db: get_local_remex().await? };
+  if should_skip_job(&job.id.to_sql(), &cache_repo).await {
     tracing::debug!("Skipping job {} (recent execution exists)", job.job_name);
     return Ok(());
   }
@@ -220,7 +205,7 @@ pub async fn execute_job(job: remex_core::db::model::jobs::Job, client_id: &str)
   repo.update(&cache_id, data).await?;
 
   if is_completed {
-    if let Err(e) = mark_job_completed(&db, &job.id).await {
+    if let Err(e) = mark_job_completed(&job.id.to_sql(), &cache_repo).await {
       tracing::warn!("Failed to mark job as completed in cache: {}", e);
     }
   }
@@ -232,4 +217,125 @@ pub async fn execute_job(job: remex_core::db::model::jobs::Job, client_id: &str)
   );
 
   Ok(())
+}
+
+#[cfg(test)]
+mod execution_tests {
+  use remex_core::db::DbOperator;
+  use remex_core::impl_in_memory_db_operator;
+
+  use crate::db::remex::{JobCache, JobCacheData};
+
+  impl_in_memory_db_operator!(InMemoryJobCacheRepo, JobCache, JobCacheData, "job");
+
+  /// The string format used by `RecordId::to_sql()` for a `RecordId::new("job", <key>)`.
+  fn job_sql_id(key: &str) -> String {
+    format!("job:{key}")
+  }
+
+  fn make_cache(job_key: &str, completed: bool) -> JobCacheData {
+    use remex_core::db::model::jobs::{Job, JobType, ExecutionStatus, Enabled};
+
+    let job = Job {
+      id: surrealdb::types::RecordId::new("job", job_key),
+      job_name: format!("test-{job_key}"),
+      job_shell: "/bin/sh".to_string(),
+      job_command: "echo hi".to_string(),
+      job_type: JobType::Instant,
+      execution_status: ExecutionStatus::Pending,
+      enabled: Enabled::Enabled,
+      assignments: vec![],
+      timeout: None,
+      created_at: surrealdb::types::Datetime::default(),
+      updated_at: surrealdb::types::Datetime::default(),
+    };
+    let job_id = format!("job:{job_key}");
+    JobCacheData { job_id, job_info: job, completed }
+  }
+
+  // ---- should_skip_job ----
+
+  #[tokio::test]
+  async fn skip_no_cache_returns_false() {
+    let repo = InMemoryJobCacheRepo::new();
+    let job_id = job_sql_id("no-cache");
+    assert!(!super::should_skip_job(&job_id, &repo).await);
+  }
+
+  #[tokio::test]
+  async fn skip_cache_completed_false_returns_false() {
+    let repo = InMemoryJobCacheRepo::new();
+    let job_id = job_sql_id("not-done");
+    let _ = repo.create(make_cache("not-done", false)).await.unwrap();
+    assert!(!super::should_skip_job(&job_id, &repo).await);
+  }
+
+  #[tokio::test]
+  async fn skip_cache_completed_true_returns_true() {
+    let repo = InMemoryJobCacheRepo::new();
+    let job_id = job_sql_id("done");
+    let _ = repo.create(make_cache("done", true)).await.unwrap();
+    assert!(super::should_skip_job(&job_id, &repo).await);
+  }
+
+  #[tokio::test]
+  async fn skip_other_cache_returns_false() {
+    let repo = InMemoryJobCacheRepo::new();
+    let _ = repo.create(make_cache("other", true)).await.unwrap();
+    let job_id = job_sql_id("mine");
+    assert!(!super::should_skip_job(&job_id, &repo).await);
+  }
+
+  // ---- mark_job_completed ----
+
+  #[tokio::test]
+  async fn mark_noop_when_cache_does_not_exist() {
+    let repo = InMemoryJobCacheRepo::new();
+    let job_id = job_sql_id("ghost");
+    super::mark_job_completed(&job_id, &repo).await.unwrap();
+
+    let all = repo.list().await.unwrap();
+    assert!(all.is_empty(), "no cache should be created");
+  }
+
+  #[tokio::test]
+  async fn mark_updates_existing_cache() {
+    let repo = InMemoryJobCacheRepo::new();
+    let job_id = job_sql_id("existing");
+    let _ = repo.create(make_cache("existing", false)).await.unwrap();
+    super::mark_job_completed(&job_id, &repo).await.unwrap();
+
+    let all = repo.list().await.unwrap();
+    assert_eq!(all.len(), 1);
+    assert!(all[0].completed);
+  }
+
+  #[tokio::test]
+  async fn mark_does_not_affect_other_caches() {
+    let repo = InMemoryJobCacheRepo::new();
+    let _ = repo.create(make_cache("other", true)).await.unwrap();
+    let job_id = job_sql_id("target");
+    let _ = repo.create(make_cache("target", false)).await.unwrap();
+    super::mark_job_completed(&job_id, &repo).await.unwrap();
+
+    let all = repo.list().await.unwrap();
+    assert_eq!(all.len(), 2);
+    for cache in &all {
+      if cache.job_id == job_id {
+        assert!(cache.completed);
+      }
+    }
+  }
+
+  #[tokio::test]
+  async fn mark_idempotent_on_already_completed() {
+    let repo = InMemoryJobCacheRepo::new();
+    let job_id = job_sql_id("already-done");
+    let _ = repo.create(make_cache("already-done", true)).await.unwrap();
+    super::mark_job_completed(&job_id, &repo).await.unwrap();
+
+    let all = repo.list().await.unwrap();
+    assert_eq!(all.len(), 1);
+    assert!(all[0].completed);
+  }
 }

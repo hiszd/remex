@@ -7,7 +7,9 @@ The directory and project are laid out as such:
 - `/core` - The shared library for all remex executables
 - `/server` - The server executable (TCP communication only, no REST API)
 - `/endpoint` - The endpoint executable and its related source code
+- `/macros` - proc-macro crate for derive macros
 - `/configurator` - The configurator Vue.js web application
+- `/docs` - Architecture documents and ADRs
 
 ## Systems Design
 
@@ -20,6 +22,97 @@ remex_server houses the application's central server which maintains connections
 remex_endpoint is the edge client that both connects with the remex_server and connects to the core SurrealDB database in the cloud. In addition to this, it also manages a local database for caching updates to be sent to the core database, and to reference for jobs that may need to be executed offline. It spawns several background tasks that monitor things like whether a job should be run yet, whether to respond to a server message, etc.
 
 remex_configurator is a standalone Vue.js web application for the end user to create new configurations, modify existing ones, and check on the execution status of each job. It connects **directly to the core SurrealDB database** (same as endpoints) using SurrealDB's built-in authentication. User preferences and UI configuration are stored in a separate `config` database.
+
+## Endpoint Architecture
+
+### Background Tasks
+
+The endpoint spawns **5 background tasks** in `endpoint/src/main.rs` (spawned during startup, then main sleeps forever):
+
+| Task | File | Function | Purpose |
+|---|---|---|---|
+| Database connector | `endpoint/src/db_connector.rs` | `run()` | Connects to remote SurrealDB using bearer token, sends DB handle via `watch` channel |
+| Server message loop | `endpoint/src/async_tasks/server_msg.rs` | `server_msg_loop()` | TCP connection to remex_server — ping/pong, sign-in/sign-up, receives bearer token and server URL |
+| Job scheduler | `endpoint/src/async_tasks/jobs/scheduler.rs` | `run()` | BinaryHeap-based job queue — receives `JobQueueMessage`s, fires `Immediate` / `Scheduled` jobs |
+| Remote monitor | `endpoint/src/async_tasks/jobs/monitor.rs` | `run()` | Connects to remote DB, sets up LIVE SELECT on `job` and `group` tables, reacts to changes by injecting jobs |
+| Execution sync loop | `endpoint/src/async_tasks/jobs/sync.rs` | `execution_sync_loop()` | Every 30s: pushes unsynced local executions to remote DB; every 6h: cleans up old synced executions |
+
+**Message flow between tasks:**
+
+| Producer | Channel | Consumer | Message Type |
+|---|---|---|---|
+| `server_msg_loop` | `db_token_tx` (mpsc) | `db_connector` | `(BearerGrantResponse, String)` — bearer token + server URL |
+| `db_connector` | `db_handle_tx` (watch) | `monitor`, `execution_sync_loop` | `Option<Surreal<Client>>` — remote DB handle (or `None`) |
+| `server_msg_loop` | `monitor_cmd_tx` (mpsc) | `monitor` | `MonitorCommand::SetClientId(String)` |
+| `monitor` | `job_injection_tx` (mpsc) | `scheduler` | `JobQueueMessage` — `Immediate`, `Scheduled`, `Remove`, `SyncFromRemote` |
+| `scheduler` | spawns tasks | `execute_job()` | Job + client_id passed via async closure |
+
+The `jobs` module (`endpoint/src/async_tasks/jobs/`) contains four sub-modules:
+
+| Module | File | Key Exports |
+|---|---|---|
+| `scheduler` | `jobs/scheduler.rs` | `run(rx)` |
+| `monitor` | `jobs/monitor.rs` | `run(cmd_rx, job_injection_tx, db_handle_rx)`, `MonitorCommand` |
+| `sync` | `jobs/sync.rs` | `full_sync()`, `sync_groups()`, `sync_and_refill_queue()`, `sync_job_to_cache()`, `execution_sync_loop()` |
+| `execution` | `jobs/execution.rs` | `execute_job()`, `should_skip_job()`, `mark_job_completed()`, `validate_shell()`, `run_command()` |
+
+`JobQueueMessage` variants:
+
+| Variant | Meaning |
+|---|---|
+| `Immediate { job, client_id }` | Execute the job right now |
+| `Scheduled { job, execution_time, client_id }` | Execute the job at `execution_time` (an `Instant`) |
+| `Remove { id }` | Remove a job from the scheduler queue by its `RecordId` |
+| `SyncFromRemote` | Clear the entire scheduler queue |
+
+### Local Database Structure
+
+The endpoint runs an embedded SurrealDB (SurrealKV) with two logical databases inside the same engine:
+
+| DB | Tables | Purpose |
+|---|---|---|
+| `remex` / `endpoint` | `session`, `last_action` | Utility tables (no remote counterpart) |
+| `remex` / `remex` | `job` (cache), `execution` (cache) | Local caches of remote tables for offline operation |
+
+**Init flow** (`endpoint/src/db.rs`):
+
+1. `get_local_remex()` — lazily initializes `LOCAL_DB` (single `Surreal<Db>` instance backed by `surrealkv::Ds`), sets NS `remex` DB `remex`
+2. `get_local_endpoint()` — same `LOCAL_DB`, sets NS `remex` DB `endpoint`
+3. `migrate()` — runs migrations in order:
+   - `Session::migrate()` (DB `endpoint`, table `session`)
+   - `LastAction::migrate()` (DB `endpoint`, table `last_action`)
+   - `JobCache::migrate()` (DB `remex`, table `job`)
+   - `ExecutionCache::migrate()` (DB `remex`, table `execution`)
+
+**Local tables:**
+
+| Table | DB | Struct | Fields | Adapter |
+|---|---|---|---|---|
+| `session` | `endpoint` | `Session` | `client_id`, `client_name`, `hardware_hash`, `db_addr`, `tkn`, `secret`, `groups` | `SurrealSessionRepo` |
+| `last_action` | `endpoint` | `LastAction` | `task_name`, `last_run` | (raw queries via `should_skip`/`record`/`cleanup_old`) |
+| `job` (cache) | `remex` | `JobCache` | `job_id` (string), `job_info` (Job), `completed` (bool) | `SurrealJobCacheRepo` |
+| `execution` (cache) | `remex` | `ExecutionCache` | `execution_id` (string), `execution_info` (Execution), `synced` (bool) | `SurrealExecutionCacheRepo` |
+
+**Caching pattern:**
+
+```
+REMOTE (cloud)                    LOCAL (endpoint surrealkv)
+─────────────────                 ────────────────────────────
+job  ──sync_job_to_cache()──▶     job (JobCache)
+                                    • job_id      — remote record id as string
+                                    • job_info    — full serialised Job
+                                    • completed   — local execution flag
+
+execution ──execute_job()──▶     execution (ExecutionCache)
+                                    • execution_id   — remote record id as string
+                                    • execution_info — full serialised Execution
+                                    • synced         — false until pushed to remote
+```
+
+Key properties:
+- **JobCache** is **one-way pull**: fetched from remote, stored locally — never synced back
+- **ExecutionCache** is **one-way push**: created offline, marked `synced: false`, pushed to remote by `execution_sync_loop`
+- **Session** and **LastAction** are purely local with no remote counterpart
 
 ## CSS/SCSS Styles
 
@@ -172,31 +265,7 @@ import IconViewDetails from '@/components/icons/IconViewDetails.vue'
 
 ## Database Patterns
 
-This codebase uses SurrealDB as its database. All database operations follow a consistent pattern:
-
-### DbOperator Trait
-
-All database models implement the `DbOperator<T, U>` trait defined in `core/src/db/mod.rs`:
-
-```rust
-pub trait DbOperator<T, U>
-where
-  T: surrealdb::types::SurrealValue,
-  U: surrealdb::types::SurrealValue,
-{
-  fn create(obj: U, db: &Surreal<Db>) -> impl Future<Output = Result<Option<T>, DbError>> + Send;
-  fn read(id: String, db: &Surreal<Db>) -> impl Future<Output = Result<Option<T>, DbError>> + Send;
-  fn push(&mut self, db: &Surreal<Db>) -> impl Future<Output = Result<(), DbError>> + Send;
-  fn pull(&self, db: &Surreal<Db>) -> impl Future<Output = Result<Option<T>, DbError>> + Send;
-  fn delete(&self, db: &Surreal<Db>) -> impl Future<Output = Result<(), DbError>> + Send;
-}
-```
-
-- **create**: Insert a new record
-- **read**: Fetch a record by ID
-- **push**: Update (upsert) an existing record
-- **pull**: Refresh a record from the database
-- **delete**: Remove a record
+This codebase uses SurrealDB as its database. All database operations follow a consistent pattern through the `DbOperator` trait. See the [Testable Database Code with DbOperator](#testable-database-code-with-dboperator) section for the current trait definition and how to write testable seam functions.
 
 ### Migrations
 
@@ -231,6 +300,7 @@ DEFINE ACCESS IF NOT EXISTS endpoint ON DATABASE TYPE BEARER FOR RECORD DURATION
 - **job**: Scheduled jobs to be executed
 - **audit_log**: Audit trail for all record changes
 - **user**: Configurator users (for authentication)
+- **refresh_tokens**: Configurator token refresh
 - **config**: UI preferences and configuration (separate database)
 
 ## New Schema Design
@@ -281,12 +351,11 @@ DEFINE TABLE IF NOT EXISTS client SCHEMAFULL;
 DEFINE FIELD client_name ON TABLE client TYPE string;
 DEFINE FIELD secret ON TABLE client TYPE string VALUE crypto::argon2::generate($value);
 DEFINE FIELD hardware_hash ON TABLE client TYPE string;
-DEFINE FIELD last_seen ON TABLE client TYPE datetime; -- NEW
-DEFINE FIELD connection_history ON TABLE client TYPE array<object> DEFAULT []; -- NEW: {timestamp, event, ip_address}
-DEFINE INDEX idx_hardware_hash ON TABLE client UNIQUE;
+DEFINE FIELD last_seen ON TABLE client TYPE datetime;
+DEFINE FIELD connection_history ON TABLE client TYPE array<object> DEFAULT [];
 ```
 
-### Audit Log Table (NEW)
+### Audit Log Table
 
 ```sql
 DEFINE TABLE IF NOT EXISTS audit_log SCHEMAFULL;
@@ -315,7 +384,7 @@ THEN {
 };
 ```
 
-### User Table (NEW - for Configurator)
+### User Table (for Configurator)
 
 ```sql
 DEFINE TABLE IF NOT EXISTS user SCHEMAFULL;
@@ -409,27 +478,51 @@ THEN { /* side effects */ };
 - **TYPE RECORD**: For configurator users that sign in with credentials
 - Both support token expiration and refresh
 
-## Communication Protocol
+## SurrealDB Pitfalls
 
-### Packet System
+### `to_sql()` Adds the Table Prefix
 
-Messages are fragmented into 128-byte fixed-size packets for transmission over TCP:
+`RecordId::to_sql()` returns `"table_name:key"`, not just `"key"`. This is easy to forget when constructing strings for field comparison:
 
-- **Packet size**: 128 bytes total
-- **Payload**: 126 bytes per packet (2 bytes for packet metadata)
-- **Header**: `[packet_number, total_packets]`
+```rust
+let id = RecordId::new("job", "abc123");
+assert_eq!(id.to_sql(), "job:abc123"); // NOT "abc123"
+```
 
-### Message Contents Types
+Test code often mirrors this with a helper:
+```rust
+fn job_sql_id(key: &str) -> String {
+  format!("job:{key}")
+}
+```
 
-Messages are classified by their first character prefix:
+### `UPDATE ... CONTENT` vs `UPDATE ... MERGE`
 
-- **`0` prefix**: Command - executable instructions
-- **`1` prefix**: Secret - sensitive data (credentials, tokens)
-- **Other**: Log - general logging information
+The `impl_surreal_db_operator!` macro uses different SurrealQL keywords for `create` and `update`:
 
-### Stack Allocation
+- **`CREATE ... CONTENT $data`** — replaces the entire document body. Any field not present in `$data` is removed. This can break SCHEMAFULL tables if required fields are omitted.
+- **`UPDATE $id MERGE $data`** — partial update. Only the fields present in `$data` are changed. The record `id` is always included in the response.
 
-Uses `heapless::Vec` for fixed-capacity, no-heap allocations to ensure memory safety in constrained environments.
+In SurrealDB v3, `UPDATE ... CONTENT` may return the document body **without** the record `id`, causing deserialization failures on structs that require an `id: RecordId` field. This is why `update` uses `MERGE`, not `CONTENT`.
+
+### Schemafull Tables Require All Fields
+
+SCHEMAFULL tables (all core and endpoint tables except `config`) require that any field defined via `DEFINE FIELD` must be present on `CREATE` unless it has a `DEFAULT`. For example, the `execution` table has zero optional field definitions — every field (`output`, `command`, `exit_code`, `execution_start`, `execution_end`, etc.) must be provided.
+
+### Local and Remote Tables Share Names
+
+The endpoint's local cache `job` table and the remote `job` table are both in `remex.remex` on their respective SurrealDB instances. They have different schemas:
+
+| Table | Location | Schema |
+|---|---|---|
+| `job` (remote) | Cloud SurrealDB | `job_name`, `job_shell`, `job_command`, `job_type`, `execution_status`, `enabled`, ... |
+| `job` (cache) | Local SurrealKV | `job_id` (string), `job_info` (FLEXIBLE), `completed` (bool) |
+
+The same applies to `execution`. The endpoint's migration only defines the cache fields, so queries must match the table's actual schema on the instance being queried.
+
+### In-Memory Adapter Has UPSERT Semantics
+
+The in-memory adapter's `update` calls `HashMap::insert`, which **creates** a record if it doesn't exist. The real `UPDATE ... MERGE` in SurrealDB may error or return empty for non-existent records. Tests using the in-memory adapter can mask production errors where updates target missing records.
 
 ## Key Dependencies
 
@@ -439,7 +532,6 @@ Uses `heapless::Vec` for fixed-capacity, no-heap allocations to ensure memory sa
 | surrealdb | 3 | Database with kv-surrealkv and protocol-ws |
 | tokio | 1.38.1 | Async runtime |
 | aes-gcm | 0.10.3 | Encryption for TCP socket communication |
-| heapless | 0.9.2 | Fixed-capacity collections |
 | chrono | 0.4.38 | Date/time handling |
 | tracing | 0.1.40 | Structured logging |
 | uuid | 1.6 | Unique identifiers (v4, v7) |
@@ -467,6 +559,146 @@ pub enum DbError {
 For general application error handling with context propagation.
 
 When adding new errors, prefer `thiserror` for domain-specific errors and `thiserror::Error` derive macro.
+
+## Testing
+
+### Test Framework
+
+All tests use `#[tokio::test]` (async runtime). Assertions use standard `assert!`/`assert_eq!`/`assert_ne!`. There are no third-party assertion crates and no `[dev-dependencies]` — all test dependencies are already regular workspace deps.
+
+### Test Module Placement
+
+Tests are defined **inline** at the bottom of the source file they test, gated with `#[cfg(test)]`:
+
+```rust
+#[cfg(test)]
+mod my_tests {
+  // imports, helpers, #[tokio::test] functions
+}
+```
+
+Module naming convention: `<name>_tests` (e.g., `sync_tests`, `execution_tests`). Production functions under test are accessed via `super::`.
+
+### Running Tests
+
+```bash
+cargo test                    # all workspace tests
+cargo test -p remex-core      # core tests only
+cargo test -p remex-endpoint  # endpoint tests only
+cargo test sync_tests         # tests matching module name
+cargo test execution_tests    # execution seam tests
+cargo test server_msg::tests  # session seam tests
+```
+
+### Testing Pattern: Seam Functions + In-Memory Adapter
+
+Database-dependent logic is tested via the **seam function** pattern (see [Testable Database Code with DbOperator](#testable-database-code-with-dboperator)). Each seam function accepts `&dyn DbOperator<Record = X, Input = Y>` as a parameter, and test modules generate an in-memory adapter via `impl_in_memory_db_operator!`.
+
+**Recipe:**
+
+1. Extract the logic into a function accepting `&dyn DbOperator`
+2. In the test module, do `impl_in_memory_db_operator!(InMemoryXRepo, RecordType, InputType, "table")`
+3. Instantiate `InMemoryXRepo::new()` in the test
+4. Call the seam function and assert on the result
+
+**18 seam tests** exist across the endpoint:
+- `sync_job_to_cache`: 5 tests (new job, unchanged preserves, changed resets, missing cache, multiple independence)
+- `should_skip_job`: 4 tests (no cache, completed=false, completed=true, other cache)
+- `mark_job_completed`: 4 tests (updates existing, no-op on missing, idempotent, doesn't affect others)
+- `create_new_session_with_repo`: 2 tests (defaults, unique IDs)
+- `persist_session_with_repo`: 3 tests (state, without client_id, full CRUD roundtrip)
+
+## Testable Database Code with DbOperator
+
+All database operations go through the `DbOperator` trait (`core/src/db/mod.rs`):
+
+```rust
+#[async_trait]
+pub trait DbOperator: Send + Sync {
+  type Record: Send + Sync + 'static;
+  type Input: Send + Sync + 'static;
+
+  async fn create(&self, input: Self::Input) -> Result<Self::Record, DbError>;
+  async fn read(&self, id: &str) -> Result<Option<Self::Record>, DbError>;
+  async fn update(&self, id: &str, input: Self::Input) -> Result<Self::Record, DbError>;
+  async fn list(&self) -> Result<Vec<Self::Record>, DbError>;
+  async fn delete(&self, id: &str) -> Result<(), DbError>;
+}
+```
+
+### Seam Pattern
+
+To make a function testable, extract it to accept `&dyn DbOperator` instead of directly querying SurrealDB:
+
+```rust
+// ❌ Not testable — tightly coupled to SurrealDB
+async fn do_stuff(db: &Surreal<Db>, id: &str) -> Result<(), Error> {
+  db.query("SELECT * FROM table WHERE field = $id").bind(("id", id)).await?;
+  // ...
+}
+
+// ✅ Testable — accepts any adapter via &dyn DbOperator
+async fn do_stuff(
+  id: &str,
+  repo: &dyn DbOperator<Record = MyRecord, Input = MyInput>,
+) -> Result<(), Error> {
+  let records = repo.list().await?;
+  if let Some(record) = records.iter().find(|r| r.field == id) {
+    repo.update(&record.id_as_key(), MyInput { ... }).await?;
+  }
+  Ok(())
+}
+
+// Production caller wires in the real adapter:
+let repo = SurrealMyRepo { db: get_local_remex().await? };
+do_stuff(&id, &repo).await?;
+```
+
+### In-Memory Adapter for Tests
+
+Declarative macros in `core/src/db/adapters.rs` generate adapters:
+
+```rust
+use remex_core::impl_in_memory_db_operator;
+impl_in_memory_db_operator!(InMemoryMyRepo, MyRecord, MyInput, "table_name");
+```
+
+**Requirements:**
+- `MyRecord: Send + Sync + Clone + 'static`
+- `MyInput: Send + Sync + Clone + 'static`
+- `impl From<(String, MyInput)> for MyRecord` (for ID generation)
+
+### Recipe: Writing a Testable Seam
+
+1. **Define the seam function** — takes `&dyn DbOperator<Record = X, Input = Y>` as its last parameter
+2. **Update the caller** — create the real adapter (`SurrealXRepo { db }`) and pass a reference
+3. **Generate an in-memory adapter** — `impl_in_memory_db_operator!` in the test module
+4. **Write tests** — instantiate `InMemoryXRepo::new()`, call the seam function, assert on results
+
+### Reference Examples in this Repo
+
+| Seam Function | File | Tests |
+|---|---|---|
+| `sync_job_to_cache` | `endpoint/src/async_tasks/jobs/sync.rs:135` | 5 tests at line 157 |
+| `should_skip_job` | `endpoint/src/async_tasks/jobs/execution.rs:57` | 4 tests at line 223 |
+| `mark_job_completed` | `endpoint/src/async_tasks/jobs/execution.rs:68` | 4 tests at line 223 |
+| `create_new_session_with_repo` | `endpoint/src/async_tasks/server_msg.rs:213` | 2 tests at line 263 |
+| `persist_session_with_repo` | `endpoint/src/async_tasks/server_msg.rs:237` | 3 tests at line 263 |
+
+### Adapter Generation Macros
+
+Both macros handle `id` generation differently:
+
+- **`impl_surreal_db_operator!(pub Name, Record, Input, "table", "ns", "db")`**: Gets the real DB handle. `create` uses `CREATE table CONTENT $data` (auto-generates ID). `update` uses `UPDATE $id MERGE $data` for partial updates. `list` uses `SELECT * FROM table`.
+
+- **`impl_in_memory_db_operator!(pub Name, Record, Input, "table")`**: `create` generates a UUID v4 string key, calls `From<(String, Input)>`. `update` replaces via HashMap insert (UPSERT semantics). `list` clones all HashMap values.
+
+### Notes
+
+- Use `list()` + iterator filtering for field-based lookups (the trait only supports `read` by record ID)
+- `update` has UPSERT semantics in both adapters
+- The in-memory adapter is **not persistent** — each test gets a fresh state
+- Always clean up unused imports when refactoring (the caller may no longer need `Surreal`, `RecordId`, etc. directly)
 
 ## Implementation Plan
 

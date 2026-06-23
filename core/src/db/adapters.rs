@@ -39,7 +39,7 @@ macro_rules! impl_surreal_db_operator {
 
       async fn update(&self, id: &str, input: Self::Input) -> Result<Self::Record, $crate::db::DbError> {
         use $crate::db::DbError;
-        let sql = concat!("USE NS ", $ns, " DB ", $db, "; UPDATE $id CONTENT $data");
+        let sql = concat!("USE NS ", $ns, " DB ", $db, "; UPDATE $id MERGE $data");
         let mut result = self.db
           .query(sql)
           .bind(("id", ::surrealdb::types::RecordId::new($table, id)))
@@ -50,6 +50,15 @@ macro_rules! impl_surreal_db_operator {
         record.ok_or_else(|| {
           DbError::OperationFailed(concat!("Failed to update ", $table).into())
         })
+      }
+
+      async fn list(&self) -> Result<Vec<Self::Record>, $crate::db::DbError> {
+        let sql = concat!("USE NS ", $ns, " DB ", $db, "; SELECT * FROM ", $table);
+        let mut result = self.db
+          .query(sql)
+          .await?
+          .check()?;
+        Ok(result.take(0)?)
       }
 
       async fn delete(&self, id: &str) -> Result<(), $crate::db::DbError> {
@@ -105,6 +114,10 @@ macro_rules! impl_in_memory_db_operator {
         let record: $record = (id.to_string(), input).into();
         self.inner.lock().unwrap().insert(id.to_string(), record.clone());
         Ok(record)
+      }
+
+      async fn list(&self) -> Result<Vec<Self::Record>, $crate::db::DbError> {
+        Ok(self.inner.lock().unwrap().values().cloned().collect())
       }
 
       async fn delete(&self, id: &str) -> Result<(), $crate::db::DbError> {

@@ -21,6 +21,7 @@ const client = useSurrealClient()
 const jobId = route.params.id as string
 
 const showDeleteModal = ref(false)
+const submitError = ref<string | null>(null)
 
 const { data: job, isLoading: loadingJob, isError: jobError } = useQuery({
   queryKey: ["job", jobId],
@@ -131,6 +132,7 @@ const startEditing = () => {
 
 const updateMutation = useMutation({
   mutationFn: (updatedJob: Partial<typeof editForm.value>) => {
+    submitError.value = null
     const payload: Record<string, unknown> = {
       job_name: updatedJob.job_name,
       job_shell: updatedJob.job_shell,
@@ -145,6 +147,9 @@ const updateMutation = useMutation({
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: ["job", jobId] })
     isEditing.value = false
+  },
+  onError: (err: Error) => {
+    submitError.value = err.message || "Failed to update job"
   },
 })
 
@@ -161,6 +166,9 @@ const updateAssignmentsMutation = useMutation({
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: ["job", jobId] })
     isEditingAssignments.value = false
+  },
+  onError: (err: Error) => {
+    submitError.value = err.message || "Failed to update assignments"
   },
 })
 
@@ -222,6 +230,7 @@ const handleViewAssignmentDetails = (item: selectItem) => {
         </div>
 
         <form v-if="isEditing" @submit.prevent="handleUpdate" class="edit-form">
+          <div v-if="submitError" class="error-banner">{{ submitError }}</div>
           <div class="form-group">
             <label class="form-label">Name</label>
             <input v-model="editForm.job_name" type="text" class="form-input" required />
@@ -367,6 +376,15 @@ const handleViewAssignmentDetails = (item: selectItem) => {
   select {
     cursor: pointer;
   }
+}
+
+.error-banner {
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  background: var(--status-failed-bg);
+  color: var(--status-failed-text);
+  font-size: 0.85rem;
+  font-weight: 600;
 }
 
 .form-actions {

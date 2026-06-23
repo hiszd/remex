@@ -45,6 +45,8 @@ pub trait DbOperator: Send + Sync {
   async fn read(&self, id: &str) -> Result<Option<Self::Record>, DbError>;
   /// Replace a record's content. Returns the updated record.
   async fn update(&self, id: &str, input: Self::Input) -> Result<Self::Record, DbError>;
+  /// List all records.
+  async fn list(&self) -> Result<Vec<Self::Record>, DbError>;
   /// Delete a record by string id.
   async fn delete(&self, id: &str) -> Result<(), DbError>;
 }
