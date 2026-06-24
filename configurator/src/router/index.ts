@@ -60,10 +60,20 @@ const router = markRaw(createRouter({
       name: "job-details",
       component: () => import("@/views/JobDetailsView.vue"),
     },
+    {
+      path: "/design",
+      name: "design",
+      component: () => import("@/views/DesignPrototype.vue"),
+    },
+    {
+      path: "/design/:section",
+      name: "design-section",
+      component: () => import("@/views/DesignPrototype.vue"),
+    },
   ],
 }))
 
-const publicRoutes = ["login", "register"]
+const publicRoutes = ["login", "register", "design"]
 
 router.beforeEach(async (to) => {
   if (!authReady.value) {
