@@ -1,5 +1,6 @@
 pub mod audit;
 pub mod clients;
+pub mod enrollment_token;
 pub mod config;
 pub mod executions;
 pub mod groups;

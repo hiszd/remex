@@ -42,6 +42,8 @@ impl AuditLog {
         USE NS remex DB remex;
         DEFINE TABLE IF NOT EXISTS audit_log SCHEMAFULL
           PERMISSIONS FOR select FULL;
+        DEFINE TABLE audit_log PERMISSIONS
+          FOR select WHERE $auth.id IN (SELECT id FROM user);
 
         DEFINE FIELD IF NOT EXISTS table_name ON TABLE audit_log TYPE string;
         DEFINE FIELD IF NOT EXISTS record_id ON TABLE audit_log TYPE record<job | client | group>;

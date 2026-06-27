@@ -17,6 +17,7 @@ pub struct ClientData {
   pub client_name: String,
   pub secret: String,
   pub hardware_hash: String,
+  pub blocked: bool,
   pub last_seen: Option<surrealdb::types::Datetime>,
   pub connection_history: Vec<serde_json::Value>,
 }
@@ -27,6 +28,7 @@ pub struct Client {
   pub client_name: String,
   pub secret: String,
   pub hardware_hash: String,
+  pub blocked: bool,
   pub last_seen: Option<surrealdb::types::Datetime>,
   pub connection_history: Vec<serde_json::Value>,
   pub created_at: surrealdb::types::Datetime,
@@ -35,25 +37,54 @@ pub struct Client {
 
 impl Client {
   pub async fn migrate(db: &Surreal<Any>) -> Result<(), DbError> {
-    // this will create the table in the database if it does not already exist
+    // Initial table creation (IF NOT EXISTS — only runs once)
     db.query(
       r"
         USE NS remex DB remex;
         DEFINE TABLE IF NOT EXISTS client SCHEMAFULL
-          PERMISSIONS FOR select FULL;
+          PERMISSIONS FOR select WHERE id = $auth.id,
+                    FOR update WHERE id = $auth.id,
+                    FOR create FULL,
+                    FOR delete NONE;
         DEFINE FIELD IF NOT EXISTS client_name ON TABLE client TYPE string;
         DEFINE FIELD IF NOT EXISTS secret ON TABLE client TYPE string VALUE crypto::argon2::generate($value);
         DEFINE FIELD IF NOT EXISTS hardware_hash ON TABLE client TYPE string;
+        DEFINE FIELD IF NOT EXISTS blocked ON TABLE client TYPE bool DEFAULT false;
         DEFINE FIELD IF NOT EXISTS created_at ON TABLE client TYPE datetime DEFAULT time::now() READONLY;
         DEFINE FIELD IF NOT EXISTS updated_at ON TABLE client TYPE datetime VALUE time::now() READONLY;
 
         DEFINE FIELD IF NOT EXISTS last_seen ON TABLE client TYPE option<datetime>;
         DEFINE FIELD IF NOT EXISTS connection_history ON TABLE client TYPE array<object> DEFAULT [];
-        // TODO: Limit connection_history to last 100 entries via EVENT or application code
+        DEFINE EVENT IF NOT EXISTS trim_client_connection_history ON TABLE client
+        WHEN $event = 'UPDATE'
+        THEN {
+          IF array::len($after.connection_history) > 100 THEN
+            UPDATE $this.id SET connection_history = $after.connection_history[
+              math::max(0, array::len($after.connection_history) - 100)..
+            ];
+          END;
+        };
 
         DEFINE INDEX IF NOT EXISTS idx_hardware_hash ON TABLE client COLUMNS hardware_hash UNIQUE;
 
-        DEFINE ACCESS IF NOT EXISTS endpoint ON DATABASE TYPE BEARER FOR RECORD DURATION FOR GRANT 1d;
+        DEFINE ACCESS IF NOT EXISTS endpoint_access ON DATABASE TYPE RECORD
+          SIGNUP {
+            LET $tok = (SELECT * FROM enrollment_token WHERE token_hash = crypto::sha256($token) AND valid = true AND (expires_at = NONE OR expires_at > time::now()) LIMIT 1)[0];
+            IF $tok = NONE {
+              THROW 'Invalid or expired enrollment token'
+            } ELSE {
+              LET $cl = (CREATE client CONTENT {
+                client_name: $client_name,
+                secret: $secret,
+                hardware_hash: $hardware_hash,
+                blocked: false
+              });
+              UPDATE $tok.id SET valid = false, used_at = time::now(), used_by = $cl.id;
+              RETURN $cl
+            }
+          }
+          SIGNIN (SELECT * FROM client WHERE hardware_hash = $hardware_hash AND crypto::argon2::compare(secret, $secret) AND blocked != true)
+          DURATION FOR TOKEN 1d;
 
         DEFINE EVENT IF NOT EXISTS audit_client ON TABLE client
         WHEN $event IN ['CREATE', 'UPDATE', 'DELETE']
@@ -70,6 +101,7 @@ impl Client {
     )
     .await?
     .check()?;
+
     Ok(())
   }
 }
@@ -81,6 +113,7 @@ impl From<(String, ClientData)> for Client {
       client_name: data.client_name,
       secret: data.secret,
       hardware_hash: data.hardware_hash,
+      blocked: data.blocked,
       last_seen: data.last_seen,
       connection_history: data.connection_history,
       created_at: surrealdb::types::Datetime::default(),

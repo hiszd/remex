@@ -55,6 +55,7 @@ pub async fn migrate(db: &Surreal<Any>) -> Result<(), DbError> {
   let remex = db.clone();
   remex.use_ns("remex").use_db("remex").await?;
   model::clients::Client::migrate(&remex).await?;
+  model::enrollment_token::EnrollmentToken::migrate(&remex).await?;
   model::executions::Execution::migrate(&remex).await?;
   model::groups::Group::migrate(&remex).await?;
   model::jobs::Job::migrate(&remex).await?;

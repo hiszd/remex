@@ -73,6 +73,11 @@ impl Job {
         USE NS remex DB remex;
         DEFINE TABLE IF NOT EXISTS job SCHEMAFULL
           PERMISSIONS FOR select FULL FOR create FULL FOR update FULL FOR delete FULL;
+        DEFINE TABLE job PERMISSIONS
+          FOR select FULL,
+          FOR create WHERE $auth.id IN (SELECT id FROM user),
+          FOR update WHERE $auth.id IN (SELECT id FROM user),
+          FOR delete WHERE $auth.id IN (SELECT id FROM user);
         DEFINE FIELD IF NOT EXISTS job_name ON TABLE job TYPE string;
         DEFINE FIELD IF NOT EXISTS job_shell ON TABLE job TYPE string;
         DEFINE FIELD IF NOT EXISTS job_command ON TABLE job TYPE string;
@@ -83,11 +88,21 @@ impl Job {
         DEFINE FIELD IF NOT EXISTS execution_status ON TABLE job TYPE object COMPUTED
           IF count((SELECT id FROM execution WHERE job_id = $this.id)) = 0
             THEN { Pending: {} }
-          ELSE IF count((SELECT id FROM execution WHERE job_id = $this.id AND status = { Failed: {} })) > 0
+          ELSE IF count((SELECT id FROM execution AS e WHERE job_id = $this.id
+            AND status = { Failed: {} }
+            AND execution_start = (SELECT VALUE math::max(execution_start) FROM execution WHERE job_id = $this.id AND client_id = e.client_id))) > 0
             THEN { Failed: {} }
-          ELSE IF count((SELECT id FROM execution WHERE job_id = $this.id AND status = { TimedOut: {} })) = count((SELECT id FROM execution WHERE job_id = $this.id))
+          ELSE IF count((SELECT id FROM execution AS e WHERE job_id = $this.id
+            AND status = { TimedOut: {} }
+            AND execution_start = (SELECT VALUE math::max(execution_start) FROM execution WHERE job_id = $this.id AND client_id = e.client_id)))
+            =
+            count((SELECT client_id FROM execution WHERE job_id = $this.id GROUP BY client_id))
             THEN { TimedOut: {} }
-          ELSE IF count((SELECT id FROM execution WHERE job_id = $this.id AND status = { Completed: {} })) = count((SELECT id FROM execution WHERE job_id = $this.id))
+          ELSE IF count((SELECT id FROM execution AS e WHERE job_id = $this.id
+            AND status = { Completed: {} }
+            AND execution_start = (SELECT VALUE math::max(execution_start) FROM execution WHERE job_id = $this.id AND client_id = e.client_id)))
+            =
+            count((SELECT client_id FROM execution WHERE job_id = $this.id GROUP BY client_id))
             THEN { Completed: {} }
           ELSE { Running: {} }
           END;

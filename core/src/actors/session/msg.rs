@@ -72,7 +72,8 @@ impl Handler<SignupClient> for super::RemexSession {
           client_name: name,
           hardware_hash,
           secret: client_secret.clone(),
-          last_seen: None,
+          blocked: false,
+          last_seen: Some(chrono::Utc::now().into()),
           connection_history: vec![],
         }))
         .await
@@ -161,7 +162,8 @@ impl Handler<SigninClient> for super::RemexSession {
             client_name: c.client_name,
             hardware_hash: c.hardware_hash,
             secret: client_secret.clone(),
-            last_seen: None,
+            blocked: c.blocked,
+            last_seen: Some(chrono::Utc::now().into()),
             connection_history: vec![],
           }))
           .await
