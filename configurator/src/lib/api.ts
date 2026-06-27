@@ -48,16 +48,15 @@ export async function updateJob(
   // Use SET instead of MERGE to replace object fields entirely
   // (MERGE recursively merges object-typed enums like `enabled`)
   const assignments = keys.map(k => `\`${k}\` = $${k}`).join(", ")
-  const [raw] = await client.query<Job[]>(
+  const [record] = await client.query<Job[]>(
     `UPDATE ${recordId} SET ${assignments} RETURN AFTER`,
     data
   ).collect()
 
-  const job = (raw as any)?.result?.[0] ?? raw
-  if (!job) {
+  if (!record) {
     throw new Error(`Failed to update job: ${id}`)
   }
-  return job as unknown as Job
+  return record as unknown as Job
 }
 
 export async function deleteJob(
@@ -142,11 +141,12 @@ export async function getExecutionsForJob(
   client: Surreal,
   jobId: RecordId
 ): Promise<Execution[]> {
-  const [raw] = await client.query<Execution[]>(
+  const result = await client.query<Execution[]>(
     "SELECT * FROM execution WHERE job_id = $job_id ORDER BY created_at DESC",
     { job_id: jobId }
   ).collect()
-  return (raw as any)?.result ?? []
+  const records = (result as any)[0] as Execution[] | undefined
+  return records ?? []
 }
 
 export async function getExecutionById(
@@ -163,7 +163,7 @@ export async function getEnrollmentTokens(client: Surreal): Promise<EnrollmentTo
   const [raw] = await client.query<EnrollmentToken[]>(
     "SELECT * FROM enrollment_token ORDER BY created_at DESC"
   ).collect()
-  return (raw as any)?.result ?? []
+  return (Array.isArray(raw) ? raw : (raw as any)?.result) ?? []
 }
 
 export async function getEnrollmentTokenById(
@@ -191,7 +191,7 @@ export async function createEnrollmentToken(
   if (opts.expires_at) {
     params.expires_at = opts.expires_at
   }
-  const queryResult = await client.query<EnrollmentToken[]>(
+  const [record] = await client.query<EnrollmentToken[]>(
     `CREATE enrollment_token CONTENT {
       token_hash: crypto::sha256($raw_token),
       valid: true,
@@ -202,17 +202,8 @@ export async function createEnrollmentToken(
     params
   ).collect()
 
-  const first = (queryResult as any)?.[0]
-  const record = first as EnrollmentToken | undefined
-
   if (!record) {
-    throw new Error(
-      `Failed to create enrollment token.\n` +
-      `queryResult type: ${typeof queryResult}, isArray: ${Array.isArray(queryResult)}\n` +
-      `queryResult: ${JSON.stringify(queryResult)}\n` +
-      `first type: ${typeof first}, isArray: ${Array.isArray(first)}\n` +
-      `first: ${JSON.stringify(first)}`
-    )
+    throw new Error("Failed to create enrollment token")
   }
   return { record, plaintext_token }
 }
