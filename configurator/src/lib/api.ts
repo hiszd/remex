@@ -184,19 +184,22 @@ export async function createEnrollmentToken(
   opts: { single_use: boolean; expires_at: string | null }
 ): Promise<CreateEnrollmentTokenResult> {
   const plaintext_token = generateToken()
+  const params: Record<string, unknown> = {
+    raw_token: plaintext_token,
+    single_use: opts.single_use,
+  }
+  if (opts.expires_at) {
+    params.expires_at = opts.expires_at
+  }
   const [raw] = await client.query<EnrollmentToken[]>(
     `CREATE enrollment_token CONTENT {
       token_hash: crypto::sha256($raw_token),
       valid: true,
       single_use: $single_use,
-      expires_at: $expires_at,
+      expires_at: $expires_at ?? NONE,
       issued_by: $auth.id
     }`,
-    {
-      raw_token: plaintext_token,
-      single_use: opts.single_use,
-      expires_at: opts.expires_at,
-    }
+    params
   ).collect()
   const record = (raw as any)?.result?.[0] as unknown as EnrollmentToken
   if (!record) {
