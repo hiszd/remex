@@ -202,17 +202,17 @@ export async function createEnrollmentToken(
     params
   ).collect()
 
-  // queryResult is [QueryResult]; extract the created record
   const first = (queryResult as any)?.[0]
-  const record: EnrollmentToken | undefined =
-    (first as any)?.result?.[0] ??      // { status, result: [record] }
-    (Array.isArray(first) ? first[0] : undefined) ??  // [record]
-    (first as any)?.result ??            // { status, result: record }
-    undefined                            // fallback
+  const record = first as EnrollmentToken | undefined
 
   if (!record) {
-    const errDetail = (first as any)?.result ?? (first as any)?.status ?? "unknown"
-    throw new Error(`Failed to create enrollment token: ${JSON.stringify(errDetail)}`)
+    throw new Error(
+      `Failed to create enrollment token.\n` +
+      `queryResult type: ${typeof queryResult}, isArray: ${Array.isArray(queryResult)}\n` +
+      `queryResult: ${JSON.stringify(queryResult)}\n` +
+      `first type: ${typeof first}, isArray: ${Array.isArray(first)}\n` +
+      `first: ${JSON.stringify(first)}`
+    )
   }
   return { record, plaintext_token }
 }
