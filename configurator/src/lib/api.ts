@@ -186,14 +186,14 @@ export async function createEnrollmentToken(
   const plaintext_token = generateToken()
   const [raw] = await client.query<EnrollmentToken[]>(
     `CREATE enrollment_token CONTENT {
-      token_hash: crypto::sha256($token),
+      token_hash: crypto::sha256($raw_token),
       valid: true,
       single_use: $single_use,
       expires_at: $expires_at,
       issued_by: $auth.id
     }`,
     {
-      token: plaintext_token,
+      raw_token: plaintext_token,
       single_use: opts.single_use,
       expires_at: opts.expires_at,
     }
