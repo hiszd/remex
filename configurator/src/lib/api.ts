@@ -191,7 +191,7 @@ export async function createEnrollmentToken(
   if (opts.expires_at) {
     params.expires_at = opts.expires_at
   }
-  const [raw] = await client.query<EnrollmentToken[]>(
+  const queryResult = await client.query<EnrollmentToken[]>(
     `CREATE enrollment_token CONTENT {
       token_hash: crypto::sha256($raw_token),
       valid: true,
@@ -201,9 +201,18 @@ export async function createEnrollmentToken(
     }`,
     params
   ).collect()
-  const record = (raw as any)?.result?.[0] as unknown as EnrollmentToken
+
+  // queryResult is [QueryResult]; extract the created record
+  const first = (queryResult as any)?.[0]
+  const record: EnrollmentToken | undefined =
+    (first as any)?.result?.[0] ??      // { status, result: [record] }
+    (Array.isArray(first) ? first[0] : undefined) ??  // [record]
+    (first as any)?.result ??            // { status, result: record }
+    undefined                            // fallback
+
   if (!record) {
-    throw new Error("Failed to create enrollment token")
+    const errDetail = (first as any)?.result ?? (first as any)?.status ?? "unknown"
+    throw new Error(`Failed to create enrollment token: ${JSON.stringify(errDetail)}`)
   }
   return { record, plaintext_token }
 }
