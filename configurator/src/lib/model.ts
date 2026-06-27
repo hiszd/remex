@@ -93,6 +93,18 @@ export interface Execution {
   updated_at: string
 }
 
+export interface EnrollmentToken {
+  id: RecordId
+  token_hash: string
+  valid: boolean
+  single_use: boolean
+  expires_at: string | null
+  issued_by: RecordId
+  used_at: string | null
+  used_by: RecordId | null
+  created_at: string
+}
+
 export interface User {
   id: RecordId
   username: string
@@ -154,6 +166,15 @@ export const FIELD_LABELS: Record<string, string> = {
   timeout: "Timeout",
   username: "Username",
   email: "Email",
+  execution_id: "Execution ID",
+  status: "Status",
+  token_hash: "Token Hash",
+  valid: "Valid",
+  single_use: "Single Use",
+  expires_at: "Expires",
+  issued_by: "Issued By",
+  used_at: "Used At",
+  used_by: "Used By",
 }
 
 export function fieldLabel(field: string): string {

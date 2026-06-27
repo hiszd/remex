@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from "vue"
+import { ref, computed, onMounted, onUnmounted, watch } from "vue"
 
 const props = withDefaults(defineProps<{
   expanded?: boolean
@@ -16,6 +16,8 @@ const emit = defineEmits<{
   navigate: [path: string]
   logout: []
 }>()
+
+const initial = computed(() => (props.username ?? "U").charAt(0).toUpperCase())
 
 const isCollapsedMedia = ref(false)
 let mql: MediaQueryList | null = null
@@ -42,13 +44,17 @@ function toggle() {
 }
 
 const navItems = [
-  { name: "Dashboard", path: "/design", icon: "dashboard" },
-  { name: "Jobs", path: "/design/jobs", icon: "jobs" },
-  { name: "Groups", path: "/design/groups", icon: "groups" },
-  { name: "Clients", path: "/design/clients", icon: "clients" },
+  { name: "Dashboard", path: "/", icon: "dashboard" },
+  { name: "Jobs", path: "/jobs", icon: "jobs" },
+  { name: "Groups", path: "/groups", icon: "groups" },
+  { name: "Clients", path: "/clients", icon: "clients" },
+  { name: "Tokens", path: "/tokens", icon: "tokens" },
 ]
 
-
+function isActive(item: (typeof navItems)[number]): boolean {
+  if (item.path === "/") return props.activeItem === "/"
+  return props.activeItem.startsWith(item.path)
+}
 </script>
 
 <template>
@@ -68,7 +74,7 @@ const navItems = [
         v-for="item in navItems"
         :key="item.path"
         class="nav-item"
-        :class="{ active: activeItem === item.path }"
+        :class="{ active: isActive(item) }"
         @click="emit('navigate', item.path)"
         :title="item.name"
       >
@@ -89,6 +95,11 @@ const navItems = [
           <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
           <path d="M16 3.13a4 4 0 0 1 0 7.75" />
         </svg>
+        <!-- Tokens -->
+        <svg v-else-if="item.icon === 'tokens'" class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+        </svg>
         <!-- Clients -->
         <svg v-else class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect width="14" height="8" x="5" y="2" rx="2" />
@@ -102,7 +113,7 @@ const navItems = [
 
     <div class="sidebar-footer">
       <div class="user-section" :title="username">
-        <div class="user-avatar-design">{{ username[0].toUpperCase() }}</div>
+        <div class="user-avatar-design">{{ initial }}</div>
         <span v-if="expanded" class="user-name-design">{{ username }}</span>
       </div>
       <button class="logout-btn-design" @click="emit('logout')" title="Logout">

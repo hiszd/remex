@@ -1,5 +1,5 @@
 import { RecordId, Table, type Surreal } from "surrealdb"
-import type { Job, JobCreate, Group, GroupCreate, Client } from "@/lib/model"
+import type { EnrollmentToken, Job, JobCreate, Group, GroupCreate, Client, Execution } from "@/lib/model"
 
 /* ── helpers ── */
 
@@ -134,6 +134,94 @@ export async function getClientById(
   } else {
     return (result as unknown as Client)
   }
+}
+
+/* ── Executions ── */
+
+export async function getExecutionsForJob(
+  client: Surreal,
+  jobId: RecordId
+): Promise<Execution[]> {
+  const [raw] = await client.query<Execution[]>(
+    "SELECT * FROM execution WHERE job_id = $job_id ORDER BY created_at DESC",
+    { job_id: jobId }
+  ).collect()
+  return (raw as any)?.result ?? []
+}
+
+export async function getExecutionById(
+  client: Surreal,
+  id: string
+): Promise<Execution | null> {
+  const result = await client.select<Execution>(rid(id))
+  return (result as unknown as Execution) ?? null
+}
+
+/* ── Enrollment Tokens ── */
+
+export async function getEnrollmentTokens(client: Surreal): Promise<EnrollmentToken[]> {
+  const [raw] = await client.query<EnrollmentToken[]>(
+    "SELECT * FROM enrollment_token ORDER BY created_at DESC"
+  ).collect()
+  return (raw as any)?.result ?? []
+}
+
+export async function getEnrollmentTokenById(
+  client: Surreal,
+  id: string
+): Promise<EnrollmentToken | null> {
+  const result = await client.select<EnrollmentToken>(rid(id))
+  return (result as unknown as EnrollmentToken) ?? null
+}
+
+export interface CreateEnrollmentTokenResult {
+  record: EnrollmentToken
+  plaintext_token: string
+}
+
+export async function createEnrollmentToken(
+  client: Surreal,
+  opts: { single_use: boolean; expires_at: string | null }
+): Promise<CreateEnrollmentTokenResult> {
+  const plaintext_token = generateToken()
+  const [raw] = await client.query<EnrollmentToken[]>(
+    `CREATE enrollment_token CONTENT {
+      token_hash: crypto::sha256($token),
+      valid: true,
+      single_use: $single_use,
+      expires_at: $expires_at,
+      issued_by: $auth.id
+    }`,
+    {
+      token: plaintext_token,
+      single_use: opts.single_use,
+      expires_at: opts.expires_at,
+    }
+  ).collect()
+  const record = (raw as any)?.result?.[0] as unknown as EnrollmentToken
+  if (!record) {
+    throw new Error("Failed to create enrollment token")
+  }
+  return { record, plaintext_token }
+}
+
+export async function deleteEnrollmentToken(
+  client: Surreal,
+  id: string
+): Promise<void> {
+  await client.delete(rid(id))
+}
+
+function generateToken(): string {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+  let result = ""
+  const array = new Uint8Array(32)
+  crypto.getRandomValues(array)
+  for (let i = 0; i < 32; i++) {
+    const byte = array[i] ?? 0
+    result += chars[byte % chars.length]
+  }
+  return result
 }
 
 /* ── Helpers ── */

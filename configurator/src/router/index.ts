@@ -18,62 +18,79 @@ const router = markRaw(createRouter({
     {
       path: "/",
       name: "home",
+      meta: { title: "Dashboard" },
       component: () => import("@/views/DashboardView.vue"),
     },
     {
       path: "/clients",
       name: "clients",
+      meta: { title: "Clients" },
       component: () => import("@/views/ClientsView.vue"),
     },
     {
       path: "/clients/:id",
       name: "client-details",
+      meta: { title: "Client Details" },
       component: () => import("@/views/ClientDetailsView.vue"),
     },
     {
       path: "/groups",
       name: "groups",
+      meta: { title: "Groups" },
       component: () => import("@/views/GroupsView.vue"),
     },
     {
       path: "/groups/:id",
       name: "group-details",
+      meta: { title: "Group Details" },
       component: () => import("@/views/GroupDetailsView.vue"),
     },
     {
       path: "/groups/new",
       name: "create-group",
+      meta: { title: "Create Group" },
       component: () => import("@/views/CreateGroupView.vue"),
     },
     {
       path: "/jobs",
       name: "jobs",
+      meta: { title: "Jobs" },
       component: () => import("@/views/JobsView.vue"),
     },
     {
       path: "/jobs/new",
       name: "create-job",
+      meta: { title: "Create Job" },
       component: () => import("@/views/CreateJobView.vue"),
     },
     {
       path: "/jobs/:id",
       name: "job-details",
+      meta: { title: "Job Details" },
       component: () => import("@/views/JobDetailsView.vue"),
     },
     {
-      path: "/design",
-      name: "design",
-      component: () => import("@/views/DesignPrototype.vue"),
+      path: "/tokens",
+      name: "tokens",
+      meta: { title: "Enrollment Tokens" },
+      component: () => import("@/views/TokensView.vue"),
     },
     {
-      path: "/design/:section",
-      name: "design-section",
-      component: () => import("@/views/DesignPrototype.vue"),
+      path: "/tokens/new",
+      name: "create-token",
+      meta: { title: "Generate Token" },
+      component: () => import("@/views/CreateTokenView.vue"),
+    },
+    {
+      path: "/executions/:id",
+      name: "execution-details",
+      meta: { title: "Execution Details" },
+      component: () => import("@/views/ExecutionDetailsView.vue"),
     },
   ],
 }))
 
-const publicRoutes = ["login", "register", "design"]
+const publicRoutes = ["login", "register"]
 
 router.beforeEach(async (to) => {
   if (!authReady.value) {
