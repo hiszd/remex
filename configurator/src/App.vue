@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { watch, ref, computed } from "vue"
 import { RouterView, useRoute, useRouter } from "vue-router"
-import AppSidebar from "@/components/AppSidebar.vue"
+import DesignSidebar from "@/components/design/DesignSidebar.vue"
+import DesignTopBar from "@/components/design/DesignTopBar.vue"
 import { provideSurreal } from "@/lib/surreal"
 import { authReady, tryRestoreSession } from "@/lib/auth"
 import { useAuthGuard, setupGlobalInactivityListeners } from "@/lib/authGuard"
@@ -10,13 +11,43 @@ const route = useRoute()
 const router = useRouter()
 const showApp = ref(false)
 const connectionError = ref<string | null>(null)
+const sidebarExpanded = ref(true)
+
 const isAuthPage = computed(() =>
   ["login", "register"].includes(String(route.name))
 )
 
-const isDesignPage = computed(() =>
-  String(route.name).startsWith("design")
+const pageTitle = computed(() =>
+  (route.meta.title as string) ?? "Remex"
 )
+
+const breadcrumbs = computed(() => {
+  const name = route.name as string
+  switch (name) {
+    case "home":
+      return [{ label: "Dashboard" }]
+    case "jobs":
+      return [{ label: "Jobs" }]
+    case "job-details":
+      return [{ label: "Jobs", path: "/jobs" }, { label: "Job Details" }]
+    case "create-job":
+      return [{ label: "Jobs", path: "/jobs" }, { label: "Create Job" }]
+    case "groups":
+      return [{ label: "Groups" }]
+    case "group-details":
+      return [{ label: "Groups", path: "/groups" }, { label: "Group Details" }]
+    case "create-group":
+      return [{ label: "Groups", path: "/groups" }, { label: "Create Group" }]
+    case "clients":
+      return [{ label: "Clients" }]
+    case "client-details":
+      return [{ label: "Clients", path: "/clients" }, { label: "Client Details" }]
+    case "execution-details":
+      return [{ label: "Jobs", path: "/jobs" }, { label: "Execution Details" }]
+    default:
+      return []
+  }
+})
 
 const { client, isSuccess, isError, connect, error } = provideSurreal({
   endpoint: "ws://192.168.10.87:8090",
@@ -27,7 +58,6 @@ const { client, isSuccess, isError, connect, error } = provideSurreal({
   autoConnect: false,
 })
 
-// Mount the global auth guard: handles token rotation and auth error redirects
 const { scheduleRotation } = useAuthGuard(client)
 
 connect().catch(() => { })
@@ -65,31 +95,32 @@ watch(authReady, (ready) => {
     <p class="loading-text">Loading...</p>
   </div>
 
-  <div v-else-if="isDesignPage" class="design-layout">
-    <Suspense>
-      <RouterView />
-      <template #fallback>
-        <div class="state-card">
-          <div class="spinner" />
-          <p class="state-text">Loading...</p>
-        </div>
-      </template>
-    </Suspense>
-  </div>
-
-  <div v-else-if="!isAuthPage" class="app-layout">
-    <AppSidebar />
-    <main class="main-content">
-      <Suspense>
-        <RouterView />
-        <template #fallback>
-          <div class="state-card">
-            <div class="spinner" />
-            <p class="state-text">Loading...</p>
-          </div>
-        </template>
-      </Suspense>
-    </main>
+  <div v-else-if="!isAuthPage" class="design-layout">
+    <DesignSidebar
+      :expanded="sidebarExpanded"
+      :active-item="route.path"
+      @navigate="router.push"
+      @close="sidebarExpanded = false"
+    />
+    <div :class="['sidebar-overlay', { visible: sidebarExpanded }]" @click="sidebarExpanded = false" />
+    <div class="design-content">
+      <DesignTopBar
+        :title="pageTitle"
+        :breadcrumbs="breadcrumbs"
+        @toggle-sidebar="sidebarExpanded = !sidebarExpanded"
+      />
+      <main class="design-main">
+        <Suspense>
+          <RouterView />
+          <template #fallback>
+            <div class="state-card">
+              <div class="spinner" />
+              <p class="state-text">Loading...</p>
+            </div>
+          </template>
+        </Suspense>
+      </main>
+    </div>
   </div>
 
   <div v-else class="auth-layout">
@@ -813,18 +844,6 @@ body {
       @extend .monospace;
     }
   }
-}
-
-.app-layout {
-  display: flex;
-  height: 100vh;
-  overflow: hidden;
-}
-
-.main-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0;
 }
 
 .auth-layout {

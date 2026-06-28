@@ -108,7 +108,6 @@ const handleDelete = () => {
 }
 
 const handleMembersSubmit = (selectedIds: RecordId[]) => {
-  console.log("selectedIds", selectedIds)
   updateMembersMutation.mutate(selectedIds)
 }
 
@@ -131,22 +130,21 @@ const handleViewJobDetails = (item: selectItem) => {
 
 <template>
   <div class="page">
-    <header class="page-header">
-      <router-link to="/groups" class="back-link">← Back to Groups</router-link>
-      <div v-if="group" class="header-main">
-        <div class="title-group">
-          <h1 class="page-title">{{ group.group_name }}</h1>
-          <p class="group-id">{{ String(group.id) }}</p>
-        </div>
-        <div class="header-actions">
-          <button @click="showDeleteModal = true" class="btn-danger">Delete Group</button>
-        </div>
+    <router-link to="/groups" class="back-link">← Back to Groups</router-link>
+
+    <div v-if="group" class="header-main">
+      <div class="title-group">
+        <h1 class="page-title">{{ group.group_name }}</h1>
+        <p class="record-id">{{ String(group.id) }}</p>
       </div>
-    </header>
+      <div class="header-actions">
+        <button @click="showDeleteModal = true" class="btn-danger">Delete Group</button>
+      </div>
+    </div>
 
     <div v-if="loadingGroup" class="state-card">
       <div class="spinner" />
-      <p>Loading group details...</p>
+      <p class="state-text">Loading group details...</p>
     </div>
 
     <div v-else-if="groupError || !group" class="state-card state-error">
@@ -154,8 +152,8 @@ const handleViewJobDetails = (item: selectItem) => {
       <p class="state-text">The requested group could not be retrieved.</p>
     </div>
 
-    <div v-else class="details-container">
-      <section class="info-section card">
+    <template v-else>
+      <section class="card">
         <div class="section-header">
           <h2>General Information</h2>
         </div>
@@ -176,7 +174,7 @@ const handleViewJobDetails = (item: selectItem) => {
         </div>
       </section>
 
-      <section class="members-section card">
+      <section class="card">
         <div class="section-header">
           <h2>Members</h2>
           <button v-if="!isEditingMembers" @click="isEditingMembers = true" class="btn-secondary">Edit Members</button>
@@ -187,7 +185,7 @@ const handleViewJobDetails = (item: selectItem) => {
           @submit="handleMembersSubmit" @cancel="handleMembersCancel" @viewDetails="handleViewClientDetails" />
       </section>
 
-      <section class="assignments-section card">
+      <section class="card">
         <div class="section-header">
           <h2>Assigned Jobs ({{ assignedJobs.length }})</h2>
         </div>
@@ -195,14 +193,14 @@ const handleViewJobDetails = (item: selectItem) => {
         <MultiSelector :selectedItems="jobItems" :mode="'view'" :showMembers="true" emptyText="No jobs assigned"
           @viewDetails="handleViewJobDetails" />
       </section>
-    </div>
+    </template>
 
     <div v-if="showDeleteModal" class="modal-overlay">
       <div class="modal-content">
         <h3>Delete Group</h3>
         <p>Are you sure you want to delete this group? This action cannot be undone.</p>
         <div class="modal-actions">
-          <button @click="showDeleteModal = false" class="btn-secondary">Cancel</button>
+          <button @click="showDeleteModal = false" class="btn-ghost">Cancel</button>
           <button @click="handleDelete" class="btn-danger">Delete</button>
         </div>
       </div>
@@ -211,27 +209,6 @@ const handleViewJobDetails = (item: selectItem) => {
 </template>
 
 <style lang="scss" scoped>
-.page {
-  width: 100%;
-  max-width: 1000px;
-  margin: 0 auto;
-}
-
-.details-container {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-}
-
-.members-section,
-.assignments-section {
-  .section-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-}
-
 .assignment-badges {
   display: flex;
   gap: 0.5rem;

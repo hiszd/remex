@@ -42,7 +42,7 @@ impl Client {
       r"
         USE NS remex DB remex;
         DEFINE TABLE IF NOT EXISTS client SCHEMAFULL
-          PERMISSIONS FOR select WHERE id = $auth.id,
+          PERMISSIONS FOR select WHERE id = $auth.id OR $auth.id INSIDE (SELECT VALUE id FROM user),
                     FOR update WHERE id = $auth.id,
                     FOR create FULL,
                     FOR delete NONE;
@@ -67,36 +67,24 @@ impl Client {
 
         DEFINE INDEX IF NOT EXISTS idx_hardware_hash ON TABLE client COLUMNS hardware_hash UNIQUE;
 
-        DEFINE ACCESS IF NOT EXISTS endpoint_access ON DATABASE TYPE RECORD
-          SIGNUP {
-            LET $tok = (SELECT * FROM enrollment_token WHERE token_hash = crypto::sha256($token) AND valid = true AND (expires_at = NONE OR expires_at > time::now()) LIMIT 1)[0];
-            IF $tok = NONE {
-              THROW 'Invalid or expired enrollment token'
-            } ELSE {
-              LET $cl = (CREATE client CONTENT {
-                client_name: $client_name,
-                secret: $secret,
-                hardware_hash: $hardware_hash,
-                blocked: false
-              });
-              UPDATE $tok.id SET valid = false, used_at = time::now(), used_by = $cl.id;
-              RETURN $cl
+          DEFINE ACCESS IF NOT EXISTS endpoint_access ON DATABASE TYPE RECORD
+            SIGNUP {
+              LET $tok = (SELECT * FROM enrollment_token WHERE token_hash = crypto::sha256($enrollment_token) AND valid = true AND (expires_at = NONE OR expires_at > time::now()) LIMIT 1)[0];
+              IF $tok = NONE {
+                THROW 'Invalid or expired enrollment token'
+              } ELSE {
+                LET $cl = (CREATE client CONTENT {
+                  client_name: $client_name,
+                  secret: $secret,
+                  hardware_hash: $hardware_hash,
+                  blocked: false
+                })[0];
+                UPDATE $tok.id SET valid = false, used_at = time::now(), used_by = $cl.id;
+                RETURN $cl
+              }
             }
-          }
-          SIGNIN (SELECT * FROM client WHERE hardware_hash = $hardware_hash AND crypto::argon2::compare(secret, $secret) AND blocked != true)
-          DURATION FOR TOKEN 1d;
-
-        DEFINE EVENT IF NOT EXISTS audit_client ON TABLE client
-        WHEN $event IN ['CREATE', 'UPDATE', 'DELETE']
-        THEN {
-          CREATE audit_log SET
-            table_name = 'client',
-            record_id = $after.id ?? $before.id,
-            action = $event,
-            before_snapshot = IF $event = 'CREATE' THEN {} ELSE $before END,
-            after_snapshot = IF $event = 'DELETE' THEN {} ELSE $after END,
-            changed_by = $auth.id;
-        };
+            SIGNIN (SELECT * FROM client WHERE hardware_hash = $hardware_hash AND crypto::argon2::compare(secret, $secret) AND blocked != true)
+            DURATION FOR TOKEN 1d;
       ",
     )
     .await?

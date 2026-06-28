@@ -14,17 +14,17 @@ macro_rules! impl_surreal_db_operator {
       type Input = $input;
 
       async fn create(&self, input: Self::Input) -> Result<Self::Record, $crate::db::DbError> {
-        use $crate::db::DbError;
-        let sql = concat!("USE NS ", $ns, " DB ", $db, "; CREATE ", $table, " CONTENT $data");
-        let mut result = self.db
+        let id = ::uuid::Uuid::new_v4().to_string();
+        let rid = ::surrealdb::types::RecordId::new($table, id.as_str());
+        let sql = concat!("USE NS ", $ns, " DB ", $db, "; CREATE $id CONTENT $data");
+        self.db
           .query(sql)
-          .bind(("data", input))
+          .bind(("id", rid))
+          .bind(("data", input.clone()))
           .await?
           .check()?;
-        let record: Option<$record> = result.take(1)?;
-        record.ok_or_else(|| {
-          DbError::OperationFailed(concat!("Failed to create ", $table).into())
-        })
+        let record: $record = (id, input).into();
+        Ok(record)
       }
 
       async fn read(&self, id: &str) -> Result<Option<Self::Record>, $crate::db::DbError> {
@@ -38,18 +38,15 @@ macro_rules! impl_surreal_db_operator {
       }
 
       async fn update(&self, id: &str, input: Self::Input) -> Result<Self::Record, $crate::db::DbError> {
-        use $crate::db::DbError;
         let sql = concat!("USE NS ", $ns, " DB ", $db, "; UPDATE $id MERGE $data");
-        let mut result = self.db
+        self.db
           .query(sql)
           .bind(("id", ::surrealdb::types::RecordId::new($table, id)))
-          .bind(("data", input))
+          .bind(("data", input.clone()))
           .await?
           .check()?;
-        let record: Option<$record> = result.take(1)?;
-        record.ok_or_else(|| {
-          DbError::OperationFailed(concat!("Failed to update ", $table).into())
-        })
+        let record: $record = (id.to_string(), input).into();
+        Ok(record)
       }
 
       async fn list(&self) -> Result<Vec<Self::Record>, $crate::db::DbError> {
@@ -58,7 +55,7 @@ macro_rules! impl_surreal_db_operator {
           .query(sql)
           .await?
           .check()?;
-        Ok(result.take(0)?)
+        Ok(result.take(1)?)
       }
 
       async fn delete(&self, id: &str) -> Result<(), $crate::db::DbError> {

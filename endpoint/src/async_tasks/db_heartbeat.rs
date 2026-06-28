@@ -9,7 +9,7 @@ use tokio::sync::{
 
 pub async fn run(
   mut client_id_rx: mpsc::Receiver<String>,
-  mut db_handle_rx: watch::Receiver<Option<Surreal<Any>>>,
+  mut db_handle_rx: watch::Receiver<Option<(Surreal<Any>, String)>>,
 ) {
   let mut client_id: Option<String> = None;
   let mut db: Option<Surreal<Any>> = None;
@@ -34,9 +34,18 @@ pub async fn run(
       result = db_handle_rx.changed() => {
         match result {
           Ok(()) => {
-            db = db_handle_rx.borrow().clone();
-            if db.is_some() {
-              tracing::info!("Heartbeat task received db handle");
+            let entry = db_handle_rx.borrow().clone();
+            if let Some((ref handle, ref token)) = entry {
+              db = Some(handle.clone());
+              if let Err(e) = handle.authenticate(token.clone()).await {
+                tracing::warn!("Heartbeat auth failed: {e}");
+                db = None;
+              } else {
+                tracing::info!("Heartbeat task received db handle");
+              }
+            } else {
+              tracing::info!("Heartbeat task received cleared db handle");
+              db = None;
             }
           }
           Err(_) => {

@@ -42,37 +42,22 @@ const handleSubmit = async () => {
 </script>
 
 <template>
-  <div class="page">
-    <header class="page-header">
-      <router-link to="/groups" class="back-link">← Back to Groups</router-link>
-      <h1 class="page-title">Create New Group</h1>
-      <p class="page-subtitle">Create a new group to organize your clients.</p>
-    </header>
+  <div class="page" style="max-width: 800px;">
+    <router-link to="/groups" class="back-link">← Back to Groups</router-link>
+    <h1 class="page-title" style="margin-bottom: 1.5rem;">Create New Group</h1>
 
-    <form @submit.prevent="handleSubmit" class="form-card">
+    <form @submit.prevent="handleSubmit" class="card">
       <div v-if="submitError" class="error-banner">
         {{ submitError }}
       </div>
 
-      <div class="form-section">
+      <div class="form-group">
         <label for="group_name" class="form-label">Group Name</label>
-        <input
-          id="group_name"
-          v-model="form.group_name"
-          type="text"
-          class="form-input"
-          placeholder="e.g. Production Servers"
-          required
-        />
+        <input id="group_name" v-model="form.group_name" type="text" class="form-input" placeholder="e.g. Production Servers" required />
       </div>
 
       <div class="form-actions">
-        <button
-          type="button"
-          @click="router.push('/groups')"
-          class="btn-secondary"
-          :disabled="isSubmitting"
-        >Cancel</button>
+        <button type="button" @click="router.push('/groups')" class="btn-ghost" :disabled="isSubmitting">Cancel</button>
         <button type="submit" class="btn-primary" :disabled="isSubmitting">
           {{ isSubmitting ? "Creating..." : "Create Group" }}
         </button>
@@ -82,17 +67,10 @@ const handleSubmit = async () => {
 </template>
 
 <style lang="scss" scoped>
-.page {
-  width: 100%;
-  max-width: 800px;
-  margin: 0 auto;
-}
-
-.form-card {
+.form-group {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
-  padding: 2rem;
+  gap: 0.5rem;
 }
 
 .error-banner {
@@ -102,12 +80,6 @@ const handleSubmit = async () => {
   color: var(--accent-900);
   border-radius: 0.5rem;
   font-size: 0.9rem;
-}
-
-.form-section {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
 }
 
 .form-actions {

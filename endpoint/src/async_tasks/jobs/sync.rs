@@ -311,7 +311,7 @@ async fn cleanup_old_executions() -> Result<(), crate::Error> {
 }
 
 pub async fn execution_sync_loop(
-  mut db_handle_rx: watch::Receiver<Option<Surreal<Any>>>,
+  mut db_handle_rx: watch::Receiver<Option<(Surreal<Any>, String)>>,
 ) -> Result<(), crate::Error> {
   use crate::db::remex::ExecutionCache;
 
@@ -320,13 +320,17 @@ pub async fn execution_sync_loop(
   loop {
     tokio::time::sleep(Duration::from_secs(30)).await;
 
-    let remote_db = match db_handle_rx.borrow_and_update().clone() {
-      Some(db) => db,
+    let (remote_db, auth_token) = match db_handle_rx.borrow_and_update().clone() {
+      Some((db, token)) => (db, token),
       None => {
         tracing::debug!("Remote DB not connected, skipping execution sync");
         continue;
       }
     };
+    if let Err(e) = remote_db.authenticate(auth_token).await {
+      tracing::warn!("Failed to authenticate remote db in sync: {e}");
+      continue;
+    }
 
     let db = match crate::db::get_local_remex().await {
       Ok(d) => d,

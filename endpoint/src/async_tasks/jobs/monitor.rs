@@ -86,14 +86,14 @@ async fn load_jobs_from_local_db(
 pub async fn run(
   mut cmd_rx: mpsc::Receiver<MonitorCommand>,
   job_injection_tx: mpsc::Sender<super::JobQueueMessage>,
-  mut db_handle_rx: watch::Receiver<Option<Surreal<Any>>>,
+  mut db_handle_rx: watch::Receiver<Option<(Surreal<Any>, String)>>,
 ) -> Result<(), crate::Error> {
   let mut client_id: Option<String> = None;
   let mut groups: Vec<RecordId> = Vec::new();
   let mut initial_sync_done = false;
 
   loop {
-    let remote_db: Option<Surreal<Any>> = db_handle_rx.borrow_and_update().clone();
+    let remote_db: Option<(Surreal<Any>, String)> = db_handle_rx.borrow_and_update().clone();
 
     if remote_db.is_none() && client_id.is_none() {
       tokio::time::sleep(Duration::from_secs(1)).await;
@@ -116,7 +116,12 @@ pub async fn run(
       continue;
     }
 
-    let remote_db = remote_db.unwrap();
+    let (remote_db, auth_token) = remote_db.unwrap();
+    if let Err(e) = remote_db.authenticate(auth_token).await {
+      tracing::warn!("Failed to re-authenticate remote db: {e}");
+      tokio::time::sleep(Duration::from_secs(2)).await;
+      continue;
+    }
     let cid = match client_id.clone() {
       Some(id) => id,
       None => {

@@ -76,13 +76,11 @@ impl Execution {
     db.query(
       r"
         USE NS remex DB remex;
-        DEFINE TABLE IF NOT EXISTS execution SCHEMAFULL
-          PERMISSIONS FOR select FULL FOR create FULL FOR update FULL;
-        DEFINE TABLE execution PERMISSIONS
-          FOR select WHERE client_id = $auth.id OR $auth.id IN (SELECT id FROM user),
-          FOR create WHERE client_id = $auth.id OR $auth.id IN (SELECT id FROM user),
-          FOR update WHERE client_id = $auth.id OR $auth.id IN (SELECT id FROM user),
-          FOR delete WHERE $auth.id IN (SELECT id FROM user);
+        DEFINE TABLE IF NOT EXISTS execution SCHEMAFULL PERMISSIONS
+          FOR select WHERE client_id = $auth.id OR $auth.id INSIDE (SELECT VALUE id FROM user),
+          FOR create WHERE client_id = $auth.id OR $auth.id INSIDE (SELECT VALUE id FROM user),
+          FOR update WHERE client_id = $auth.id OR $auth.id INSIDE (SELECT VALUE id FROM user),
+          FOR delete WHERE $auth.id INSIDE (SELECT VALUE id FROM user);
 
         DEFINE FIELD IF NOT EXISTS job_id ON TABLE execution TYPE record<job>;
         DEFINE FIELD IF NOT EXISTS client_id ON TABLE execution TYPE record<client>;

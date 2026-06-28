@@ -827,3 +827,87 @@ Using default canonical triage labels. See `docs/agents/triage-labels.md`.
 ### Domain docs
 
 Multi-context monorepo layout. See `docs/agents/domain.md`.
+
+## Configurator Design System
+
+The configurator uses a blue corporate design system with a collapsible sidebar + top bar layout.
+
+### Layout Architecture
+
+| Component | Role |
+|---|---|
+| `App.vue` | Root — provides DesignSidebar + DesignTopBar for all authenticated routes; auth pages (login/register) use full-screen layout |
+| `DesignSidebar.vue` | Collapsible sidebar with icon + label nav items. Auto-collapses ≤768px. Dark bg: `#334155`. Blue accent active state with left border indicator |
+| `DesignTopBar.vue` | Shows page title (from `route.meta.title`), hamburger toggle, optional search input |
+
+### Route Meta
+
+Each route defines `meta.title` used by DesignTopBar:
+
+| Route | `meta.title` |
+|---|---|
+| `/` | "Dashboard" |
+| `/jobs` | "Jobs" |
+| `/jobs/new` | "Create Job" |
+| `/jobs/:id` | "Job Details" |
+| `/groups` | "Groups" |
+| `/groups/new` | "Create Group" |
+| `/groups/:id` | "Group Details" |
+| `/clients` | "Clients" |
+| `/clients/:id` | "Client Details" |
+
+### Global CSS Classes (defined in App.vue)
+
+**Layout:** `.page`, `.page-title`, `.page-subtitle`, `.header-main`, `.title-group`, `.header-actions`, `.section-header`, `.section-header-row`, `.section-actions`, `.back-link`, `.design-layout`, `.design-content`, `.design-main`
+
+**Data display:** `.data-table`, `.data-table-card`, `.stats-grid`, `.stat-card`, `.stat-card-header`, `.stat-card-label`, `.stat-card-value`, `.stat-card-change`, `.stat-icon`
+
+**Badges:** `.status-badge` (pending/running/completed/failed/timedout), `.state-badge` (draft/enabled/disabled)
+
+**Forms:** `.form-input`, `.form-label`, `.info-label`, `.info-grid`, `.info-item`
+
+**Buttons:** `.btn-primary` (blue fill), `.btn-secondary` (blue-tinted fill), `.btn-danger` (vibrant red fill), `.btn-ghost` (slate fill)
+
+**Utilities:** `.card`, `.back-link`, `.empty-state`, `.empty-state-block`, `.empty-state-icon`, `.state-card`, `.monospace`, `.spinner`, `.modal-overlay`, `.modal-content`, `.modal-actions`, `.assignment-list`, `.assignment-item`, `.assignment-badges`, `.assignment-name`, `.details-btn`, `.search-input`, `.view-toggle`, `.hamburger-btn`, `.sidebar-overlay`, `.top-bar`, `.top-bar-left`, `.top-bar-right`, `.top-bar-title`, `.top-bar-breadcrumbs`
+
+### View Patterns
+
+| Pattern | Files |
+|---|---|
+| **List with view toggle** (table/grid) | `JobsView.vue`, `GroupsView.vue`, `ClientsView.vue` |
+| **Detail with info-grid + sections** | `JobDetailsView.vue`, `GroupDetailsView.vue`, `ClientDetailsView.vue` |
+| **Create form** (back-link + card form) | `CreateJobView.vue`, `CreateGroupView.vue` |
+| **Dashboard** (stat cards + recent data-table) | `DashboardView.vue` |
+
+### View Toggle Pattern
+
+List views implement a table/grid toggle:
+```vue
+const viewMode = ref<"table" | "grid">("table")
+```
+
+When `viewMode === "table"`, render `data-table-card > data-table`. When `viewMode === "grid"`, render a `stats-grid` of clickable stat-card elements.
+
+### Data Gaps (not currently in schema)
+
+| Data Point | Where Needed | Schema Gap |
+|---|---|---|
+| Online/offline status per client | Dashboard stat card, client list | `last_seen` exists but no live status |
+| Job execution count | Dashboard, client details, group details | Requires aggregation query on `execution` table |
+| Job last execution time | Dashboard, job details | Not stored on job — derived from executions |
+| Execution duration | Job details | `execution_start`/`execution_end` exist but not surfaced |
+| Job description | Job detail | No field exists |
+| Job tags/labels | Job list filter | No field exists |
+| Next scheduled run | Job detail | Cron/schedule not yet in schema |
+| Client IP / location | Client details | `connection_history` has ip but not surfaced |
+
+### Removed Files (post-redesign)
+
+| File | Reason |
+|---|---|
+| `AppSidebar.vue` | Replaced by `DesignSidebar.vue` |
+| `Job.vue` | Replaced by data-table rows |
+| `Group.vue` | Replaced by data-table rows |
+| `Client1.vue` | Replaced by data-table rows |
+| `DesignPrototype.vue` | Design routes removed |
+| `hero-card.scss` | Unused styles |

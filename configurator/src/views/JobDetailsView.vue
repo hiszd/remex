@@ -2,9 +2,9 @@
 import { ref, computed } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/vue-query"
-import { getJobById, updateJob, deleteJob, getClients, getGroups } from "@/lib/api"
+import { getJobById, updateJob, deleteJob, getClients, getGroups, getExecutionsForJob } from "@/lib/api"
 import { useSurrealClient } from "@/lib/surreal"
-import { formatDate } from "@/utils/date"
+import { formatDate, formatDistanceToNow, formatDuration } from "@/utils/date"
 import {
   extractEnumVariant,
   formatEnumVariant,
@@ -12,6 +12,7 @@ import {
   type EnabledVariant,
 } from "@/lib/model"
 import MultiSelector, { type selectItem } from "@/components/MultiSelector.vue"
+import IconViewDetails from "@/components/icons/IconViewDetails.vue"
 import type { RecordId } from "surrealdb"
 
 const route = useRoute()
@@ -45,6 +46,30 @@ const { data: allGroups } = useQuery({
   queryFn: () => getGroups(client),
   select: (data) => Object.freeze(data),
 })
+
+const { data: executions } = useQuery({
+  queryKey: ["executions", jobId],
+  queryFn: () => {
+    if (!job.value) return []
+    return getExecutionsForJob(client, job.value.id)
+  },
+  select: (data) => Object.freeze(data),
+  enabled: !!job.value,
+})
+
+const enrichedExecutions = computed(() => {
+  if (!executions.value || !allClients.value) return []
+  return executions.value.map(exec => {
+    const cidStr = String(exec.client_id)
+    const foundClient = allClients.value.find(c => String(c.id) === cidStr)
+    return {
+      ...exec,
+      client_name: foundClient?.client_name ?? cidStr,
+    }
+  })
+})
+
+const getStatusBadgeClass = (exec: any) => extractEnumVariant(exec.status).toLowerCase()
 
 const getAssignments = computed(() => {
   if (!job.value || !allClients.value || !allGroups.value) return []
@@ -195,27 +220,30 @@ const handleViewAssignmentDetails = (item: selectItem) => {
     router.push(`/groups/${item.id}`)
   }
 }
+
+const navigateToExecution = (execId: RecordId) => {
+  router.push(`/executions/${execId}`)
+}
 </script>
 
 <template>
   <div class="page">
-    <header class="page-header">
-      <router-link to="/jobs" class="back-link">← Back to Jobs</router-link>
-      <div class="header-main">
-        <div v-if="job" class="title-group">
-          <h1 class="page-title">{{ job.job_name }}</h1>
-          <p class="job-id">{{ String(job.id) }}</p>
-        </div>
-        <div class="header-actions">
-          <button v-if="job && !isEditing" @click="startEditing" class="btn-secondary">Edit Job</button>
-          <button v-if="job && !isEditing" @click="showDeleteModal = true" class="btn-danger">Delete Job</button>
-        </div>
+    <router-link to="/jobs" class="back-link">← Back to Jobs</router-link>
+
+    <div v-if="job" class="header-main">
+      <div class="title-group">
+        <h1 class="page-title">{{ job.job_name }}</h1>
+        <p class="record-id">{{ String(job.id) }}</p>
       </div>
-    </header>
+      <div class="header-actions">
+        <button v-if="!isEditing" @click="startEditing" class="btn-primary">Edit Job</button>
+        <button v-if="!isEditing" @click="showDeleteModal = true" class="btn-danger">Delete Job</button>
+      </div>
+    </div>
 
     <div v-if="loadingJob" class="state-card">
       <div class="spinner" />
-      <p>Loading job details...</p>
+      <p class="state-text">Loading job details...</p>
     </div>
 
     <div v-else-if="jobError || !job" class="state-card state-error">
@@ -223,31 +251,31 @@ const handleViewAssignmentDetails = (item: selectItem) => {
       <p class="state-text">The requested job could not be retrieved.</p>
     </div>
 
-    <div v-else class="details-container">
-      <section class="info-section card">
+    <template v-else>
+      <section class="card">
         <div class="section-header">
           <h2>General Information</h2>
         </div>
 
         <form v-if="isEditing" @submit.prevent="handleUpdate" class="edit-form">
           <div v-if="submitError" class="error-banner">{{ submitError }}</div>
-          <div class="form-group">
+          <div class="form-row">
             <label class="form-label">Name</label>
             <input v-model="editForm.job_name" type="text" class="form-input" required />
           </div>
-          <div class="form-group">
+          <div class="form-row">
             <label class="form-label">Shell</label>
             <input type="text" v-model="editForm.job_shell" class="form-input" required />
           </div>
-          <div class="form-group">
+          <div class="form-row">
             <label class="form-label">Command</label>
             <textarea v-model="editForm.job_command" class="form-input" rows="4" required></textarea>
           </div>
-          <div class="form-group">
+          <div class="form-row">
             <label class="form-label">Timeout (optional)</label>
             <input type="text" v-model="editForm.timeout" class="form-input" placeholder="e.g. 5m, 1h, 30s" />
           </div>
-          <div class="form-group">
+          <div class="form-row">
             <label class="form-label">State</label>
             <select v-model="editForm.enabled" class="form-input">
               <option value="Draft">Draft</option>
@@ -255,7 +283,7 @@ const handleViewAssignmentDetails = (item: selectItem) => {
               <option value="Disabled">Disabled</option>
             </select>
           </div>
-          <div class="form-actions">
+          <div class="form-actions" style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--background-400);">
             <button type="button" @click="isEditing = false" class="btn-ghost">Cancel</button>
             <button type="submit" class="btn-primary" :disabled="updateMutation.isPending.value">
               {{ updateMutation.isPending.value ? "Saving..." : "Save Changes" }}
@@ -290,36 +318,84 @@ const handleViewAssignmentDetails = (item: selectItem) => {
               <span class="value">{{ formatDate(job.updated_at) }}</span>
             </div>
           </div>
-          <div class="info-item">
+          <div class="info-item" style="margin-top: 1rem;">
             <span class="label">Shell</span>
             <pre class="command-box">{{ job.job_shell }}</pre>
           </div>
-          <div class="info-item full-width">
+          <div class="info-item" style="margin-top: 0.75rem;">
             <span class="label">Command</span>
             <pre class="command-box">{{ job.job_command }}</pre>
           </div>
         </div>
       </section>
 
-      <section class="assignments-section card">
+      <section class="card">
         <div class="section-header">
           <h2>Assignments</h2>
-          <button v-if="!isEditingAssignments" @click="isEditingAssignments = true" class="btn-secondary">Edit
-            Assignments</button>
+          <button v-if="!isEditingAssignments" @click="isEditingAssignments = true" class="btn-secondary">Edit Assignments</button>
         </div>
 
         <MultiSelector :selectedItems="getAssignments" :allItems="getAll" :mode="isEditingAssignments ? 'edit' : 'view'"
           :showMembers="true" emptyText="No clients or groups assigned" @submit="handleAssignmentSubmit"
           @cancel="handleAssignmentCancel" @viewDetails="handleViewAssignmentDetails" />
       </section>
-    </div>
+
+      <section class="card">
+        <div class="section-header">
+          <h2>Recent Executions ({{ executions ? executions.length : 0 }})</h2>
+        </div>
+
+        <div v-if="!executions" class="state-card">
+          <div class="spinner" />
+        </div>
+
+        <div v-else-if="executions.length === 0" class="empty-state">
+          <p>No executions yet</p>
+        </div>
+
+        <div v-else class="data-table-card">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Status</th>
+                <th>Client</th>
+                <th>Exit Code</th>
+                <th>Started</th>
+                <th>Duration</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="exec in enrichedExecutions" :key="String(exec.id)">
+                <td>
+                  <span class="status-badge" :class="getStatusBadgeClass(exec)">{{ extractEnumVariant(exec.status) }}</span>
+                </td>
+                <td>{{ exec.client_name }}</td>
+                <td class="monospace">{{ exec.exit_code || "-" }}</td>
+                <td>{{ exec.execution_start ? formatDistanceToNow(exec.execution_start) : "-" }}</td>
+                <td>
+                  {{ exec.execution_start && exec.execution_end
+                    ? formatDuration(new Date(exec.execution_start), new Date(exec.execution_end))
+                    : "-" }}
+                </td>
+                <td>
+                  <button class="details-btn" @click="navigateToExecution(exec.id)" title="View details">
+                    <IconViewDetails />
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </template>
 
     <div v-if="showDeleteModal" class="modal-overlay">
       <div class="modal-content">
         <h3>Delete Job</h3>
         <p>Are you sure you want to delete this job? This action cannot be undone.</p>
         <div class="modal-actions">
-          <button @click="showDeleteModal = false" class="btn-secondary">Cancel</button>
+          <button @click="showDeleteModal = false" class="btn-ghost">Cancel</button>
           <button @click="handleDelete" class="btn-danger">Delete</button>
         </div>
       </div>
@@ -328,24 +404,6 @@ const handleViewAssignmentDetails = (item: selectItem) => {
 </template>
 
 <style lang="scss" scoped>
-.page {
-  width: 100%;
-  max-width: 1000px;
-  margin: 0 auto;
-}
-
-.details-container {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-}
-
-.info-item {
-  &.full-width {
-    grid-column: 1 / -1;
-  }
-}
-
 .command-box {
   background: var(--background-100);
   padding: 1rem;
@@ -362,11 +420,10 @@ const handleViewAssignmentDetails = (item: selectItem) => {
   gap: 1rem;
 }
 
-.form-group {
+.form-row {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  margin-bottom: 0;
 
   textarea {
     resize: vertical;
@@ -385,13 +442,5 @@ const handleViewAssignmentDetails = (item: selectItem) => {
   color: var(--status-failed-text);
   font-size: 0.85rem;
   font-weight: 600;
-}
-
-.form-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.75rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--background-400);
 }
 </style>

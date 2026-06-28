@@ -56,7 +56,7 @@ async fn main() -> Result<(), Error> {
     .unwrap();
   db::migrate(&db::LOCAL_DB).await.unwrap();
 
-  let (db_handle_tx, db_handle_rx) = tokio::sync::watch::channel(None::<surrealdb::Surreal<surrealdb::engine::any::Any>>);
+  let (db_handle_tx, db_handle_rx) = tokio::sync::watch::channel(None::<(surrealdb::Surreal<surrealdb::engine::any::Any>, String)>);
   let (monitor_cmd_tx, monitor_cmd_rx) = tokio::sync::mpsc::channel::<async_tasks::jobs::monitor::MonitorCommand>(100);
   let (job_injection_tx, job_injection_rx) = tokio::sync::mpsc::channel::<async_tasks::jobs::JobQueueMessage>(1000);
   let (heartbeat_client_id_tx, heartbeat_client_id_rx) = tokio::sync::mpsc::channel::<String>(10);

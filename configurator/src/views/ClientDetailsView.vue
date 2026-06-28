@@ -56,19 +56,18 @@ const navigateToGroup = (groupId: any) => {
 
 <template>
   <div class="page">
-    <header class="page-header">
-      <router-link to="/clients" class="back-link">← Back to Clients</router-link>
-      <div v-if="client" class="header-main">
-        <div class="title-group">
-          <h1 class="page-title">{{ client.client_name }}</h1>
-          <p class="client-id">{{ String(client.id) }}</p>
-        </div>
+    <router-link to="/clients" class="back-link">← Back to Clients</router-link>
+
+    <div v-if="client" class="header-main">
+      <div class="title-group">
+        <h1 class="page-title">{{ client.client_name }}</h1>
+        <p class="record-id">{{ String(client.id) }}</p>
       </div>
-    </header>
+    </div>
 
     <div v-if="isLoading" class="state-card">
       <div class="spinner" />
-      <p>Loading client details...</p>
+      <p class="state-text">Loading client details...</p>
     </div>
 
     <div v-else-if="isError || !client" class="state-card state-error">
@@ -76,8 +75,8 @@ const navigateToGroup = (groupId: any) => {
       <p class="state-text">The requested client could not be retrieved.</p>
     </div>
 
-    <div v-else class="details-container">
-      <section class="info-section card">
+    <template v-else>
+      <section class="card">
         <div class="section-header">
           <h2>General Information</h2>
         </div>
@@ -106,7 +105,7 @@ const navigateToGroup = (groupId: any) => {
         </div>
       </section>
 
-      <section class="assignments-section card">
+      <section class="card">
         <div class="section-header">
           <h2>Assigned Jobs ({{ assignedJobs.length }})</h2>
         </div>
@@ -116,11 +115,7 @@ const navigateToGroup = (groupId: any) => {
         </div>
 
         <div v-else class="assignment-list">
-          <div
-            v-for="job in assignedJobs"
-            :key="String(job.id)"
-            class="assignment-item"
-          >
+          <div v-for="job in assignedJobs" :key="String(job.id)" class="assignment-item">
             <span class="assignment-name">{{ job.job_name }}</span>
             <div class="assignment-badges">
               <span class="badge state-badge" :class="getStatusVariant(job).toLowerCase()">
@@ -137,7 +132,7 @@ const navigateToGroup = (groupId: any) => {
         </div>
       </section>
 
-      <section class="assignments-section card">
+      <section class="card">
         <div class="section-header">
           <h2>Assigned Groups ({{ assignedGroups.length }})</h2>
         </div>
@@ -147,11 +142,7 @@ const navigateToGroup = (groupId: any) => {
         </div>
 
         <div v-else class="assignment-list">
-          <div
-            v-for="group in assignedGroups"
-            :key="String(group.id)"
-            class="assignment-item"
-          >
+          <div v-for="group in assignedGroups" :key="String(group.id)" class="assignment-item">
             <span class="assignment-name">{{ group.group_name }}</span>
             <button class="details-btn" @click="navigateToGroup(group.id)" title="View details">
               <IconViewDetails />
@@ -159,34 +150,9 @@ const navigateToGroup = (groupId: any) => {
           </div>
         </div>
       </section>
-    </div>
+    </template>
   </div>
 </template>
 
 <style lang="scss" scoped>
-.page {
-  width: 100%;
-  max-width: 1000px;
-  margin: 0 auto;
-}
-
-.details-container {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-}
-
-.assignments-section {
-  .section-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-}
-
-.assignment-item {
-  &:hover {
-    background: var(--background-100);
-  }
-}
 </style>

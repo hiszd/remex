@@ -10,7 +10,7 @@ use crate::db::endpoint::SurrealSessionRepo;
 pub async fn run(
   db_url: String,
   enrollment_token: Option<String>,
-  db_handle_tx: watch::Sender<Option<Surreal<Any>>>,
+  db_handle_tx: watch::Sender<Option<(Surreal<Any>, String)>>,
   monitor_cmd_tx: mpsc::Sender<MonitorCommand>,
   heartbeat_client_id_tx: mpsc::Sender<String>,
 ) {
@@ -61,7 +61,7 @@ pub async fn run(
         .signin(surrealdb::opt::auth::Record {
           namespace: "remex".into(),
           database: "remex".into(),
-          access: "endpoint_access".into(),
+            access: "endpoint_access".into(),
           params: serde_json::json!({
             "hardware_hash": hardware_hash,
             "secret": secret,
@@ -69,13 +69,17 @@ pub async fn run(
         })
         .await
       {
-        Ok(_token) => {
+        Ok(tok) => {
+          let auth_token = tok.access.as_insecure_token().to_string();
+          let _ = remote_db.use_ns("remex").use_db("remex").await;
           let client_id = lookup_client_id(&remote_db, &hardware_hash).await;
           tracing::info!("Signed in successfully as {client_id}");
           send_identity(&monitor_cmd_tx, &heartbeat_client_id_tx, &client_id).await;
           tracing::info!("Connected to remote database");
-          let _ = db_handle_tx.send(Some(remote_db));
-          return;
+          let _ = db_handle_tx.send(Some((remote_db, auth_token)));
+          loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
+          }
         }
         Err(e) => {
           tracing::error!("Signin failed: {e}. Will attempt enrollment if token is available.");
@@ -94,7 +98,7 @@ pub async fn run(
           database: "remex".into(),
           access: "endpoint_access".into(),
           params: serde_json::json!({
-            "token": token,
+            "enrollment_token": token,
             "client_name": client_name,
             "secret": secret,
             "hardware_hash": hardware_hash,
@@ -102,14 +106,18 @@ pub async fn run(
         })
         .await
       {
-        Ok(_token) => {
+        Ok(tok) => {
+          let auth_token = tok.access.as_insecure_token().to_string();
+          let _ = remote_db.use_ns("remex").use_db("remex").await;
           let client_id = lookup_client_id(&remote_db, &hardware_hash).await;
           tracing::info!("Signed up successfully as {client_id}");
           update_session(&session_repo, &session.session_id(), client_id.clone(), Some(secret)).await;
           send_identity(&monitor_cmd_tx, &heartbeat_client_id_tx, &client_id).await;
           tracing::info!("Connected to remote database");
-          let _ = db_handle_tx.send(Some(remote_db));
-          return;
+          let _ = db_handle_tx.send(Some((remote_db, auth_token)));
+          loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
+          }
         }
         Err(e) => {
           tracing::error!("Signup failed (debug): {e:?}");

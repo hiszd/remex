@@ -33,13 +33,11 @@ impl Group {
     db.query(
       r"
         USE NS remex DB remex;
-        DEFINE TABLE IF NOT EXISTS group SCHEMAFULL
-          PERMISSIONS FOR select FULL FOR create FULL FOR update FULL FOR delete FULL;
-        DEFINE TABLE group PERMISSIONS
+        DEFINE TABLE IF NOT EXISTS group SCHEMAFULL PERMISSIONS
           FOR select FULL,
-          FOR create WHERE $auth.id IN (SELECT id FROM user),
-          FOR update WHERE $auth.id IN (SELECT id FROM user),
-          FOR delete WHERE $auth.id IN (SELECT id FROM user);
+          FOR create WHERE $auth.id INSIDE (SELECT VALUE id FROM user),
+          FOR update WHERE $auth.id INSIDE (SELECT VALUE id FROM user),
+          FOR delete WHERE $auth.id INSIDE (SELECT VALUE id FROM user);
         DEFINE FIELD IF NOT EXISTS group_name ON TABLE group TYPE string;
 
         DEFINE FIELD IF NOT EXISTS members ON TABLE group TYPE array<record<client>> DEFAULT [];
