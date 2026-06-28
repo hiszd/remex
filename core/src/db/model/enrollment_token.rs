@@ -40,7 +40,9 @@ impl EnrollmentToken {
       r"
         USE NS remex DB remex;
         DEFINE TABLE IF NOT EXISTS enrollment_token SCHEMAFULL
-          PERMISSIONS FOR select, create, update WHERE $auth.id IN (SELECT id FROM user),
+          PERMISSIONS FOR select FULL,
+                    FOR create WHERE $auth.id IN (SELECT id FROM user),
+                    FOR update WHERE $auth.id IN (SELECT id FROM user),
                     FOR delete NONE;
         DEFINE FIELD IF NOT EXISTS token_hash ON TABLE enrollment_token TYPE string;
         DEFINE FIELD IF NOT EXISTS valid ON TABLE enrollment_token TYPE bool DEFAULT true;
