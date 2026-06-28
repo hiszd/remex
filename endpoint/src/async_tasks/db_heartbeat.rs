@@ -13,6 +13,7 @@ pub async fn run(
 ) {
   let mut client_id: Option<String> = None;
   let mut db: Option<Surreal<Any>> = None;
+  let mut auth_token: Option<String> = None;
 
   let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
   interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -37,15 +38,12 @@ pub async fn run(
             let entry = db_handle_rx.borrow().clone();
             if let Some((ref handle, ref token)) = entry {
               db = Some(handle.clone());
-              if let Err(e) = handle.authenticate(token.clone()).await {
-                tracing::warn!("Heartbeat auth failed: {e}");
-                db = None;
-              } else {
-                tracing::info!("Heartbeat task received db handle");
-              }
+              auth_token = Some(token.clone());
+              tracing::info!("Heartbeat task received db handle");
             } else {
               tracing::info!("Heartbeat task received cleared db handle");
               db = None;
+              auth_token = None;
             }
           }
           Err(_) => {
@@ -60,10 +58,15 @@ pub async fn run(
           db.is_some(),
         );
         if let Some(ref cid) = client_id {
-          if let Some(ref d) = db {
+          if db.is_some() && auth_token.is_some() {
             let cid = cid.clone();
-            let db = d.clone();
+            let db = db.clone().unwrap();
+            let tkn = auth_token.clone().unwrap();
               tokio::spawn(async move {
+                if let Err(e) = db.authenticate(tkn).await {
+                  tracing::warn!("Heartbeat authenticate failed: {e}");
+                  return;
+                }
                 match surrealdb::types::RecordId::parse_simple(&cid) {
                   Ok(rid) => {
                     match db
