@@ -57,6 +57,23 @@ impl EnrollmentToken {
     )
     .await?
     .check()?;
+
+    // Re-define table permissions without IF NOT EXISTS so the migration
+    // can upgrade existing tables that were created with restrictive SELECT
+    // permissions (which broke the endpoint SIGNUP flow).
+    db.query(
+      r"
+        USE NS remex DB remex;
+        DEFINE TABLE enrollment_token PERMISSIONS
+          FOR select FULL,
+          FOR create WHERE $auth.id IN (SELECT id FROM user),
+          FOR update WHERE $auth.id IN (SELECT id FROM user),
+          FOR delete NONE;
+      ",
+    )
+    .await?
+    .check()?;
+
     Ok(())
   }
 }
