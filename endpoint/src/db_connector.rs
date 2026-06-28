@@ -112,7 +112,7 @@ pub async fn run(
           return;
         }
         Err(e) => {
-          tracing::error!("Signup failed: {e}");
+          tracing::error!("Signup failed (debug): {e:?}");
           tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
           continue;
         }
