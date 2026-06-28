@@ -6,7 +6,7 @@ use remex_core::db::{
 };
 
 use crate::db::remex::{JobCacheData, SurrealJobCacheRepo};
-use surrealdb::{engine::remote::ws::Client, types::Action};
+use surrealdb::{engine::any::Any, types::Action};
 use surrealdb::types::{RecordId, ToSql};
 use surrealdb::Surreal;
 use tokio::sync::{mpsc, watch};
@@ -86,14 +86,14 @@ async fn load_jobs_from_local_db(
 pub async fn run(
   mut cmd_rx: mpsc::Receiver<MonitorCommand>,
   job_injection_tx: mpsc::Sender<super::JobQueueMessage>,
-  mut db_handle_rx: watch::Receiver<Option<Surreal<Client>>>,
+  mut db_handle_rx: watch::Receiver<Option<Surreal<Any>>>,
 ) -> Result<(), crate::Error> {
   let mut client_id: Option<String> = None;
   let mut groups: Vec<RecordId> = Vec::new();
   let mut initial_sync_done = false;
 
   loop {
-    let remote_db: Option<Surreal<Client>> = db_handle_rx.borrow_and_update().clone();
+    let remote_db: Option<Surreal<Any>> = db_handle_rx.borrow_and_update().clone();
 
     if remote_db.is_none() && client_id.is_none() {
       tokio::time::sleep(Duration::from_secs(1)).await;

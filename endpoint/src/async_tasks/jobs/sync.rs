@@ -8,7 +8,7 @@ use remex_core::db::{
   DbOperator,
 };
 use surrealdb::{
-  engine::remote::ws::Client,
+  engine::any::Any,
   types::{
     RecordId,
     ToSql,
@@ -25,7 +25,7 @@ use crate::db::remex::{
 
 pub async fn sync_groups(
   client_id: &str,
-  remote_db: &Surreal<Client>,
+  remote_db: &Surreal<Any>,
 ) -> Result<Vec<Group>, crate::Error> {
   println!("Syncing groups from remote...");
   tracing::info!("Syncing groups from remote database");
@@ -56,7 +56,7 @@ pub async fn sync_and_refill_queue(
   job_injection_tx: &tokio::sync::mpsc::Sender<JobQueueMessage>,
   client_id: &str,
   groups: &[RecordId],
-  remote_db: &Surreal<Client>,
+  remote_db: &Surreal<Any>,
 ) -> Result<(), crate::Error> {
   use crate::db::remex::{
     JobCache,
@@ -290,7 +290,7 @@ mod sync_tests {
 pub async fn full_sync(
   client_id: &str,
   job_injection_tx: &tokio::sync::mpsc::Sender<JobQueueMessage>,
-  remote_db: &Surreal<Client>,
+  remote_db: &Surreal<Any>,
 ) -> Result<(), crate::Error> {
   let groups = sync_groups(client_id, remote_db).await?;
   let group_ids: Vec<RecordId> = groups.iter().map(|g| g.id.clone()).collect();
@@ -311,7 +311,7 @@ async fn cleanup_old_executions() -> Result<(), crate::Error> {
 }
 
 pub async fn execution_sync_loop(
-  mut db_handle_rx: watch::Receiver<Option<Surreal<Client>>>,
+  mut db_handle_rx: watch::Receiver<Option<Surreal<Any>>>,
 ) -> Result<(), crate::Error> {
   use crate::db::remex::ExecutionCache;
 

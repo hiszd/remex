@@ -1,5 +1,5 @@
 use remex_core::db::DbOperator;
-use surrealdb::engine::remote::ws::Client;
+use surrealdb::engine::any::Any;
 use surrealdb::types::ToSql;
 use surrealdb::Surreal;
 use tokio::sync::{mpsc, watch};
@@ -10,25 +10,44 @@ use crate::db::endpoint::SurrealSessionRepo;
 pub async fn run(
   db_url: String,
   enrollment_token: Option<String>,
-  db_handle_tx: watch::Sender<Option<Surreal<Client>>>,
+  db_handle_tx: watch::Sender<Option<Surreal<Any>>>,
   monitor_cmd_tx: mpsc::Sender<MonitorCommand>,
   heartbeat_client_id_tx: mpsc::Sender<String>,
-) -> Result<(), crate::Error> {
+) {
   loop {
-    let local_db = crate::db::get_local_endpoint().await?;
+    let local_db = match crate::db::get_local_endpoint().await {
+      Ok(db) => db,
+      Err(e) => {
+        tracing::error!("Failed to get local endpoint: {e}");
+        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+        continue;
+      }
+    };
     let session_repo = SurrealSessionRepo { db: local_db.clone() };
     let session = load_or_create_session(&session_repo).await;
 
-    let remote_db: Surreal<Client> = Surreal::init();
+    let remote_db: Surreal<Any> = Surreal::init();
 
-    if let Err(e) = remote_db
-      .connect::<surrealdb::engine::remote::ws::Ws>(db_url.clone())
-      .await
-    {
-      tracing::error!("Failed to connect to remote database: {e}");
-      tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-      continue;
+    tracing::info!("Connecting to remote database at {db_url}");
+    let connect_result = tokio::time::timeout(
+      tokio::time::Duration::from_secs(15),
+      remote_db.connect(db_url.clone()),
+    )
+    .await;
+    match connect_result {
+      Ok(Ok(())) => tracing::info!("Connected to remote database, proceeding with auth"),
+      Ok(Err(e)) => {
+        tracing::error!("Failed to connect to remote database: {e}");
+        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+        continue;
+      }
+      Err(_) => {
+        tracing::error!("Timed out connecting to remote database at {db_url}");
+        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+        continue;
+      }
     }
+    tracing::info!("Connected to remote database, proceeding with auth");
 
     let hardware_hash = machine_uid::get().unwrap_or_default();
 
@@ -56,7 +75,7 @@ pub async fn run(
           send_identity(&monitor_cmd_tx, &heartbeat_client_id_tx, &client_id).await;
           tracing::info!("Connected to remote database");
           let _ = db_handle_tx.send(Some(remote_db));
-          return Ok(());
+          return;
         }
         Err(e) => {
           tracing::error!("Signin failed: {e}. Will attempt enrollment if token is available.");
@@ -90,7 +109,7 @@ pub async fn run(
           send_identity(&monitor_cmd_tx, &heartbeat_client_id_tx, &client_id).await;
           tracing::info!("Connected to remote database");
           let _ = db_handle_tx.send(Some(remote_db));
-          return Ok(());
+          return;
         }
         Err(e) => {
           tracing::error!("Signup failed: {e}");
@@ -105,7 +124,7 @@ pub async fn run(
   }
 }
 
-async fn lookup_client_id(remote_db: &Surreal<Client>, hardware_hash: &str) -> String {
+async fn lookup_client_id(remote_db: &Surreal<Any>, hardware_hash: &str) -> String {
   let hash = hardware_hash.to_owned();
   match remote_db
     .query("SELECT VALUE id FROM client WHERE hardware_hash = $hash;")

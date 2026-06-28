@@ -1,5 +1,5 @@
 use surrealdb::{
-  engine::remote::ws::Client,
+  engine::any::Any,
   Surreal,
 };
 use tokio::sync::{
@@ -9,10 +9,10 @@ use tokio::sync::{
 
 pub async fn run(
   mut client_id_rx: mpsc::Receiver<String>,
-  mut db_handle_rx: watch::Receiver<Option<Surreal<Client>>>,
+  mut db_handle_rx: watch::Receiver<Option<Surreal<Any>>>,
 ) {
   let mut client_id: Option<String> = None;
-  let mut db: Option<Surreal<Client>> = None;
+  let mut db: Option<Surreal<Any>> = None;
 
   let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
   interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);

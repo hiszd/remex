@@ -4,17 +4,14 @@ use surrealdb::engine::local::SurrealKv;
 mod async_tasks;
 mod db;
 mod db_connector;
-mod utils;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
-  #[clap(long, env = "REMEX_SECRET")]
-  secret: Option<String>,
-  #[clap(long, env = "REMEX_SERVER")]
-  server: String,
-  #[clap(long, env = "REMEX_PORT", default_value = "4269")]
-  port: String,
+  #[clap(long, env = "REMEX_DB_URL")]
+  db_url: String,
+  #[clap(long, env = "REMEX_ENROLLMENT_TOKEN")]
+  enrollment_token: Option<String>,
   #[clap(short, long, env = "REMEX_DEBUG")]
   debug: bool,
 }
@@ -59,19 +56,17 @@ async fn main() -> Result<(), Error> {
     .unwrap();
   db::migrate(&db::LOCAL_DB).await.unwrap();
 
-  let (db_token_tx, db_token_rx) = tokio::sync::mpsc::channel::<(remex_core::db::BearerGrantResponse, String)>(10);
-  let (db_handle_tx, db_handle_rx) = tokio::sync::watch::channel(None::<surrealdb::Surreal<surrealdb::engine::remote::ws::Client>>);
+  let (db_handle_tx, db_handle_rx) = tokio::sync::watch::channel(None::<surrealdb::Surreal<surrealdb::engine::any::Any>>);
   let (monitor_cmd_tx, monitor_cmd_rx) = tokio::sync::mpsc::channel::<async_tasks::jobs::monitor::MonitorCommand>(100);
   let (job_injection_tx, job_injection_rx) = tokio::sync::mpsc::channel::<async_tasks::jobs::JobQueueMessage>(1000);
+  let (heartbeat_client_id_tx, heartbeat_client_id_rx) = tokio::sync::mpsc::channel::<String>(10);
 
-  tokio::spawn(db_connector::run(db_token_rx, db_handle_tx));
-
-  tokio::spawn(async_tasks::server_msg::server_msg_loop(
-    args.secret,
-    args.server,
-    args.port,
-    db_token_tx,
+  tokio::spawn(db_connector::run(
+    args.db_url,
+    args.enrollment_token,
+    db_handle_tx,
     monitor_cmd_tx,
+    heartbeat_client_id_tx,
   ));
 
   tokio::spawn(async_tasks::jobs::scheduler::run(job_injection_rx));
@@ -82,7 +77,12 @@ async fn main() -> Result<(), Error> {
     db_handle_rx.clone(),
   ));
 
-  tokio::spawn(async_tasks::jobs::sync::execution_sync_loop(db_handle_rx));
+  tokio::spawn(async_tasks::jobs::sync::execution_sync_loop(db_handle_rx.clone()));
+
+  tokio::spawn(async_tasks::db_heartbeat::run(
+    heartbeat_client_id_rx,
+    db_handle_rx,
+  ));
 
   loop {
     tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
