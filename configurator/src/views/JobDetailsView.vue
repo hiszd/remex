@@ -47,14 +47,16 @@ const { data: allGroups } = useQuery({
   select: (data) => Object.freeze(data),
 })
 
-const { data: executions } = useQuery({
+const { data: executions, isLoading: loadingExecutions, isError: execError } = useQuery({
   queryKey: ["executions", jobId],
-  queryFn: () => {
+  queryFn: async ({ signal }) => {
     if (!job.value) return []
-    return getExecutionsForJob(client, job.value.id)
+    return getExecutionsForJob(client, job.value.id, signal)
   },
   select: (data) => Object.freeze(data),
   enabled: !!job.value,
+  retry: 0,
+  gcTime: 0,
 })
 
 const enrichedExecutions = computed(() => {
@@ -345,13 +347,18 @@ const navigateToExecution = (execId: RecordId) => {
           <h2>Recent Executions ({{ executions ? executions.length : 0 }})</h2>
         </div>
 
-        <div v-if="!executions" class="state-card">
-          <div class="spinner" />
-        </div>
+  <div v-if="loadingExecutions" class="state-card">
+    <div class="spinner" />
+    <p style="margin-top:0.75rem;color:var(--text-500)">Loading executions…</p>
+  </div>
 
-        <div v-else-if="executions.length === 0" class="empty-state">
-          <p>No executions yet</p>
-        </div>
+  <div v-else-if="execError" class="state-card" style="text-align:center;padding:2rem">
+    <p style="color:var(--danger)">Failed to load executions</p>
+  </div>
+
+  <div v-else-if="executions.length === 0" class="empty-state">
+    <p>No executions yet</p>
+  </div>
 
         <div v-else class="data-table-card">
           <table class="data-table">

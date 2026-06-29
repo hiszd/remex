@@ -139,12 +139,15 @@ export async function getClientById(
 
 export async function getExecutionsForJob(
   client: Surreal,
-  jobId: RecordId
+  jobId: RecordId,
+  signal?: AbortSignal
 ): Promise<Execution[]> {
+  const timeout = AbortSignal.timeout(10_000)
+  const combined = signal ? AbortSignal.any([signal, timeout]) : timeout
   const result = await client.query<Execution[]>(
     "SELECT * FROM execution WHERE job_id = $job_id ORDER BY created_at DESC",
     { job_id: jobId }
-  ).collect()
+  ).collect(combined)
   const records = (result as any)[0] as Execution[] | undefined
   return records ?? []
 }
