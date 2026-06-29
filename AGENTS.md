@@ -524,6 +524,74 @@ The same applies to `execution`. The endpoint's migration only defines the cache
 
 The in-memory adapter's `update` calls `HashMap::insert`, which **creates** a record if it doesn't exist. The real `UPDATE ... MERGE` in SurrealDB may error or return empty for non-existent records. Tests using the in-memory adapter can mask production errors where updates target missing records.
 
+### (Configurator) `enabled` in `@tanstack/vue-query` is Evaluated Once
+
+Passing a plain boolean like `enabled: !!job.value` evaluates at setup time and is never re-evaluated. Use a function `enabled: () => !!job.value` for reactive behavior, or restructure the query to not depend on another query's result.
+
+**Wrong** — `enabled` is locked at `false` forever:
+```ts
+const { data: job } = useQuery({ queryKey: ["job", id], queryFn: () => getJob(client, id) })
+const { data: execs } = useQuery({
+  queryKey: ["executions", id],
+  queryFn: () => getExecutionsForJob(client, job.value!.id),
+  enabled: !!job.value,  // BUG: never re-evaluated
+})
+```
+
+**Right** — make the executions query independent:
+```ts
+const { data: job } = useQuery({ queryKey: ["job", id], queryFn: () => getJob(client, id) })
+const { data: execs } = useQuery({
+  queryKey: ["executions", id],
+  queryFn: () => getExecutionsForJob(client, rid(id)),  // uses route param directly
+})
+```
+
+### (Configurator) SurrealDB JS SDK `RecordId.toString()` Double-Wraps Angle Brackets
+
+The SDK v2.0.3's `escapeIdent` function wraps record ID values in `⟨...⟩` when they contain non-ASCII characters. If the `id` part already contains `⟨...⟩` (as with UUID-based record IDs from SurrealDB), `toString()` double-wraps them: `execution:⟨⟨uuid\⟩⟩`.
+
+When round-tripping a RecordId through URL serialization (`router.push(\`/path/${recordId}\`)`) and back through `rid()`, the `rid()` helper must strip the outer brackets before constructing a new `RecordId`:
+
+```ts
+export function rid(id: string): RecordId {
+  const sep = id.indexOf(":")
+  let idPart = id.slice(sep + 1)
+  if (idPart.startsWith("\u27e8") && idPart.endsWith("\u27e9")) {
+    idPart = idPart.slice(1, -1)
+  }
+  return new RecordId(id.slice(0, sep), idPart)
+}
+```
+
+Always use `rid()` (not `new RecordId(...)`) when parsing record IDs from route params or user input.
+
+## Lessons Learned
+
+### 1. `enabled` in Query Libraries Must Be Reactive
+
+TanStack Vue Query v5 evaluates `enabled` once inside a `computed()` at setup time. Passing a plain boolean like `!!job.value` evaluates immediately and is never re-evaluated, even if `job.value` changes later. This creates a subtle deadlock — a query dependent on another query's data may never fire on fresh page loads when that data hasn't been cached yet.
+
+**Always make queries independent of each other when possible.** A query's `queryFn` should derive its parameters from stable sources (route params, refs initialized before queries) rather than another query's result. If you must chain queries, pass `enabled` as a function: `enabled: () => !!job.value`.
+
+### 2. Don't Trust SDK `toString()` for Round-Tripping
+
+The SurrealDB JS SDK v2.0.3's `RecordId.toString()` produces a SurrealQL-compatible string that wraps UUID IDs in `⟨...⟩` via `escapeIdent`. If you parse that string back into a `RecordId` via `new RecordId(table, idPart)`, the new `RecordId`'s `toString()` will wrap the already-bracketed `id` again, producing `execution:⟨⟨uuid\⟩⟩` — a value that doesn't match any record in the database.
+
+**The `rid()` helper exists precisely to handle this.** Always route record ID string parsing through `rid()` rather than directly calling `new RecordId()`. See the pitfall above for the implementation.
+
+### 3. Debug with Logging, Fix by Simplifying
+
+Both bugs were diagnosed by adding `console.log` to trace the actual values flowing through the system:
+- In the execution detail view, logging `execId`, `String(recordId)`, and `recordId.id` revealed that the queried ID didn't match database records
+- In the job details view, checking whether the executions query was ever firing (it wasn't) revealed the `enabled` deadlock
+
+Once diagnosed, both fixes simplified the code — removing the `enabled` option entirely in one case, and making `rid()` more robust in the other. If a fix complicates the code, it's probably the wrong fix.
+
+### 4. URL Round-Trips Can Corrupt Typed Values
+
+Passing SurrealDB `RecordId` objects through URL serialization (`router.push(\`/path/${recordId}\`)`) and back (`route.params.id` → `rid()`) is inherently lossy. The SDK's string representation includes SurrealQL escaping that isn't idempotent. Prefer to pass the id as its raw parts (`table:id` without escaping) or keep a reference to the original `RecordId` object in a store/cache rather than re-parsing from the URL.
+
 ## Key Dependencies
 
 | Dependency | Version | Purpose |
