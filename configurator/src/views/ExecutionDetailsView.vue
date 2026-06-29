@@ -12,11 +12,11 @@ const router = useRouter()
 const surreal = useSurrealClient()
 const execId = route.params.id as string
 
-const { data: execution, isLoading, isError } = useQuery({
+const { data: execution, isLoading, isError, error: execError } = useQuery({
   queryKey: ["execution", execId],
   queryFn: () => getExecutionById(surreal, execId),
   select: (data) => Object.freeze(data),
-  retry: 3,
+  retry: 0,
 })
 
 const execJobId = computed(() => execution.value?.job_id ? String(execution.value.job_id) : null)
@@ -47,6 +47,12 @@ const statusVariant = computed(() =>
 )
 const statusDisplay = computed(() => formatEnumVariant(statusVariant.value))
 
+const displayId = computed(() => {
+  if (!execution.value?.id) return ""
+  const id = execution.value.id
+  return `${id.table}:${id.id}`
+})
+
 const duration = computed(() => {
   if (!execution.value?.execution_start || !execution.value?.execution_end) return null
   return formatDuration(
@@ -75,7 +81,7 @@ const navigateToClient = () => {
     <div v-if="execution" class="header-main">
       <div class="title-group">
         <h1 class="page-title">Execution Details</h1>
-        <p class="record-id">{{ String(execution.id) }}</p>
+        <p class="record-id">{{ displayId }}</p>
       </div>
     </div>
 
@@ -87,6 +93,7 @@ const navigateToClient = () => {
     <div v-else-if="isError || !execution" class="state-card state-error">
       <p class="state-label">Execution not found</p>
       <p class="state-text">The requested execution could not be retrieved.</p>
+      <p v-if="execError" class="state-text" style="color:var(--danger);margin-top:0.5rem;font-size:0.8rem">{{ execError.message }}</p>
     </div>
 
     <template v-else>

@@ -2,7 +2,7 @@
 import { ref, computed } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/vue-query"
-import { getJobById, updateJob, deleteJob, getClients, getGroups, getExecutionsForJob } from "@/lib/api"
+import { getJobById, updateJob, deleteJob, getClients, getGroups, getExecutionsForJob, rid } from "@/lib/api"
 import { useSurrealClient } from "@/lib/surreal"
 import { formatDate, formatDistanceToNow, formatDuration } from "@/utils/date"
 import {
@@ -49,12 +49,8 @@ const { data: allGroups } = useQuery({
 
 const { data: executions, isLoading: loadingExecutions, isError: execError } = useQuery({
   queryKey: ["executions", jobId],
-  queryFn: async ({ signal }) => {
-    if (!job.value) return []
-    return getExecutionsForJob(client, job.value.id, signal)
-  },
+  queryFn: () => getExecutionsForJob(client, rid(jobId)),
   select: (data) => Object.freeze(data),
-  enabled: !!job.value,
   retry: 0,
   gcTime: 0,
 })
@@ -356,7 +352,7 @@ const navigateToExecution = (execId: RecordId) => {
     <p style="color:var(--danger)">Failed to load executions</p>
   </div>
 
-  <div v-else-if="executions.length === 0" class="empty-state">
+  <div v-else-if="executions && executions.length === 0" class="empty-state">
     <p>No executions yet</p>
   </div>
 

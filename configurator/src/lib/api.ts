@@ -3,10 +3,15 @@ import type { EnrollmentToken, Job, JobCreate, Group, GroupCreate, Client, Execu
 
 /* ── helpers ── */
 
-function rid(id: string): RecordId {
+export function rid(id: string): RecordId {
   const sep = id.indexOf(":")
   if (sep === -1) throw new Error(`Invalid record ID: ${id}`)
-  return new RecordId(id.slice(0, sep), id.slice(sep + 1))
+  let idPart = id.slice(sep + 1)
+  // Strip outer angle brackets if present — the SDK's RecordId.toString() re-adds them
+  if (idPart.startsWith("\u27e8") && idPart.endsWith("\u27e9")) {
+    idPart = idPart.slice(1, -1)
+  }
+  return new RecordId(id.slice(0, sep), idPart)
 }
 
 /* ── Jobs ── */
@@ -139,17 +144,18 @@ export async function getClientById(
 
 export async function getExecutionsForJob(
   client: Surreal,
-  jobId: RecordId,
-  signal?: AbortSignal
+  jobId: RecordId
 ): Promise<Execution[]> {
-  const timeout = AbortSignal.timeout(10_000)
-  const combined = signal ? AbortSignal.any([signal, timeout]) : timeout
-  const result = await client.query<Execution[]>(
-    "SELECT * FROM execution WHERE job_id = $job_id ORDER BY created_at DESC",
-    { job_id: jobId }
-  ).collect(combined)
-  const records = (result as any)[0] as Execution[] | undefined
-  return records ?? []
+  const [records] = await Promise.race([
+    client.query<Execution[]>(
+      "SELECT * FROM execution WHERE job_id = $job_id ORDER BY created_at DESC",
+      { job_id: jobId }
+    ).collect(),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("Execution query timed out after 10s")), 10_000)
+    ),
+  ])
+  return (records as Execution[]) ?? []
 }
 
 export async function getExecutionById(
@@ -157,7 +163,8 @@ export async function getExecutionById(
   id: string
 ): Promise<Execution | null> {
   const result = await client.select<Execution>(rid(id))
-  return (result as unknown as Execution) ?? null
+  if (!result) return null
+  return (result as unknown as Execution)
 }
 
 /* ── Enrollment Tokens ── */
