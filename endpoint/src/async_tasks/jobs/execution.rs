@@ -1,14 +1,21 @@
 use std::time::Duration;
 
 use remex_core::db::{
-  model::executions::{Execution, ExecutionStatus},
+  model::executions::{
+    Execution,
+    ExecutionStatus,
+  },
   DbOperator,
 };
 use surrealdb::types::ToSql;
 
 use crate::db::{
   get_local_remex,
-  remex::{ExecutionCacheData, SurrealExecutionCacheRepo, SurrealJobCacheRepo},
+  remex::{
+    ExecutionCacheData,
+    SurrealExecutionCacheRepo,
+    SurrealJobCacheRepo,
+  },
 };
 
 fn validate_shell(shell: &str) -> Result<(), crate::Error> {
@@ -31,7 +38,10 @@ async fn run_command(
   println!("Running command: {} -c {}", shell, cmd);
   tracing::debug!("Running command: {} -c {}", shell, cmd);
 
-  let output_fut = tokio::process::Command::new(shell).arg("-c").arg(cmd).output();
+  let output_fut = tokio::process::Command::new(shell)
+    .arg("-c")
+    .arg(cmd)
+    .output();
 
   let result = if let Some(dur) = timeout {
     match tokio::time::timeout(dur, output_fut).await {
@@ -56,18 +66,28 @@ async fn run_command(
 
 async fn should_skip_job(
   job_id: &str,
-  cache_repo: &dyn DbOperator<Record = crate::db::remex::JobCache, Input = crate::db::remex::JobCacheData>,
+  cache_repo: &dyn DbOperator<
+    Record = crate::db::remex::JobCache,
+    Input = crate::db::remex::JobCacheData,
+  >,
 ) -> bool {
   let caches = match cache_repo.list().await {
     Ok(c) => c,
     Err(_) => return false,
   };
-  caches.iter().find(|c| c.job_id == job_id).map(|c| c.completed).unwrap_or(false)
+  caches
+    .iter()
+    .find(|c| c.job_id == job_id)
+    .map(|c| c.completed)
+    .unwrap_or(false)
 }
 
 async fn mark_job_completed(
   job_id: &str,
-  cache_repo: &dyn DbOperator<Record = crate::db::remex::JobCache, Input = crate::db::remex::JobCacheData>,
+  cache_repo: &dyn DbOperator<
+    Record = crate::db::remex::JobCache,
+    Input = crate::db::remex::JobCacheData,
+  >,
 ) -> Result<(), crate::Error> {
   let caches = cache_repo.list().await?;
   if let Some(cache) = caches.iter().find(|c| c.job_id == job_id) {
@@ -81,8 +101,13 @@ async fn mark_job_completed(
   Ok(())
 }
 
-pub async fn execute_job(job: remex_core::db::model::jobs::Job, client_id: &str) -> Result<(), crate::Error> {
-  let cache_repo = SurrealJobCacheRepo { db: get_local_remex().await? };
+pub async fn execute_job(
+  job: remex_core::db::model::jobs::Job,
+  client_id: &str,
+) -> Result<(), crate::Error> {
+  let cache_repo = SurrealJobCacheRepo {
+    db: get_local_remex().await?,
+  };
   if should_skip_job(&job.id.to_sql(), &cache_repo).await {
     tracing::debug!("Skipping job {} (recent execution exists)", job.job_name);
     return Ok(());
@@ -210,31 +235,35 @@ pub async fn execute_job(job: remex_core::db::model::jobs::Job, client_id: &str)
     }
   }
 
-  tracing::info!(
-    "Job {} completed with status: {:?}",
-    job.job_name,
-    execution_status
-  );
+  tracing::info!("Job {} completed with status: {:?}", job.job_name, execution_status);
 
   Ok(())
 }
 
 #[cfg(test)]
 mod execution_tests {
-  use remex_core::db::DbOperator;
-  use remex_core::impl_in_memory_db_operator;
+  use remex_core::{
+    db::DbOperator,
+    impl_in_memory_db_operator,
+  };
 
-  use crate::db::remex::{JobCache, JobCacheData};
+  use crate::db::remex::{
+    JobCache,
+    JobCacheData,
+  };
 
   impl_in_memory_db_operator!(InMemoryJobCacheRepo, JobCache, JobCacheData, "job");
 
   /// The string format used by `RecordId::to_sql()` for a `RecordId::new("job", <key>)`.
-  fn job_sql_id(key: &str) -> String {
-    format!("job:{key}")
-  }
+  fn job_sql_id(key: &str) -> String { format!("job:{key}") }
 
   fn make_cache(job_key: &str, completed: bool) -> JobCacheData {
-    use remex_core::db::model::jobs::{Job, JobType, ExecutionStatus, Enabled};
+    use remex_core::db::model::jobs::{
+      Enabled,
+      ExecutionStatus,
+      Job,
+      JobType,
+    };
 
     let job = Job {
       id: surrealdb::types::RecordId::new("job", job_key),
@@ -250,7 +279,11 @@ mod execution_tests {
       updated_at: surrealdb::types::Datetime::default(),
     };
     let job_id = format!("job:{job_key}");
-    JobCacheData { job_id, job_info: job, completed }
+    JobCacheData {
+      job_id,
+      job_info: job,
+      completed,
+    }
   }
 
   // ---- should_skip_job ----

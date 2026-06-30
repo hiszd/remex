@@ -79,8 +79,13 @@ impl Client {
                   hardware_hash: $hardware_hash,
                   blocked: false
                 })[0];
-                UPDATE $tok.id SET valid = false, used_at = time::now(), used_by = $cl.id;
-                RETURN $cl
+                IF $tok.single_use = true {
+                  UPDATE $tok.id SET valid = false, used_at = time::now(), used_by = $cl.id;
+                  RETURN $cl
+                } ELSE {
+                  UPDATE $tok.id SET used_at = time::now(), used_by = $cl.id;
+                  RETURN $cl
+                }
               }
             }
             SIGNIN (SELECT * FROM client WHERE hardware_hash = $hardware_hash AND crypto::argon2::compare(secret, $secret) AND blocked != true)
