@@ -49,10 +49,10 @@ pub struct ExecutionData {
   pub output: String,
   pub command: String,
   pub exit_code: String,
-  pub execution_start: Option<surrealdb::types::Datetime>,
+  pub execution_start: surrealdb::types::Datetime,
   pub execution_end: Option<surrealdb::types::Datetime>,
-  pub created_at: Option<surrealdb::types::Datetime>,
-  pub updated_at: Option<surrealdb::types::Datetime>,
+  pub created_at: surrealdb::types::Datetime,
+  pub updated_at: surrealdb::types::Datetime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
@@ -64,7 +64,7 @@ pub struct Execution {
   pub output: String,
   pub command: String,
   pub exit_code: String,
-  pub execution_start: Option<surrealdb::types::Datetime>,
+  pub execution_start: surrealdb::types::Datetime,
   pub execution_end: Option<surrealdb::types::Datetime>,
   pub created_at: surrealdb::types::Datetime,
   pub updated_at: surrealdb::types::Datetime,
@@ -91,7 +91,7 @@ impl Execution {
         DEFINE FIELD IF NOT EXISTS exit_code ON TABLE execution TYPE string;
 
         DEFINE FIELD IF NOT EXISTS execution_start ON TABLE execution TYPE datetime;
-        DEFINE FIELD IF NOT EXISTS execution_end ON TABLE execution TYPE datetime;
+        DEFINE FIELD IF NOT EXISTS execution_end ON TABLE execution TYPE option<datetime>;
 
         DEFINE INDEX IF NOT EXISTS idx_job_id ON TABLE execution COLUMNS job_id;
         DEFINE INDEX IF NOT EXISTS idx_client_id ON TABLE execution COLUMNS client_id;
@@ -118,8 +118,8 @@ impl From<(String, ExecutionData)> for Execution {
       exit_code: data.exit_code,
       execution_start: data.execution_start,
       execution_end: data.execution_end,
-      created_at: data.created_at.unwrap_or_default(),
-      updated_at: data.updated_at.unwrap_or_default(),
+      created_at: data.created_at,
+      updated_at: data.updated_at,
     }
   }
 }

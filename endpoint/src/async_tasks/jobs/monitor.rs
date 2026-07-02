@@ -64,20 +64,26 @@ async fn load_jobs_from_local_db(
     let job = cached.job_info;
     tracing::debug!("Loading job from cache: {}", job.job_name);
     if let Some(exec_time) = super::calculate_execution_time(&job.job_type) {
-      let _ = job_injection_tx
+      if let Err(e) = job_injection_tx
         .send(super::JobQueueMessage::Scheduled {
           job,
           execution_time: exec_time,
           client_id: client_id.to_string(),
         })
-        .await;
+        .await
+      {
+        tracing::error!("Failed to inject cached scheduled job into queue: {e}");
+      }
     } else {
-      let _ = job_injection_tx
+      if let Err(e) = job_injection_tx
         .send(super::JobQueueMessage::Immediate {
           job,
           client_id: client_id.to_string(),
         })
-        .await;
+        .await
+      {
+        tracing::error!("Failed to inject cached immediate job into queue: {e}");
+      }
     }
   }
   Ok(())
@@ -209,22 +215,30 @@ pub async fn run(
                       completed: false,
                     };
                     let repo = SurrealJobCacheRepo { db: local_db.clone() };
-                    let _ = repo.create(cache_entry).await;
+                    if let Err(e) = repo.create(cache_entry).await {
+                      tracing::error!("Failed to create cache entry for new job {}: {e}", job.job_name);
+                    }
                   }
 
-                  let _ = mark_job_incomplete(&job_id).await;
+                  if let Err(e) = mark_job_incomplete(&job_id).await {
+                    tracing::error!("Failed to mark new job {} as incomplete: {e}", job.job_name);
+                  }
 
                   if let Some(exec_time) = super::calculate_execution_time(&job.job_type) {
-                    let _ = job_injection_tx.send(super::JobQueueMessage::Scheduled {
+                    if let Err(e) = job_injection_tx.send(super::JobQueueMessage::Scheduled {
                       job,
                       execution_time: exec_time,
                       client_id: cid.clone(),
-                    }).await;
+                    }).await {
+                      tracing::error!("Failed to inject new scheduled job into queue: {e}");
+                    }
                   } else {
-                    let _ = job_injection_tx.send(super::JobQueueMessage::Immediate {
+                    if let Err(e) = job_injection_tx.send(super::JobQueueMessage::Immediate {
                       job,
                       client_id: cid.clone(),
-                    }).await;
+                    }).await {
+                      tracing::error!("Failed to inject new immediate job into queue: {e}");
+                    }
                   }
                 }
                 Action::Update => {
@@ -262,46 +276,60 @@ pub async fn run(
                       job_info: updated_job.clone(),
                       completed: false,
                     };
-                    let _ = repo.update(&cached.cache_id(), data).await;
+                    if let Err(e) = repo.update(&cached.cache_id(), data).await {
+                      tracing::error!("Failed to update cache for job {job_id:?}: {e}");
+                    }
                   } else {
                     let cache_entry = JobCacheData {
                       job_id: job_id.to_sql(),
                       job_info: updated_job.clone(),
                       completed: false,
                     };
-                    let _ = repo.create(cache_entry).await;
+                    if let Err(e) = repo.create(cache_entry).await {
+                      tracing::error!("Failed to create cache entry for updated job {job_id:?}: {e}");
+                    }
                   }
 
                   if notification.data.enabled == Enabled::Enabled {
-                    let _ = job_injection_tx
+                    if let Err(e) = job_injection_tx
                       .send(super::JobQueueMessage::Remove {
                         id: notification.data.id.clone(),
                       })
-                      .await;
+                      .await
+                    {
+                      tracing::error!("Failed to send remove to scheduler for updated job: {e}");
+                    }
 
                     let job = notification.data.clone();
                     if let Some(exec_time) = super::calculate_execution_time(&job.job_type) {
-                      let _ = job_injection_tx.send(super::JobQueueMessage::Scheduled {
+                      if let Err(e) = job_injection_tx.send(super::JobQueueMessage::Scheduled {
                         job,
                         execution_time: exec_time,
                         client_id: cid.clone(),
-                      }).await;
+                      }).await {
+                        tracing::error!("Failed to inject updated scheduled job into queue: {e}");
+                      }
                     } else {
-                      let _ = job_injection_tx.send(super::JobQueueMessage::Immediate {
+                      if let Err(e) = job_injection_tx.send(super::JobQueueMessage::Immediate {
                         job,
                         client_id: cid.clone(),
-                      }).await;
+                      }).await {
+                        tracing::error!("Failed to inject updated immediate job into queue: {e}");
+                      }
                     }
                   }
                 }
                 Action::Delete | Action::Killed => {
                   println!("Job removed from remote: {}", notification.data.job_name);
                   tracing::debug!("Job removed from remote: {}", notification.data.job_name);
-                  let _ = job_injection_tx
+                  if let Err(e) = job_injection_tx
                     .send(super::JobQueueMessage::Remove {
                       id: notification.data.id.clone(),
                     })
-                    .await;
+                    .await
+                  {
+                    tracing::error!("Failed to send remove to scheduler for deleted job: {e}");
+                  }
                 }
               }
             }

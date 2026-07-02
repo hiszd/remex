@@ -606,9 +606,25 @@ Passing SurrealDB `RecordId` objects through URL serialization (`router.push(\`/
 
 ## Error Handling
 
+### Hard Rule — Never Silently Discard Errors
+
+There is absolutely no circumstance where errors should be silently discarded. Every error must either:
+- **Log to the command line and continue execution** (with `tracing::error!`/`tracing::warn!`), or
+- **Stop the program execution** if there is no appropriate fallback
+
+**There are no exceptions.**
+
+This means:
+- ❌ **Never** use `let _ =` to swallow a `Result` or error-returning call
+- ❌ **Never** use `.ok()` or `.unwrap_or_default()` to ignore errors without logging
+- ✅ Use `let _ =` only for values that are genuinely not errors (e.g., `Sink` items, drop handles, or test cleanup where failure is acceptable)
+- ✅ Always log the error context before continuing after a non-fatal failure
+
+### Approaches
+
 This codebase uses two error handling approaches:
 
-### thiserror
+#### thiserror
 
 For custom error types with enum variants:
 
@@ -622,7 +638,7 @@ pub enum DbError {
 }
 ```
 
-### anyhow
+#### anyhow
 
 For general application error handling with context propagation.
 

@@ -1,5 +1,5 @@
 import { RecordId, Table, type Surreal } from "surrealdb"
-import type { EnrollmentToken, Job, JobCreate, Group, GroupCreate, Client, Execution } from "@/lib/model"
+import type { EnrollmentToken, Job, JobCreate, Group, GroupCreate, Client, Execution, User } from "@/lib/model"
 
 /* ── helpers ── */
 
@@ -182,6 +182,14 @@ export async function getEnrollmentTokenById(
 ): Promise<EnrollmentToken | null> {
   const result = await client.select<EnrollmentToken>(rid(id))
   return (result as unknown as EnrollmentToken) ?? null
+}
+
+export async function getUserById(
+  client: Surreal,
+  id: string
+): Promise<User | null> {
+  const result = await client.select<User>(rid(id))
+  return (result as unknown as User) ?? null
 }
 
 export interface CreateEnrollmentTokenResult {

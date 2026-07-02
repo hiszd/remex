@@ -136,7 +136,7 @@ pub async fn execute_job(
     output: String::new(),
     command: job.job_command.clone(),
     exit_code: String::new(),
-    execution_start: Some(time_start.clone()),
+    execution_start: time_start.clone(),
     execution_end: None,
     created_at: surrealdb::types::Datetime::now(),
     updated_at: surrealdb::types::Datetime::now(),

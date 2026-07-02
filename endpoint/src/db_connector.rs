@@ -71,12 +71,16 @@ pub async fn run(
       {
         Ok(tok) => {
           let auth_token = tok.access.as_insecure_token().to_string();
-          let _ = remote_db.use_ns("remex").use_db("remex").await;
+          if let Err(e) = remote_db.use_ns("remex").use_db("remex").await {
+            tracing::warn!("Failed to set namespace/database after signin: {e}");
+          }
           let client_id = lookup_client_id(&remote_db, &hardware_hash).await;
           tracing::info!("Signed in successfully as {client_id}");
           send_identity(&monitor_cmd_tx, &heartbeat_client_id_tx, &client_id).await;
           tracing::info!("Connected to remote database");
-          let _ = db_handle_tx.send(Some((remote_db, auth_token)));
+          if let Err(e) = db_handle_tx.send(Some((remote_db, auth_token))) {
+            tracing::error!("Failed to send db handle to consumers: {e}");
+          }
           loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
           }
@@ -108,13 +112,19 @@ pub async fn run(
       {
         Ok(tok) => {
           let auth_token = tok.access.as_insecure_token().to_string();
-          let _ = remote_db.use_ns("remex").use_db("remex").await;
+          if let Err(e) = remote_db.use_ns("remex").use_db("remex").await {
+            tracing::warn!("Failed to set namespace/database after signup: {e}");
+          }
           let client_id = lookup_client_id(&remote_db, &hardware_hash).await;
           tracing::info!("Signed up successfully as {client_id}");
-          update_session(&session_repo, &session.session_id(), client_id.clone(), Some(secret)).await;
+          if let Err(e) = update_session(&session_repo, &session.session_id(), client_id.clone(), Some(secret)).await {
+            tracing::error!("Failed to persist session credentials after signup: {e}. Endpoint will need re-enrollment on restart.");
+          }
           send_identity(&monitor_cmd_tx, &heartbeat_client_id_tx, &client_id).await;
           tracing::info!("Connected to remote database");
-          let _ = db_handle_tx.send(Some((remote_db, auth_token)));
+          if let Err(e) = db_handle_tx.send(Some((remote_db, auth_token))) {
+            tracing::error!("Failed to send db handle to consumers: {e}");
+          }
           loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
           }
@@ -152,8 +162,12 @@ async fn send_identity(
   heartbeat_client_id_tx: &mpsc::Sender<String>,
   client_id: &str,
 ) {
-  let _ = monitor_cmd_tx.send(MonitorCommand::SetClientId(client_id.to_string())).await;
-  let _ = heartbeat_client_id_tx.send(client_id.to_string()).await;
+  if let Err(e) = monitor_cmd_tx.send(MonitorCommand::SetClientId(client_id.to_string())).await {
+    tracing::error!("Failed to send client_id to monitor: {e}");
+  }
+  if let Err(e) = heartbeat_client_id_tx.send(client_id.to_string()).await {
+    tracing::error!("Failed to send client_id to heartbeat: {e}");
+  }
 }
 
 async fn update_session(
@@ -161,9 +175,9 @@ async fn update_session(
   session_id: &str,
   client_id: String,
   secret: Option<String>,
-) {
+) -> Result<(), surrealdb::Error> {
   let local_db = repo.db.clone();
-  let _ = local_db
+  local_db
     .query(
       "USE NS remex DB endpoint;
        UPDATE $id MERGE {
@@ -174,7 +188,8 @@ async fn update_session(
     .bind(("id", surrealdb::types::RecordId::new("session", session_id)))
     .bind(("client_id", client_id))
     .bind(("secret", secret))
-    .await;
+    .await?;
+  Ok(())
 }
 
 async fn load_or_create_session(

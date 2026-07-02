@@ -103,26 +103,34 @@ pub async fn sync_and_refill_queue(
     let repo = SurrealJobCacheRepo {
       db: local_db.clone(),
     };
-    let _ = sync_job_to_cache(&job, existing.first(), &repo).await;
+    if let Err(e) = sync_job_to_cache(&job, existing.first(), &repo).await {
+      tracing::error!("Failed to sync job {} to local cache: {e}", job.job_name);
+    }
 
     if let Some(exec_time) = super::calculate_execution_time(&job.job_type) {
       tracing::debug!("Injecting scheduled job: {} at {:?}", job.job_name, exec_time);
-      let _ = job_injection_tx
+      if let Err(e) = job_injection_tx
         .send(JobQueueMessage::Scheduled {
           job,
           execution_time: exec_time,
           client_id: client_id.to_string(),
         })
-        .await;
+        .await
+      {
+        tracing::error!("Failed to inject scheduled job into queue: {e}");
+      }
       queued_count += 1;
     } else {
       tracing::debug!("Injecting immediate job: {}", job.job_name);
-      let _ = job_injection_tx
+      if let Err(e) = job_injection_tx
         .send(JobQueueMessage::Immediate {
           job,
           client_id: client_id.to_string(),
         })
-        .await;
+        .await
+      {
+        tracing::error!("Failed to inject immediate job into queue: {e}");
+      }
       queued_count += 1;
     }
   }
@@ -419,21 +427,25 @@ pub async fn execution_sync_loop(
           Err(e) => {
             tracing::warn!("Failed to push execution to remote, reverting synced flag: {}", e);
             let revert_data = ExecutionCacheData {
-              execution_id: exec_id,
+              execution_id: exec_id.clone(),
               execution_info: entry.execution_info.clone(),
               synced: false,
             };
-            let _ = repo.update(&cache_id, revert_data).await;
+            if let Err(revert_err) = repo.update(&cache_id, revert_data).await {
+              tracing::error!("Failed to revert synced flag for execution {exec_id}: {revert_err}");
+            }
           }
         },
         Err(e) => {
           tracing::warn!("Failed to push execution to remote, reverting synced flag: {}", e);
           let revert_data = ExecutionCacheData {
-            execution_id: exec_id,
+            execution_id: exec_id.clone(),
             execution_info: entry.execution_info.clone(),
             synced: false,
           };
-          let _ = repo.update(&cache_id, revert_data).await;
+          if let Err(revert_err) = repo.update(&cache_id, revert_data).await {
+            tracing::error!("Failed to revert synced flag for execution {exec_id}: {revert_err}");
+          }
         }
       }
     }

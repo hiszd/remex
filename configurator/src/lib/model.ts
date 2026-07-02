@@ -93,6 +93,11 @@ export interface Execution {
   updated_at: string
 }
 
+export interface EnrollmentTokenUsage {
+  client_id: RecordId
+  used_at: string
+}
+
 export interface EnrollmentToken {
   id: RecordId
   token_hash: string
@@ -100,8 +105,9 @@ export interface EnrollmentToken {
   single_use: boolean
   expires_at: string | null
   issued_by: RecordId
-  used_at: string | null
-  used_by: RecordId | null
+  last_used: string | null
+  last_used_by: RecordId | null
+  usage_history: EnrollmentTokenUsage[]
   created_at: string
 }
 
@@ -173,8 +179,9 @@ export const FIELD_LABELS: Record<string, string> = {
   single_use: "Single Use",
   expires_at: "Expires",
   issued_by: "Issued By",
-  used_at: "Used At",
-  used_by: "Used By",
+  last_used: "Last Used",
+  last_used_by: "Last Used By",
+  usage_history: "Usage History",
 }
 
 export function fieldLabel(field: string): string {

@@ -80,10 +80,10 @@ impl Client {
                   blocked: false
                 })[0];
                 IF $tok.single_use = true {
-                  UPDATE $tok.id SET valid = false, used_at = time::now(), used_by = $cl.id;
+                  UPDATE $tok.id SET valid = false, usage_history += { client_id: $cl.id, used_at: time::now() };
                   RETURN $cl
                 } ELSE {
-                  UPDATE $tok.id SET used_at = time::now(), used_by = $cl.id;
+                  UPDATE $tok.id SET usage_history += { client_id: $cl.id, used_at: time::now() };
                   RETURN $cl
                 }
               }

@@ -56,10 +56,10 @@ const { data: tokens, isLoading, isError, error } = useQuery({
             </tr>
           </thead>
           <tbody>
-            <tr v-for="t in tokens" :key="String(t.id)">
+            <tr v-for="t in tokens" :key="String(t.id)" class="clickable-row" @click="router.push(`/tokens/${t.id}`)">
               <td>
                 <span v-if="!t.valid" class="status-badge failed">Revoked</span>
-                <span v-else-if="t.used_at" class="status-badge completed">Used</span>
+                <span v-else-if="t.last_used" class="status-badge completed">Used</span>
                 <span v-else-if="t.expires_at && new Date(t.expires_at) < new Date()" class="status-badge timedout">Expired</span>
                 <span v-else class="status-badge running">Active</span>
               </td>
@@ -76,7 +76,7 @@ const { data: tokens, isLoading, isError, error } = useQuery({
                 <span style="color: var(--text-500); font-size: 0.85rem;">{{ new Date(t.created_at).toLocaleDateString() }}</span>
               </td>
               <td>
-                <span style="color: var(--text-500); font-size: 0.85rem;">{{ t.used_by ? String(t.used_by) : "\u2014" }}</span>
+                <span style="color: var(--text-500); font-size: 0.85rem;">{{ t.last_used_by ? String(t.last_used_by) : "\u2014" }}</span>
               </td>
             </tr>
           </tbody>
@@ -85,3 +85,14 @@ const { data: tokens, isLoading, isError, error } = useQuery({
     </QueryState>
   </div>
 </template>
+
+<style lang="scss" scoped>
+.clickable-row {
+  cursor: pointer;
+  transition: background-color 0.15s;
+
+  &:hover {
+    background-color: var(--background-200);
+  }
+}
+</style>

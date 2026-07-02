@@ -38,7 +38,7 @@ macro_rules! impl_surreal_db_operator {
       }
 
       async fn update(&self, id: &str, input: Self::Input) -> Result<Self::Record, $crate::db::DbError> {
-        let sql = concat!("USE NS ", $ns, " DB ", $db, "; UPDATE $id MERGE $data");
+        let sql = concat!("USE NS ", $ns, " DB ", $db, "; UPDATE $id CONTENT $data");
         self.db
           .query(sql)
           .bind(("id", ::surrealdb::types::RecordId::new($table, id)))
@@ -127,9 +127,15 @@ macro_rules! impl_in_memory_db_operator {
 
 #[cfg(test)]
 mod tests {
-  use serde::{Deserialize, Serialize};
+  use serde::{
+    Deserialize,
+    Serialize,
+  };
 
-  use crate::db::{DbError, DbOperator};
+  use crate::db::{
+    DbError,
+    DbOperator,
+  };
 
   #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
   pub struct TestRecord {
@@ -168,7 +174,10 @@ mod tests {
   #[tokio::test]
   async fn basic_create_and_read() {
     let repo = InMemoryTestRepo::new();
-    let data = TestData { name: "hello".into(), value: 42 };
+    let data = TestData {
+      name: "hello".into(),
+      value: 42,
+    };
 
     let created = repo.create(data).await.unwrap();
     assert_eq!(created.name, "hello");
@@ -188,10 +197,22 @@ mod tests {
   #[tokio::test]
   async fn basic_update() {
     let repo = InMemoryTestRepo::new();
-    let created = repo.create(TestData { name: "old".into(), value: 1 }).await.unwrap();
+    let created = repo
+      .create(TestData {
+        name: "old".into(),
+        value: 1,
+      })
+      .await
+      .unwrap();
 
     let id = rid_key(&created.id);
-    let updated = repo.update(&id, TestData { name: "new".into(), value: 2 }).await.unwrap();
+    let updated = repo
+      .update(&id, TestData {
+        name: "new".into(),
+        value: 2,
+      })
+      .await
+      .unwrap();
     assert_eq!(updated.name, "new");
     assert_eq!(updated.value, 2);
 
@@ -202,7 +223,13 @@ mod tests {
   #[tokio::test]
   async fn basic_delete() {
     let repo = InMemoryTestRepo::new();
-    let created = repo.create(TestData { name: "temp".into(), value: 0 }).await.unwrap();
+    let created = repo
+      .create(TestData {
+        name: "temp".into(),
+        value: 0,
+      })
+      .await
+      .unwrap();
 
     let id = rid_key(&created.id);
     repo.delete(&id).await.unwrap();
@@ -215,11 +242,20 @@ mod tests {
   async fn basic_crud_lifecycle() {
     let repo = InMemoryTestRepo::new();
 
-    let data = TestData { name: "cycle".into(), value: 10 };
+    let data = TestData {
+      name: "cycle".into(),
+      value: 10,
+    };
     let created = repo.create(data).await.unwrap();
     let id = rid_key(&created.id);
 
-    let updated = repo.update(&id, TestData { name: "cycle".into(), value: 20 }).await.unwrap();
+    let updated = repo
+      .update(&id, TestData {
+        name: "cycle".into(),
+        value: 20,
+      })
+      .await
+      .unwrap();
     assert_eq!(updated.value, 20);
 
     let found = repo.read(&id).await.unwrap();
@@ -237,11 +273,26 @@ mod tests {
     repo: &dyn DbOperator<Record = TestRecord, Input = TestData>,
     seed_name: &str,
   ) -> Result<i32, DbError> {
-    let created = repo.create(TestData { name: seed_name.into(), value: 1 }).await?;
+    let created = repo
+      .create(TestData {
+        name: seed_name.into(),
+        value: 1,
+      })
+      .await?;
     let id = rid_key(&created.id);
 
-    let v1 = repo.update(&id, TestData { name: format!("{seed_name}_step1"), value: 10 }).await?;
-    let v2 = repo.update(&id, TestData { name: format!("{seed_name}_step2"), value: v1.value + 5 }).await?;
+    let v1 = repo
+      .update(&id, TestData {
+        name: format!("{seed_name}_step1"),
+        value: 10,
+      })
+      .await?;
+    let v2 = repo
+      .update(&id, TestData {
+        name: format!("{seed_name}_step2"),
+        value: v1.value + 5,
+      })
+      .await?;
 
     Ok(v2.value)
   }
@@ -257,10 +308,7 @@ mod tests {
   async fn seam_multiple_flows_independent() {
     let repo = InMemoryTestRepo::new();
 
-    let (r1, r2) = tokio::join!(
-      business_flow(&repo, "alpha"),
-      business_flow(&repo, "beta"),
-    );
+    let (r1, r2) = tokio::join!(business_flow(&repo, "alpha"), business_flow(&repo, "beta"),);
     assert_eq!(r1.unwrap(), 15);
     assert_eq!(r2.unwrap(), 15);
   }
@@ -271,13 +319,20 @@ mod tests {
     repo: Box<dyn DbOperator<Record = TestRecord, Input = TestData>>,
     name: &str,
   ) -> Result<String, DbError> {
-    let created = repo.create(TestData { name: name.into(), value: 99 }).await?;
+    let created = repo
+      .create(TestData {
+        name: name.into(),
+        value: 99,
+      })
+      .await?;
     Ok(rid_key(&created.id))
   }
 
   #[tokio::test]
   async fn seam_boxed_trait_object() {
-    let id = boxed_flow(Box::new(InMemoryTestRepo::new()), "boxed").await.unwrap();
+    let id = boxed_flow(Box::new(InMemoryTestRepo::new()), "boxed")
+      .await
+      .unwrap();
     assert!(!id.is_empty());
   }
 
@@ -291,7 +346,12 @@ mod tests {
     for i in 0..100 {
       let r = repo.clone();
       handles.push(tokio::spawn(async move {
-        r.create(TestData { name: format!("t{i}"), value: i }).await.unwrap();
+        r.create(TestData {
+          name: format!("t{i}"),
+          value: i,
+        })
+        .await
+        .unwrap();
       }));
     }
 
@@ -302,7 +362,13 @@ mod tests {
     // Verify all 100 records are independently stored
     // (there's no read-all method, so we just verify the count via read pattern)
     for i in 0..100 {
-      let record = repo.create(TestData { name: format!("verify_{i}"), value: i }).await.unwrap();
+      let record = repo
+        .create(TestData {
+          name: format!("verify_{i}"),
+          value: i,
+        })
+        .await
+        .unwrap();
       let id = rid_key(&record.id);
       let found = repo.read(&id).await.unwrap();
       assert!(found.is_some());
@@ -312,7 +378,13 @@ mod tests {
   #[tokio::test]
   async fn concurrent_read_write_on_same_repo() {
     let repo = std::sync::Arc::new(InMemoryTestRepo::new());
-    let created = repo.create(TestData { name: "shared".into(), value: 0 }).await.unwrap();
+    let created = repo
+      .create(TestData {
+        name: "shared".into(),
+        value: 0,
+      })
+      .await
+      .unwrap();
     let id = std::sync::Arc::new(rid_key(&created.id));
 
     let mut handles = Vec::new();
@@ -320,7 +392,13 @@ mod tests {
       let r = repo.clone();
       let rid = id.clone();
       handles.push(tokio::spawn(async move {
-        let _ = r.update(&rid, TestData { name: "shared".into(), value: i }).await.unwrap();
+        let _ = r
+          .update(&rid, TestData {
+            name: "shared".into(),
+            value: i,
+          })
+          .await
+          .unwrap();
         let _ = r.read(&rid).await.unwrap();
       }));
     }
@@ -342,8 +420,20 @@ mod tests {
     let repo_a = InMemoryTestRepo::new();
     let repo_b = InMemoryTestRepo::new();
 
-    let created_a = repo_a.create(TestData { name: "a_only".into(), value: 1 }).await.unwrap();
-    let created_b = repo_b.create(TestData { name: "b_only".into(), value: 2 }).await.unwrap();
+    let created_a = repo_a
+      .create(TestData {
+        name: "a_only".into(),
+        value: 1,
+      })
+      .await
+      .unwrap();
+    let created_b = repo_b
+      .create(TestData {
+        name: "b_only".into(),
+        value: 2,
+      })
+      .await
+      .unwrap();
 
     let id_a = rid_key(&created_a.id);
     let id_b = rid_key(&created_b.id);
@@ -363,7 +453,13 @@ mod tests {
   async fn edge_update_creates_if_not_exists() {
     // Matches SurrealDB UPSERT semantics
     let repo = InMemoryTestRepo::new();
-    let updated = repo.update("nonexistent-id", TestData { name: "upserted".into(), value: 42 }).await.unwrap();
+    let updated = repo
+      .update("nonexistent-id", TestData {
+        name: "upserted".into(),
+        value: 42,
+      })
+      .await
+      .unwrap();
 
     assert_eq!(updated.name, "upserted");
     assert_eq!(updated.value, 42);
@@ -386,7 +482,13 @@ mod tests {
     let mut ids = Vec::new();
 
     for i in 0..10 {
-      let record = repo.create(TestData { name: format!("rec_{i}"), value: i }).await.unwrap();
+      let record = repo
+        .create(TestData {
+          name: format!("rec_{i}"),
+          value: i,
+        })
+        .await
+        .unwrap();
       ids.push(rid_key(&record.id));
     }
 
@@ -406,11 +508,23 @@ mod tests {
   #[tokio::test]
   async fn edge_update_preserves_other_fields() {
     let repo = InMemoryTestRepo::new();
-    let record = repo.create(TestData { name: "original".into(), value: 100 }).await.unwrap();
+    let record = repo
+      .create(TestData {
+        name: "original".into(),
+        value: 100,
+      })
+      .await
+      .unwrap();
     let id = rid_key(&record.id);
 
     // Update only value (via new TestData with same name)
-    repo.update(&id, TestData { name: "original".into(), value: 200 }).await.unwrap();
+    repo
+      .update(&id, TestData {
+        name: "original".into(),
+        value: 200,
+      })
+      .await
+      .unwrap();
 
     let found = repo.read(&id).await.unwrap().unwrap();
     assert_eq!(found.name, "original");

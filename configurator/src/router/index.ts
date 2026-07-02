@@ -82,6 +82,12 @@ const router = markRaw(createRouter({
       component: () => import("@/views/CreateTokenView.vue"),
     },
     {
+      path: "/tokens/:id",
+      name: "token-details",
+      meta: { title: "Token Details" },
+      component: () => import("@/views/TokenDetailsView.vue"),
+    },
+    {
       path: "/executions/:id",
       name: "execution-details",
       meta: { title: "Execution Details" },

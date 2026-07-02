@@ -20,7 +20,10 @@ export function formatDuration(start: Date, end: Date): string {
   if (dur.asMinutes() >= 1) {
     return `${dur.minutes()}m ${dur.seconds()}s`;
   }
-  return `${dur.seconds()}s`;
+  if (dur.asSeconds() >= 1) {
+    return `${dur.seconds()}s`;
+  }
+  return `<1s`;
 }
 
 
