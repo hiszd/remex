@@ -1,104 +1,88 @@
-use surrealdb::{
-  engine::any::Any,
-  Surreal,
-};
-use tokio::sync::{
-  mpsc,
-  watch,
-};
+use std::time::Duration;
+use actix::prelude::*;
+use surrealdb::{engine::any::Any, Surreal};
+use tracing;
 
-pub async fn run(
-  mut client_id_rx: mpsc::Receiver<String>,
-  mut db_handle_rx: watch::Receiver<Option<(Surreal<Any>, String)>>,
-) {
-  let mut client_id: Option<String> = None;
-  let mut db: Option<Surreal<Any>> = None;
-  let mut auth_token: Option<String> = None;
+pub struct HeartbeatActor {
+    client_id: Option<String>,
+    remote_db: Option<Surreal<Any>>,
+    interval: Duration,
+}
 
-  let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
-  interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
-  loop {
-    tokio::select! {
-      cid = client_id_rx.recv() => {
-        match cid {
-          Some(id) => {
-            tracing::info!("Heartbeat task received client_id: {id}");
-            client_id = Some(id);
-          }
-          None => {
-            tracing::warn!("client_id channel closed, stopping heartbeat task");
-            break;
-          }
+impl HeartbeatActor {
+    pub fn new() -> Self {
+        HeartbeatActor {
+            client_id: None,
+            remote_db: None,
+            interval: Duration::from_secs(60),
         }
-      }
-      result = db_handle_rx.changed() => {
-        match result {
-          Ok(()) => {
-            let entry = db_handle_rx.borrow().clone();
-            if let Some((ref handle, ref token)) = entry {
-              db = Some(handle.clone());
-              auth_token = Some(token.clone());
-              tracing::info!("Heartbeat task received db handle");
-            } else {
-              tracing::info!("Heartbeat task received cleared db handle");
-              db = None;
-              auth_token = None;
-            }
-          }
-          Err(_) => {
-            tracing::warn!("db_handle channel closed, stopping heartbeat task");
-            break;
-          }
-        }
-      }
-      _ = interval.tick() => {
-        tracing::trace!("Heartbeat tick fired (client_id={}, db={})",
-          client_id.is_some(),
-          db.is_some(),
-        );
-        if let Some(ref cid) = client_id {
-          if db.is_some() && auth_token.is_some() {
-            let cid = cid.clone();
-            let db = db.clone().unwrap();
-            let tkn = auth_token.clone().unwrap();
-              tokio::spawn(async move {
-                if let Err(e) = db.authenticate(tkn).await {
-                  tracing::warn!("Heartbeat authenticate failed: {e}");
-                  return;
-                }
-                match surrealdb::types::RecordId::parse_simple(&cid) {
-                  Ok(rid) => {
-                    match db
-                      .query("UPDATE $id SET last_seen = time::now()")
-                      .bind(("id", rid))
-                      .await
-                    {
-                      Ok(mut response) => {
-                        let updated: Vec<serde_json::Value> = match response.take(0) {
-                          Ok(v) => v,
-                          Err(e) => {
-                            tracing::warn!("UPDATE failed on server: {e}");
-                            vec![]
-                          }
-                        };
-                        if updated.is_empty() {
-                          tracing::warn!(
-                            "UPDATE last_seen for {cid} matched zero records"
-                          );
-                        }
-                      }
-                      Err(e) => tracing::warn!("Failed to send UPDATE: {e}"),
-                    }
-                  }
-                  Err(e) => tracing::warn!("Invalid client_id {cid}: {e}"),
-                }
-              });
-          }
-        }
-      }
     }
-  }
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+struct HeartbeatTick;
+
+impl Actor for HeartbeatActor {
+    type Context = Context<Self>;
+
+    fn started(&mut self, ctx: &mut Self::Context) {
+        ctx.notify_later(HeartbeatTick, self.interval);
+    }
+}
+
+impl Handler<crate::async_tasks::ConnectionReady> for HeartbeatActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: crate::async_tasks::ConnectionReady, _ctx: &mut Self::Context) {
+        self.remote_db = msg.db;
+        self.client_id = msg.client_id;
+        tracing::info!(
+            "Heartbeat actor received connection (db={}, client_id={})",
+            self.remote_db.is_some(),
+            self.client_id.is_some(),
+        );
+    }
+}
+
+impl Handler<HeartbeatTick> for HeartbeatActor {
+    type Result = ();
+
+    fn handle(&mut self, _msg: HeartbeatTick, ctx: &mut Self::Context) {
+        if let Some(ref cid) = self.client_id {
+            if let Some(ref db) = self.remote_db {
+                let cid = cid.clone();
+                let db = db.clone();
+                tokio::spawn(async move {
+                    match surrealdb::types::RecordId::parse_simple(&cid) {
+                        Ok(rid) => {
+                            match db
+                                .query("UPDATE $id SET last_seen = time::now()")
+                                .bind(("id", rid))
+                                .await
+                            {
+                                Ok(mut response) => {
+                                    let updated: Vec<serde_json::Value> = match response.take(0) {
+                                        Ok(v) => v,
+                                        Err(e) => {
+                                            tracing::warn!("UPDATE failed on server: {e}");
+                                            vec![]
+                                        }
+                                    };
+                                    if updated.is_empty() {
+                                        tracing::warn!("UPDATE last_seen for {cid} matched zero records");
+                                    }
+                                }
+                                Err(e) => tracing::warn!("Failed to send UPDATE: {e}"),
+                            }
+                        }
+                        Err(e) => tracing::warn!("Invalid client_id {cid}: {e}"),
+                    }
+                });
+            }
+        }
+        ctx.notify_later(HeartbeatTick, self.interval);
+    }
 }
 
 #[cfg(test)]

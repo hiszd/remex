@@ -7,6 +7,7 @@ mod db_connector;
 
 use actix::Actor;
 use async_tasks::jobs::scheduler::SchedulerActor;
+use async_tasks::db_heartbeat::HeartbeatActor;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -62,7 +63,7 @@ async fn main() -> Result<(), Error> {
   let (db_handle_tx, db_handle_rx) = tokio::sync::watch::channel(None::<(surrealdb::Surreal<surrealdb::engine::any::Any>, String)>);
   let (monitor_cmd_tx, monitor_cmd_rx) = tokio::sync::mpsc::channel::<async_tasks::jobs::monitor::MonitorCommand>(100);
   let (job_injection_tx, mut job_injection_rx) = tokio::sync::mpsc::channel::<async_tasks::jobs::JobQueueMessage>(1000);
-  let (heartbeat_client_id_tx, heartbeat_client_id_rx) = tokio::sync::mpsc::channel::<String>(10);
+  let (heartbeat_client_id_tx, _heartbeat_client_id_rx) = tokio::sync::mpsc::channel::<String>(10);
 
   // Start SchedulerActor — migrate from old tokio task to Actix actor
   let scheduler_addr = SchedulerActor::new().start();
@@ -92,10 +93,8 @@ async fn main() -> Result<(), Error> {
 
   tokio::spawn(async_tasks::jobs::sync::execution_sync_loop(db_handle_rx.clone()));
 
-  tokio::spawn(async_tasks::db_heartbeat::run(
-    heartbeat_client_id_rx,
-    db_handle_rx,
-  ));
+  // Start HeartbeatActor — receives ConnectionReady from DbConnectorActor (once migrated)
+  let _heartbeat_addr = HeartbeatActor::new().start();
 
   loop {
     tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
