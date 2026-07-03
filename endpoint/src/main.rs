@@ -5,6 +5,9 @@ mod async_tasks;
 mod db;
 mod db_connector;
 
+use actix::Actor;
+use async_tasks::jobs::scheduler::SchedulerActor;
+
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
@@ -44,7 +47,7 @@ enum Error {
   InvalidClientId(String),
 }
 
-#[tokio::main]
+#[actix::main]
 async fn main() -> Result<(), Error> {
   let args = Args::parse();
   init_logging(args.debug);
@@ -58,8 +61,20 @@ async fn main() -> Result<(), Error> {
 
   let (db_handle_tx, db_handle_rx) = tokio::sync::watch::channel(None::<(surrealdb::Surreal<surrealdb::engine::any::Any>, String)>);
   let (monitor_cmd_tx, monitor_cmd_rx) = tokio::sync::mpsc::channel::<async_tasks::jobs::monitor::MonitorCommand>(100);
-  let (job_injection_tx, job_injection_rx) = tokio::sync::mpsc::channel::<async_tasks::jobs::JobQueueMessage>(1000);
+  let (job_injection_tx, mut job_injection_rx) = tokio::sync::mpsc::channel::<async_tasks::jobs::JobQueueMessage>(1000);
   let (heartbeat_client_id_tx, heartbeat_client_id_rx) = tokio::sync::mpsc::channel::<String>(10);
+
+  // Start SchedulerActor — migrate from old tokio task to Actix actor
+  let scheduler_addr = SchedulerActor::new().start();
+  // Bridge: old mpsc channel → actor address (until monitor is migrated too)
+  tokio::spawn(async move {
+    while let Some(msg) = job_injection_rx.recv().await {
+      if scheduler_addr.send(async_tasks::jobs::scheduler::InjectJob(msg)).await.is_err() {
+        tracing::error!("Scheduler actor mailbox closed");
+        break;
+      }
+    }
+  });
 
   tokio::spawn(db_connector::run(
     args.db_url,
@@ -68,8 +83,6 @@ async fn main() -> Result<(), Error> {
     monitor_cmd_tx,
     heartbeat_client_id_tx,
   ));
-
-  tokio::spawn(async_tasks::jobs::scheduler::run(job_injection_rx));
 
   tokio::spawn(async_tasks::jobs::monitor::run(
     monitor_cmd_rx,
