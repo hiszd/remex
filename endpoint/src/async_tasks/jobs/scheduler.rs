@@ -58,6 +58,13 @@ impl Actor for SchedulerActor {
   type Context = Context<Self>;
 }
 
+impl actix::Supervised for SchedulerActor {
+    fn restarting(&mut self, _ctx: &mut Context<Self>) {
+        tracing::info!("SchedulerActor: restarting, clearing job queue");
+        self.heap.clear();
+    }
+}
+
 impl Handler<InjectJob> for SchedulerActor {
   type Result = ();
 
@@ -94,11 +101,6 @@ impl Handler<InjectJob> for SchedulerActor {
       JobQueueMessage::Remove { id } => {
         tracing::info!("Removing job from queue: {}", id.to_sql());
         self.heap.retain(|j| j.job.id != id);
-        self.schedule_next(ctx);
-      }
-      JobQueueMessage::SyncFromRemote => {
-        tracing::info!("Sync from remote requested, clearing job queue");
-        self.heap.clear();
         self.schedule_next(ctx);
       }
     }

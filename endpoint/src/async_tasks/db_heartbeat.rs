@@ -31,6 +31,16 @@ impl Actor for HeartbeatActor {
     }
 }
 
+impl actix::Supervised for HeartbeatActor {
+    fn restarting(&mut self, ctx: &mut Context<Self>) {
+        tracing::info!("HeartbeatActor: restarting");
+        self.client_id = None;
+        self.remote_db = None;
+        // Re-schedule the heartbeat tick (started() is not called on restart)
+        ctx.notify_later(HeartbeatTick, self.interval);
+    }
+}
+
 impl Handler<crate::async_tasks::ConnectionReady> for HeartbeatActor {
     type Result = ();
 

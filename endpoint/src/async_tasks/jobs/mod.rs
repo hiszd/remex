@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use remex_core::db::model::jobs::{Job, JobType};
 use surrealdb::types::RecordId;
 use tokio::time::Instant;
@@ -6,6 +7,31 @@ pub mod execution;
 pub mod monitor;
 pub mod scheduler;
 pub mod sync;
+
+/// Abstraction over sending JobQueueMessages to the scheduler.
+/// Supports both mpsc channels (for tests, backward compat) 
+/// and direct Addr<SchedulerActor> for production.
+#[async_trait]
+pub trait JobSender: Send + Sync {
+    async fn send_job(&self, msg: JobQueueMessage) -> Result<(), ()>;
+}
+
+#[async_trait]
+impl JobSender for tokio::sync::mpsc::Sender<JobQueueMessage> {
+    async fn send_job(&self, msg: JobQueueMessage) -> Result<(), ()> {
+        self.send(msg).await.map_err(|_| ())
+    }
+}
+
+#[async_trait]
+impl JobSender for actix::Addr<scheduler::SchedulerActor> {
+    async fn send_job(&self, msg: JobQueueMessage) -> Result<(), ()> {
+        self.send(scheduler::InjectJob(msg))
+            .await
+            .map_err(|_| ())?;
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum JobQueueMessage {
@@ -21,7 +47,6 @@ pub enum JobQueueMessage {
   Remove {
     id: RecordId,
   },
-  SyncFromRemote,
 }
 
 pub fn calculate_execution_time(job_type: &JobType) -> Option<Instant> {

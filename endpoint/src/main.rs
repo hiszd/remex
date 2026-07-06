@@ -5,9 +5,13 @@ mod async_tasks;
 mod db;
 mod db_connector;
 
-use actix::Actor;
+use actix::Supervisor;
+use async_tasks::ConnectionReady;
+use async_tasks::jobs::monitor::MonitorActor;
 use async_tasks::jobs::scheduler::SchedulerActor;
+use async_tasks::jobs::sync::SyncActor;
 use async_tasks::db_heartbeat::HeartbeatActor;
+use db_connector::{DbConnectorActor, Subscribe};
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -38,8 +42,6 @@ enum Error {
   DbError(#[from] remex_core::db::DbError),
   #[error(transparent)]
   StdIo(#[from] std::io::Error),
-  #[error("No Database Connection")]
-  NoDatabaseConnection(String),
   #[error("Shell not found: {0}")]
   ShellNotFound(String),
   #[error("Command timed out")]
@@ -60,41 +62,25 @@ async fn main() -> Result<(), Error> {
     .unwrap();
   db::migrate(&db::LOCAL_DB).await.unwrap();
 
-  let (db_handle_tx, db_handle_rx) = tokio::sync::watch::channel(None::<(surrealdb::Surreal<surrealdb::engine::any::Any>, String)>);
-  let (monitor_cmd_tx, monitor_cmd_rx) = tokio::sync::mpsc::channel::<async_tasks::jobs::monitor::MonitorCommand>(100);
-  let (job_injection_tx, mut job_injection_rx) = tokio::sync::mpsc::channel::<async_tasks::jobs::JobQueueMessage>(1000);
-  let (heartbeat_client_id_tx, _heartbeat_client_id_rx) = tokio::sync::mpsc::channel::<String>(10);
-
   // Start SchedulerActor — migrate from old tokio task to Actix actor
-  let scheduler_addr = SchedulerActor::new().start();
-  // Bridge: old mpsc channel → actor address (until monitor is migrated too)
-  tokio::spawn(async move {
-    while let Some(msg) = job_injection_rx.recv().await {
-      if scheduler_addr.send(async_tasks::jobs::scheduler::InjectJob(msg)).await.is_err() {
-        tracing::error!("Scheduler actor mailbox closed");
-        break;
-      }
-    }
-  });
-
-  tokio::spawn(db_connector::run(
-    args.db_url,
-    args.enrollment_token,
-    db_handle_tx,
-    monitor_cmd_tx,
-    heartbeat_client_id_tx,
-  ));
-
-  tokio::spawn(async_tasks::jobs::monitor::run(
-    monitor_cmd_rx,
-    job_injection_tx,
-    db_handle_rx.clone(),
-  ));
-
-  tokio::spawn(async_tasks::jobs::sync::execution_sync_loop(db_handle_rx.clone()));
+  let scheduler_addr = Supervisor::start(|_| SchedulerActor::new());
 
   // Start HeartbeatActor — receives ConnectionReady from DbConnectorActor (once migrated)
-  let _heartbeat_addr = HeartbeatActor::new().start();
+  let heartbeat_addr = Supervisor::start(|_| HeartbeatActor::new());
+
+  // Start SyncActor — pushes unsynced executions to remote every 30s
+  let sync_addr = Supervisor::start(|_| SyncActor::new());
+
+  // Start DbConnectorActor — owns the remote connection, broadcasts ConnectionReady
+  let db_connector_addr = Supervisor::start(|_| DbConnectorActor::new(args.db_url, args.enrollment_token));
+
+  // Subscribe downstream actors to ConnectionReady broadcasts
+  db_connector_addr.do_send(Subscribe(heartbeat_addr.recipient::<ConnectionReady>()));
+  db_connector_addr.do_send(Subscribe(sync_addr.recipient::<ConnectionReady>()));
+
+  // Start MonitorActor — LIVE SELECT streams on job/group tables
+  let monitor_addr = Supervisor::start(move |_| MonitorActor::new(scheduler_addr.clone()));
+  db_connector_addr.do_send(Subscribe(monitor_addr.recipient::<ConnectionReady>()));
 
   loop {
     tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;

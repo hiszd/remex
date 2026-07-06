@@ -10,12 +10,6 @@ use surrealdb::{
 };
 
 #[derive(Debug, Serialize, Deserialize, SurrealValue, Clone)]
-pub struct LastActionData {
-  pub task_name: String,
-  pub last_run: surrealdb::types::Datetime,
-}
-
-#[derive(Debug, Serialize, Deserialize, SurrealValue, Clone)]
 pub struct LastAction {
   pub id: surrealdb::types::RecordId,
   pub task_name: String,

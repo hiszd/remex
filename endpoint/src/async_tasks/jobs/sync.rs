@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use actix::prelude::*;
+
 use remex_core::db::{
   model::{
     groups::Group,
@@ -15,13 +17,8 @@ use surrealdb::{
   },
   Surreal,
 };
-use tokio::sync::watch;
 
-use super::JobQueueMessage;
-use crate::db::remex::{
-  ExecutionCacheData,
-  SurrealExecutionCacheRepo,
-};
+use super::{JobQueueMessage, JobSender};
 
 pub async fn sync_groups(
   client_id: &str,
@@ -53,7 +50,7 @@ pub async fn sync_groups(
 }
 
 pub async fn sync_and_refill_queue(
-  job_injection_tx: &tokio::sync::mpsc::Sender<JobQueueMessage>,
+  sender: &dyn JobSender,
   client_id: &str,
   groups: &[RecordId],
   remote_db: &Surreal<Any>,
@@ -109,27 +106,27 @@ pub async fn sync_and_refill_queue(
 
     if let Some(exec_time) = super::calculate_execution_time(&job.job_type) {
       tracing::debug!("Injecting scheduled job: {} at {:?}", job.job_name, exec_time);
-      if let Err(e) = job_injection_tx
-        .send(JobQueueMessage::Scheduled {
+      if let Err(_) = sender
+        .send_job(JobQueueMessage::Scheduled {
           job,
           execution_time: exec_time,
           client_id: client_id.to_string(),
         })
         .await
       {
-        tracing::error!("Failed to inject scheduled job into queue: {e}");
+        tracing::error!("Failed to inject scheduled job into queue");
       }
       queued_count += 1;
     } else {
       tracing::debug!("Injecting immediate job: {}", job.job_name);
-      if let Err(e) = job_injection_tx
-        .send(JobQueueMessage::Immediate {
+      if let Err(_) = sender
+        .send_job(JobQueueMessage::Immediate {
           job,
           client_id: client_id.to_string(),
         })
         .await
       {
-        tracing::error!("Failed to inject immediate job into queue: {e}");
+        tracing::error!("Failed to inject immediate job into queue");
       }
       queued_count += 1;
     }
@@ -297,12 +294,12 @@ mod sync_tests {
 
 pub async fn full_sync(
   client_id: &str,
-  job_injection_tx: &tokio::sync::mpsc::Sender<JobQueueMessage>,
+  sender: &dyn JobSender,
   remote_db: &Surreal<Any>,
 ) -> Result<(), crate::Error> {
   let groups = sync_groups(client_id, remote_db).await?;
   let group_ids: Vec<RecordId> = groups.iter().map(|g| g.id.clone()).collect();
-  sync_and_refill_queue(job_injection_tx, client_id, &group_ids, remote_db).await
+  sync_and_refill_queue(sender, client_id, &group_ids, remote_db).await
 }
 
 async fn cleanup_old_executions() -> Result<(), crate::Error> {
@@ -318,136 +315,181 @@ async fn cleanup_old_executions() -> Result<(), crate::Error> {
   Ok(())
 }
 
-pub async fn execution_sync_loop(
-  mut db_handle_rx: watch::Receiver<Option<(Surreal<Any>, String)>>,
-) -> Result<(), crate::Error> {
-  use crate::db::remex::ExecutionCache;
+pub struct SyncActor {
+    remote_db: Option<Surreal<Any>>,
+}
 
-  const CLEANUP_INTERVAL_SECS: u64 = 6 * 3600;
-
-  loop {
-    tokio::time::sleep(Duration::from_secs(30)).await;
-
-    let (remote_db, auth_token) = match db_handle_rx.borrow_and_update().clone() {
-      Some((db, token)) => (db, token),
-      None => {
-        tracing::debug!("Remote DB not connected, skipping execution sync");
-        continue;
-      }
-    };
-    if let Err(e) = remote_db.authenticate(auth_token).await {
-      tracing::warn!("Failed to authenticate remote db in sync: {e}");
-      continue;
+impl SyncActor {
+    pub fn new() -> Self {
+        SyncActor { remote_db: None }
     }
+}
 
-    let db = match crate::db::get_local_remex().await {
-      Ok(d) => d,
-      Err(e) => {
-        tracing::warn!("Failed to get local DB for execution sync: {}", e);
-        continue;
-      }
-    };
+#[derive(Message)]
+#[rtype(result = "()")]
+struct SyncTick;
 
-    match crate::db::last_action::LastAction::should_skip(
-      &db,
-      "cleanup_executions",
-      CLEANUP_INTERVAL_SECS,
-    )
-    .await
-    {
-      Ok(false) => {
-        if let Err(e) = cleanup_old_executions().await {
-          tracing::warn!("Execution cleanup failed: {}", e);
-        } else {
-          if let Err(e) =
-            crate::db::last_action::LastAction::record(&db, "cleanup_executions").await
-          {
-            tracing::warn!("Failed to record cleanup timestamp: {}", e);
-          }
-          if let Err(e) = crate::db::last_action::LastAction::cleanup_old(&db).await {
-            tracing::warn!("Failed to purge old last_action records: {}", e);
-          }
-        }
-      }
-      Ok(true) => {}
-      Err(e) => {
-        tracing::warn!("Failed to check last_action for cleanup: {}", e);
-      }
+impl Actor for SyncActor {
+    type Context = Context<Self>;
+
+    fn started(&mut self, ctx: &mut Self::Context) {
+        ctx.notify_later(SyncTick, Duration::from_secs(30));
     }
+}
 
-    let unsynced: Vec<ExecutionCache> = match db
-      .query("USE NS remex DB remex; SELECT * FROM execution WHERE synced = false;")
-      .await
-    {
-      Ok(res) => match res.check() {
-        Ok(mut r) => r.take(1)?,
-        Err(e) => {
-          tracing::warn!("Failed to query unsynced executions: {}", e);
-          continue;
-        }
-      },
-      Err(e) => {
-        tracing::warn!("Failed to query unsynced executions: {}", e);
-        continue;
-      }
-    };
-
-    if unsynced.is_empty() {
-      continue;
+impl actix::Supervised for SyncActor {
+    fn restarting(&mut self, ctx: &mut Context<Self>) {
+        tracing::info!("SyncActor: restarting");
+        self.remote_db = None;
+        // Re-schedule the sync tick (started() is not called on restart)
+        ctx.notify_later(SyncTick, Duration::from_secs(30));
     }
+}
 
-    tracing::info!("Syncing {} unsynced executions to remote", unsynced.len());
+impl Handler<crate::async_tasks::ConnectionReady> for SyncActor {
+    type Result = ();
 
-    let repo = SurrealExecutionCacheRepo { db: db.clone() };
+    fn handle(&mut self, msg: crate::async_tasks::ConnectionReady, _ctx: &mut Self::Context) {
+        self.remote_db = msg.db;
+        tracing::info!("Sync actor received connection (db={})", self.remote_db.is_some());
+    }
+}
 
-    for entry in unsynced {
-      let exec = entry.execution_info.clone();
-      let exec_id = entry.execution_id.clone();
-      let cache_id = entry.cache_id();
+impl Handler<SyncTick> for SyncActor {
+    type Result = ();
 
-      let data = ExecutionCacheData {
-        execution_id: exec_id.clone(),
-        execution_info: exec.clone(),
-        synced: true,
-      };
-      if let Err(e) = repo.update(&cache_id, data).await {
-        tracing::warn!("Failed to mark execution as synced before push: {}", e);
-        continue;
-      }
+    fn handle(&mut self, _msg: SyncTick, ctx: &mut Self::Context) {
+        let remote_db = self.remote_db.clone();
+        tokio::spawn(async move {
+            const CLEANUP_INTERVAL_SECS: u64 = 6 * 3600;
 
-      match remote_db
-        .query("CREATE execution CONTENT $data")
-        .bind(("data", exec))
-        .await
-      {
-        Ok(result) => match result.check() {
-          Ok(_) => {
-            tracing::debug!("Synced execution: {}", exec_id);
-          }
-          Err(e) => {
-            tracing::warn!("Failed to push execution to remote, reverting synced flag: {}", e);
-            let revert_data = ExecutionCacheData {
-              execution_id: exec_id.clone(),
-              execution_info: entry.execution_info.clone(),
-              synced: false,
+            let remote_db = match remote_db {
+                Some(db) => db,
+                None => {
+                    tracing::debug!("Remote DB not connected, skipping execution sync");
+                    return;
+                }
             };
-            if let Err(revert_err) = repo.update(&cache_id, revert_data).await {
-              tracing::error!("Failed to revert synced flag for execution {exec_id}: {revert_err}");
+
+            let db = match crate::db::get_local_remex().await {
+                Ok(d) => d,
+                Err(e) => {
+                    tracing::warn!("Failed to get local DB for execution sync: {}", e);
+                    return;
+                }
+            };
+
+            // ---- Cleanup (same logic as before, no changes) ----
+            match crate::db::last_action::LastAction::should_skip(
+                &db,
+                "cleanup_executions",
+                CLEANUP_INTERVAL_SECS,
+            )
+            .await
+            {
+                Ok(false) => {
+                    if let Err(e) = cleanup_old_executions().await {
+                        tracing::warn!("Execution cleanup failed: {}", e);
+                    } else {
+                        if let Err(e) =
+                            crate::db::last_action::LastAction::record(&db, "cleanup_executions").await
+                        {
+                            tracing::warn!("Failed to record cleanup timestamp: {}", e);
+                        }
+                        if let Err(e) = crate::db::last_action::LastAction::cleanup_old(&db).await {
+                            tracing::warn!("Failed to purge old last_action records: {}", e);
+                        }
+                    }
+                }
+                Ok(true) => {}
+                Err(e) => {
+                    tracing::warn!("Failed to check last_action for cleanup: {}", e);
+                }
             }
-          }
-        },
-        Err(e) => {
-          tracing::warn!("Failed to push execution to remote, reverting synced flag: {}", e);
-          let revert_data = ExecutionCacheData {
-            execution_id: exec_id.clone(),
-            execution_info: entry.execution_info.clone(),
-            synced: false,
-          };
-          if let Err(revert_err) = repo.update(&cache_id, revert_data).await {
-            tracing::error!("Failed to revert synced flag for execution {exec_id}: {revert_err}");
-          }
-        }
-      }
+
+            // ---- Query unsynced executions (same as before) ----
+            let unsynced: Vec<crate::db::remex::ExecutionCache> = match db
+                .query("USE NS remex DB remex; SELECT * FROM execution WHERE synced = false;")
+                .await
+            {
+                Ok(res) => match res.check() {
+                    Ok(mut r) => match r.take(1) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            tracing::warn!("Failed to take unsynced executions: {}", e);
+                            return;
+                        }
+                    },
+                    Err(e) => {
+                        tracing::warn!("Failed to check unsynced executions: {}", e);
+                        return;
+                    }
+                },
+                Err(e) => {
+                    tracing::warn!("Failed to query unsynced executions: {}", e);
+                    return;
+                }
+            };
+
+            if unsynced.is_empty() {
+                return;
+            }
+
+            tracing::info!("Syncing {} unsynced executions to remote", unsynced.len());
+
+            let repo = crate::db::remex::SurrealExecutionCacheRepo { db: db.clone() };
+
+            for entry in unsynced {
+                let exec = entry.execution_info.clone();
+                let exec_id = entry.execution_id.clone();
+                let cache_id = entry.cache_id();
+
+                let data = crate::db::remex::ExecutionCacheData {
+                    execution_id: exec_id.clone(),
+                    execution_info: exec.clone(),
+                    synced: true,
+                };
+                if let Err(e) = repo.update(&cache_id, data).await {
+                    tracing::warn!("Failed to mark execution as synced before push: {}", e);
+                    continue;
+                }
+
+                match remote_db
+                    .query("CREATE execution CONTENT $data")
+                    .bind(("data", exec))
+                    .await
+                {
+                    Ok(result) => match result.check() {
+                        Ok(_) => {
+                            tracing::debug!("Synced execution: {}", exec_id);
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to push execution to remote, reverting synced flag: {}", e);
+                            let revert_data = crate::db::remex::ExecutionCacheData {
+                                execution_id: exec_id.clone(),
+                                execution_info: entry.execution_info.clone(),
+                                synced: false,
+                            };
+                            if let Err(revert_err) = repo.update(&cache_id, revert_data).await {
+                                tracing::error!("Failed to revert synced flag for execution {exec_id}: {revert_err}");
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        tracing::warn!("Failed to push execution to remote, reverting synced flag: {}", e);
+                        let revert_data = crate::db::remex::ExecutionCacheData {
+                            execution_id: exec_id.clone(),
+                            execution_info: entry.execution_info.clone(),
+                            synced: false,
+                        };
+                        if let Err(revert_err) = repo.update(&cache_id, revert_data).await {
+                            tracing::error!("Failed to revert synced flag for execution {exec_id}: {revert_err}");
+                        }
+                    }
+                }
+            }
+        });
+
+        ctx.notify_later(SyncTick, Duration::from_secs(30));
     }
-  }
 }

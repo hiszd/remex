@@ -1,21 +1,15 @@
-use std::time::Duration;
-
+use actix::prelude::*;
 use remex_core::db::{
   model::jobs::{Enabled, Job},
   DbOperator,
 };
-
-use crate::db::remex::{JobCacheData, SurrealJobCacheRepo};
 use surrealdb::{engine::any::Any, types::Action};
 use surrealdb::types::{RecordId, ToSql};
 use surrealdb::Surreal;
-use tokio::sync::{mpsc, watch};
 use tokio_stream::StreamExt;
 
-#[derive(Debug, Clone)]
-pub enum MonitorCommand {
-  SetClientId(String),
-}
+use crate::async_tasks::ConnectionReady;
+use crate::db::remex::{JobCacheData, SurrealJobCacheRepo};
 
 async fn mark_job_incomplete(job_id: &RecordId) -> Result<(), crate::Error> {
   let db = crate::db::get_local_remex().await?;
@@ -34,361 +28,421 @@ async fn mark_job_incomplete(job_id: &RecordId) -> Result<(), crate::Error> {
   Ok(())
 }
 
-async fn load_jobs_from_local_db(
-  job_injection_tx: &mpsc::Sender<super::JobQueueMessage>,
-  client_id: &str,
-) -> Result<(), crate::Error> {
-  println!("Loading cached jobs from local database...");
-  tracing::info!("Loading jobs from local database cache");
+pub struct MonitorActor {
+  remote_db: Option<Surreal<Any>>,
+  client_id: Option<String>,
+  groups: Vec<RecordId>,
+  scheduler_addr: actix::Addr<super::scheduler::SchedulerActor>,
+}
 
+#[derive(Message)]
+#[rtype(result = "()")]
+struct GroupUpdate(Vec<RecordId>);
+
+impl MonitorActor {
+  pub fn new(scheduler_addr: actix::Addr<super::scheduler::SchedulerActor>) -> Self {
+    MonitorActor {
+      remote_db: None,
+      client_id: None,
+      groups: Vec::new(),
+      scheduler_addr,
+    }
+  }
+}
+
+impl Actor for MonitorActor {
+  type Context = Context<Self>;
+}
+
+impl actix::Supervised for MonitorActor {
+    fn restarting(&mut self, _ctx: &mut Context<Self>) {
+        tracing::info!("MonitorActor: restarting");
+        self.remote_db = None;
+        self.client_id = None;
+        self.groups.clear();
+    }
+}
+
+impl Handler<ConnectionReady> for MonitorActor {
+  type Result = ();
+
+  fn handle(&mut self, msg: ConnectionReady, ctx: &mut Self::Context) {
+    self.remote_db = msg.db.clone();
+    if let Some(ref cid) = msg.client_id {
+      self.client_id = Some(cid.clone());
+    }
+
+    let remote_db = match self.remote_db.clone() {
+      Some(db) => db,
+      None => return,
+    };
+    let client_id = match self.client_id.clone() {
+      Some(id) => id,
+      None => return,
+    };
+    let groups = self.groups.clone();
+    let scheduler_addr = self.scheduler_addr.clone();
+    let addr = ctx.address();
+
+    tokio::spawn(async move {
+      monitor_task(remote_db, client_id, groups, scheduler_addr, addr).await;
+    });
+  }
+}
+
+impl Handler<GroupUpdate> for MonitorActor {
+  type Result = ();
+
+  fn handle(&mut self, msg: GroupUpdate, _ctx: &mut Self::Context) {
+    self.groups = msg.0;
+    tracing::debug!("MonitorActor: groups updated (total {})", self.groups.len());
+  }
+}
+
+/// Spawned monitoring task: does full_sync, sets up LIVE SELECT streams,
+/// processes job/group notifications, sends InjectJob to SchedulerActor.
+async fn monitor_task(
+  remote_db: Surreal<Any>,
+  client_id: String,
+  mut groups: Vec<RecordId>,
+  scheduler_addr: actix::Addr<super::scheduler::SchedulerActor>,
+  actor_addr: actix::Addr<MonitorActor>,
+) {
+  // ---- Load cached jobs from local DB ----
+  tracing::info!("Monitor: loading cached jobs from local database");
   let cached_jobs: Vec<crate::db::remex::JobCache> = match crate::db::get_local_remex()
-    .await?
-    .query("USE NS remex DB remex; SELECT * FROM job;")
     .await
   {
-    Ok(res) => match res.check() {
-      Ok(mut r) => r.take(1)?,
+    Ok(db) => match db
+      .query("USE NS remex DB remex; SELECT * FROM job;")
+      .await
+    {
+      Ok(res) => match res.check() {
+        Ok(mut r) => r.take(1).unwrap_or_default(),
+        Err(e) => {
+          tracing::warn!("Monitor: failed to check local jobs: {e}");
+          vec![]
+        }
+      },
       Err(e) => {
-        tracing::warn!("Failed to check local jobs: {}", e);
-        return Ok(());
+        tracing::warn!("Monitor: failed to query local jobs: {e}");
+        vec![]
       }
     },
     Err(e) => {
-      tracing::warn!("Failed to query local jobs: {}", e);
-      return Ok(());
+      tracing::warn!("Monitor: failed to get local DB for cached jobs: {e}");
+      vec![]
     }
   };
 
-  tracing::debug!("Found {} cached jobs", cached_jobs.len());
+  // Forward cached jobs to scheduler
   for cached in cached_jobs {
     let job = cached.job_info;
-    tracing::debug!("Loading job from cache: {}", job.job_name);
     if let Some(exec_time) = super::calculate_execution_time(&job.job_type) {
-      if let Err(e) = job_injection_tx
-        .send(super::JobQueueMessage::Scheduled {
+      if let Err(e) = scheduler_addr
+        .send(super::scheduler::InjectJob(super::JobQueueMessage::Scheduled {
           job,
           execution_time: exec_time,
-          client_id: client_id.to_string(),
-        })
+          client_id: client_id.clone(),
+        }))
         .await
       {
-        tracing::error!("Failed to inject cached scheduled job into queue: {e}");
+        tracing::warn!("Monitor: failed to send cached scheduled job to scheduler: {e}");
       }
     } else {
-      if let Err(e) = job_injection_tx
-        .send(super::JobQueueMessage::Immediate {
+      if let Err(e) = scheduler_addr
+        .send(super::scheduler::InjectJob(super::JobQueueMessage::Immediate {
           job,
-          client_id: client_id.to_string(),
-        })
+          client_id: client_id.clone(),
+        }))
         .await
       {
-        tracing::error!("Failed to inject cached immediate job into queue: {e}");
+        tracing::warn!("Monitor: failed to send cached immediate job to scheduler: {e}");
       }
     }
   }
-  Ok(())
-}
 
-pub async fn run(
-  mut cmd_rx: mpsc::Receiver<MonitorCommand>,
-  job_injection_tx: mpsc::Sender<super::JobQueueMessage>,
-  mut db_handle_rx: watch::Receiver<Option<(Surreal<Any>, String)>>,
-) -> Result<(), crate::Error> {
-  let mut client_id: Option<String> = None;
-  let mut groups: Vec<RecordId> = Vec::new();
-  let mut initial_sync_done = false;
+  // ---- Full sync from remote ----
+  tracing::info!("Monitor: syncing jobs from remote");
+  if let Err(e) = super::sync::full_sync(&client_id, &scheduler_addr, &remote_db).await {
+    tracing::warn!("Monitor: full_sync failed: {e}");
+  }
+
+  // ---- Set up LIVE SELECT streams ----
+  let id = match RecordId::parse_simple(&client_id) {
+    Ok(id) => id,
+    Err(_) => {
+      tracing::error!("Monitor: invalid client_id format: {client_id}");
+      return;
+    }
+  };
+
+  let mut stream = match remote_db.select::<Vec<Job>>("job").live().await {
+    Ok(s) => s,
+    Err(e) => {
+      tracing::warn!("Monitor: failed to create job live query: {e}");
+      return;
+    }
+  };
+
+  let mut groupstream = match remote_db
+    .select::<Vec<remex_core::db::model::groups::Group>>("group")
+    .live()
+    .await
+  {
+    Ok(s) => s,
+    Err(e) => {
+      tracing::warn!("Monitor: failed to create group live query: {e}");
+      return;
+    }
+  };
+
+  tracing::info!("Monitor: monitoring jobs loop starting");
 
   loop {
-    let remote_db: Option<(Surreal<Any>, String)> = db_handle_rx.borrow_and_update().clone();
+    tokio::select! {
+      notification = stream.next() => {
+        match notification {
+          Some(Ok(notification)) => {
+            // Check assignment
+            if !notification.data.assignments.contains(&id)
+              && !notification.data.assignments.iter().any(|g| groups.contains(g))
+            {
+              tracing::debug!("Monitor: job {} not assigned, skipping", notification.data.job_name);
+              continue;
+            }
 
-    if remote_db.is_none() && client_id.is_none() {
-      tokio::time::sleep(Duration::from_secs(1)).await;
-      if let Some(cmd) = cmd_rx.try_recv().ok() {
-        match cmd {
-          MonitorCommand::SetClientId(id) => client_id = Some(id),
-        }
-      }
-      continue;
-    }
+            match notification.action {
+              Action::Create => {
+                tracing::debug!("Monitor: job created: {}", notification.data.job_name);
+                let job = notification.data.clone();
+                let job_id = job.id.clone();
 
-    if remote_db.is_none() {
-      if let Some(ref cid) = client_id {
-        tracing::debug!("Remote DB not connected, loading jobs from local cache");
-        if let Err(e) = load_jobs_from_local_db(&job_injection_tx, cid).await {
-          tracing::warn!("Failed to load from local cache: {}", e);
-        }
-      }
-      tokio::time::sleep(Duration::from_secs(5)).await;
-      continue;
-    }
-
-    let (remote_db, auth_token) = remote_db.unwrap();
-    if let Err(e) = remote_db.authenticate(auth_token).await {
-      tracing::warn!("Failed to re-authenticate remote db: {e}");
-      tokio::time::sleep(Duration::from_secs(2)).await;
-      continue;
-    }
-    let cid = match client_id.clone() {
-      Some(id) => id,
-      None => {
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        continue;
-      }
-    };
-
-    if !initial_sync_done {
-      tracing::info!("First connection to remote, syncing jobs from remote");
-      if let Err(e) = super::sync::full_sync(&cid, &job_injection_tx, &remote_db).await {
-        tracing::warn!("Failed to sync from remote: {}", e);
-      } else {
-        initial_sync_done = true;
-      }
-    }
-
-    let mut stream = match remote_db.select::<Vec<Job>>("job").live().await {
-      Ok(s) => s,
-      Err(e) => {
-        tracing::warn!("Failed to create job live query: {}", e);
-        tokio::time::sleep(Duration::from_secs(2)).await;
-        continue;
-      }
-    };
-
-    let mut groupstream = match remote_db.select::<Vec<remex_core::db::model::groups::Group>>("group").live().await {
-      Ok(s) => s,
-      Err(e) => {
-        tracing::warn!("Failed to create group live query: {}", e);
-        tokio::time::sleep(Duration::from_secs(2)).await;
-        continue;
-      }
-    };
-
-    tracing::info!("Monitoring jobs loop starting");
-    loop {
-      let id = match RecordId::parse_simple(&cid) {
-        Ok(id) => id,
-        Err(_) => break,
-      };
-
-      tokio::select! {
-        notification = stream.next() => {
-          tracing::debug!("Job notification received");
-          match notification {
-            Some(Ok(notification)) => {
-              if !notification.data.assignments.contains(&id)
-                && !notification.data.assignments.iter().any(|g| groups.contains(g))
-              {
-                tracing::debug!("Job {} not assigned to this client, skipping", notification.data.job_name);
-                continue;
-              }
-              match notification.action {
-                Action::Create => {
-                  tracing::debug!("Job created: {:#?}", notification.data.job_name);
-                  let job = notification.data.clone();
-                  let job_id = job.id.clone();
-
-                  let local_db = match crate::db::get_local_remex().await {
-                    Ok(d) => d,
-                    Err(e) => {
-                      tracing::warn!("Failed to get local DB for job cache: {}", e);
-                      return Ok(());
-                    }
-                  };
-                  let existing: Vec<crate::db::remex::JobCache> = match local_db
-                    .query(
-                      "USE NS remex DB remex; SELECT * FROM job WHERE job_id = $job_id LIMIT 1;"
-                    )
-                    .bind(("job_id", job_id.to_sql()))
-                    .await
-                  {
-                    Ok(res) => match res.check() {
-                      Ok(mut r) => r.take(1)?,
-                      Err(_) => vec![],
-                    },
+                // Cache the new job locally
+                let local_db = match crate::db::get_local_remex().await {
+                  Ok(d) => d,
+                  Err(e) => {
+                    tracing::warn!("Monitor: failed to get local DB for job cache: {e}");
+                    return;
+                  }
+                };
+                let existing: Vec<crate::db::remex::JobCache> = match local_db
+                  .query(
+                    "USE NS remex DB remex; SELECT * FROM job WHERE job_id = $job_id LIMIT 1;"
+                  )
+                  .bind(("job_id", job_id.to_sql()))
+                  .await
+                {
+                  Ok(res) => match res.check() {
+                    Ok(mut r) => r.take(1).unwrap_or_default(),
                     Err(_) => vec![],
-                  };
+                  },
+                  Err(_) => vec![],
+                };
 
-                  if existing.is_empty() {
-                    let cache_entry = JobCacheData {
-                      job_id: job_id.to_sql(),
-                      job_info: job.clone(),
-                      completed: false,
-                    };
-                    let repo = SurrealJobCacheRepo { db: local_db.clone() };
-                    if let Err(e) = repo.create(cache_entry).await {
-                      tracing::error!("Failed to create cache entry for new job {}: {e}", job.job_name);
-                    }
-                  }
-
-                  if let Err(e) = mark_job_incomplete(&job_id).await {
-                    tracing::error!("Failed to mark new job {} as incomplete: {e}", job.job_name);
-                  }
-
-                  if let Some(exec_time) = super::calculate_execution_time(&job.job_type) {
-                    if let Err(e) = job_injection_tx.send(super::JobQueueMessage::Scheduled {
-                      job,
-                      execution_time: exec_time,
-                      client_id: cid.clone(),
-                    }).await {
-                      tracing::error!("Failed to inject new scheduled job into queue: {e}");
-                    }
-                  } else {
-                    if let Err(e) = job_injection_tx.send(super::JobQueueMessage::Immediate {
-                      job,
-                      client_id: cid.clone(),
-                    }).await {
-                      tracing::error!("Failed to inject new immediate job into queue: {e}");
-                    }
-                  }
-                }
-                Action::Update => {
-                  println!("Job updated in remote: {}", notification.data.job_name);
-                  tracing::debug!("Job updated: {}", notification.data.job_name);
-
-                  let job_id = notification.data.id.clone();
-                  let updated_job = notification.data.clone();
-
-                  let local_db = match crate::db::get_local_remex().await {
-                    Ok(d) => d,
-                    Err(e) => {
-                      tracing::warn!("Failed to get local DB for job cache: {}", e);
-                      return Ok(());
-                    }
+                if existing.is_empty() {
+                  let cache_entry = JobCacheData {
+                    job_id: job_id.to_sql(),
+                    job_info: job.clone(),
+                    completed: false,
                   };
                   let repo = SurrealJobCacheRepo { db: local_db.clone() };
-                  let existing: Vec<crate::db::remex::JobCache> = match local_db
-                    .query(
-                      "USE NS remex DB remex; SELECT * FROM job WHERE job_id = $job_id LIMIT 1;"
-                    )
-                    .bind(("job_id", job_id.to_sql()))
+                  if let Err(e) = repo.create(cache_entry).await {
+                    tracing::error!("Monitor: failed to create cache entry for new job {}: {e}", job.job_name);
+                  }
+                }
+
+                if let Err(e) = mark_job_incomplete(&job_id).await {
+                  tracing::error!("Monitor: failed to mark new job {} as incomplete: {e}", job.job_name);
+                }
+
+                // Inject into scheduler
+                if let Some(exec_time) = super::calculate_execution_time(&job.job_type) {
+                  if let Err(e) = scheduler_addr
+                    .send(super::scheduler::InjectJob(super::JobQueueMessage::Scheduled {
+                      job,
+                      execution_time: exec_time,
+                      client_id: client_id.clone(),
+                    }))
                     .await
                   {
-                    Ok(res) => match res.check() {
-                      Ok(mut r) => r.take(1)?,
-                      Err(_) => vec![],
-                    },
-                    Err(_) => vec![],
-                  };
+                    tracing::warn!("Monitor: failed to inject new scheduled job to scheduler: {e}");
+                  }
+                } else {
+                  if let Err(e) = scheduler_addr
+                    .send(super::scheduler::InjectJob(super::JobQueueMessage::Immediate {
+                      job,
+                      client_id: client_id.clone(),
+                    }))
+                    .await
+                  {
+                    tracing::warn!("Monitor: failed to inject new immediate job to scheduler: {e}");
+                  }
+                }
+              }
+              Action::Update => {
+                tracing::debug!("Monitor: job updated: {}", notification.data.job_name);
+                let job_id = notification.data.id.clone();
+                let updated_job = notification.data.clone();
 
-                  if let Some(cached) = existing.first() {
-                    let data = JobCacheData {
-                      job_id: cached.job_id.clone(),
-                      job_info: updated_job.clone(),
-                      completed: false,
-                    };
-                    if let Err(e) = repo.update(&cached.cache_id(), data).await {
-                      tracing::error!("Failed to update cache for job {job_id:?}: {e}");
-                    }
-                  } else {
-                    let cache_entry = JobCacheData {
-                      job_id: job_id.to_sql(),
-                      job_info: updated_job.clone(),
-                      completed: false,
-                    };
-                    if let Err(e) = repo.create(cache_entry).await {
-                      tracing::error!("Failed to create cache entry for updated job {job_id:?}: {e}");
-                    }
+                // Update local cache
+                let local_db = match crate::db::get_local_remex().await {
+                  Ok(d) => d,
+                  Err(e) => {
+                    tracing::warn!("Monitor: failed to get local DB for job cache: {e}");
+                    return;
+                  }
+                };
+                let repo = SurrealJobCacheRepo { db: local_db.clone() };
+                let existing: Vec<crate::db::remex::JobCache> = match local_db
+                  .query(
+                    "USE NS remex DB remex; SELECT * FROM job WHERE job_id = $job_id LIMIT 1;"
+                  )
+                  .bind(("job_id", job_id.to_sql()))
+                  .await
+                {
+                  Ok(res) => match res.check() {
+                    Ok(mut r) => r.take(1).unwrap_or_default(),
+                    Err(_) => vec![],
+                  },
+                  Err(_) => vec![],
+                };
+
+                if let Some(cached) = existing.first() {
+                  let data = JobCacheData {
+                    job_id: cached.job_id.clone(),
+                    job_info: updated_job.clone(),
+                    completed: false,
+                  };
+                  if let Err(e) = repo.update(&cached.cache_id(), data).await {
+                    tracing::error!("Monitor: failed to update cache for job {job_id:?}: {e}");
+                  }
+                } else {
+                  let cache_entry = JobCacheData {
+                    job_id: job_id.to_sql(),
+                    job_info: updated_job.clone(),
+                    completed: false,
+                  };
+                  if let Err(e) = repo.create(cache_entry).await {
+                    tracing::error!("Monitor: failed to create cache entry for updated job {job_id:?}: {e}");
+                  }
+                }
+
+                if notification.data.enabled == Enabled::Enabled {
+                  // Remove old job from scheduler queue
+                  if let Err(e) = scheduler_addr
+                    .send(super::scheduler::InjectJob(super::JobQueueMessage::Remove {
+                      id: notification.data.id.clone(),
+                    }))
+                    .await
+                  {
+                    tracing::warn!("Monitor: failed to remove updated job from scheduler: {e}");
                   }
 
-                  if notification.data.enabled == Enabled::Enabled {
-                    if let Err(e) = job_injection_tx
-                      .send(super::JobQueueMessage::Remove {
-                        id: notification.data.id.clone(),
-                      })
-                      .await
-                    {
-                      tracing::error!("Failed to send remove to scheduler for updated job: {e}");
-                    }
-
-                    let job = notification.data.clone();
-                    if let Some(exec_time) = super::calculate_execution_time(&job.job_type) {
-                      if let Err(e) = job_injection_tx.send(super::JobQueueMessage::Scheduled {
+                  // Re-inject updated job
+                  let job = notification.data.clone();
+                  if let Some(exec_time) = super::calculate_execution_time(&job.job_type) {
+                    if let Err(e) = scheduler_addr
+                      .send(super::scheduler::InjectJob(super::JobQueueMessage::Scheduled {
                         job,
                         execution_time: exec_time,
-                        client_id: cid.clone(),
-                      }).await {
-                        tracing::error!("Failed to inject updated scheduled job into queue: {e}");
-                      }
-                    } else {
-                      if let Err(e) = job_injection_tx.send(super::JobQueueMessage::Immediate {
+                        client_id: client_id.clone(),
+                      }))
+                      .await
+                    {
+                      tracing::warn!("Monitor: failed to inject updated scheduled job to scheduler: {e}");
+                    }
+                  } else {
+                    if let Err(e) = scheduler_addr
+                      .send(super::scheduler::InjectJob(super::JobQueueMessage::Immediate {
                         job,
-                        client_id: cid.clone(),
-                      }).await {
-                        tracing::error!("Failed to inject updated immediate job into queue: {e}");
-                      }
+                        client_id: client_id.clone(),
+                      }))
+                      .await
+                    {
+                      tracing::warn!("Monitor: failed to inject updated immediate job to scheduler: {e}");
                     }
                   }
                 }
-                Action::Delete | Action::Killed => {
-                  println!("Job removed from remote: {}", notification.data.job_name);
-                  tracing::debug!("Job removed from remote: {}", notification.data.job_name);
-                  if let Err(e) = job_injection_tx
-                    .send(super::JobQueueMessage::Remove {
-                      id: notification.data.id.clone(),
-                    })
-                    .await
-                  {
-                    tracing::error!("Failed to send remove to scheduler for deleted job: {e}");
-                  }
+              }
+              Action::Delete | Action::Killed => {
+                tracing::debug!("Monitor: job removed from remote: {}", notification.data.job_name);
+                if let Err(e) = scheduler_addr
+                  .send(super::scheduler::InjectJob(super::JobQueueMessage::Remove {
+                    id: notification.data.id.clone(),
+                  }))
+                  .await
+                {
+                  tracing::warn!("Monitor: failed to remove deleted job from scheduler: {e}");
                 }
               }
-            }
-            Some(Err(err)) => {
-              tracing::error!("Error: {:#?}", err);
-            }
-            None => {
-              tracing::warn!("Job notification stream ended, recreating");
-              break;
             }
           }
+          Some(Err(err)) => {
+            tracing::error!("Monitor: job stream error: {:#?}", err);
+          }
+          None => {
+            tracing::warn!("Monitor: job notification stream ended");
+            break;
+          }
         }
-        group_notification = groupstream.next() => {
-          tracing::debug!("Group notification received");
-          match group_notification {
-            Some(Ok(notification)) => {
-              match notification.action {
-                Action::Create => {
-                  println!("Group created in remote: {}", notification.data.group_name);
-                  tracing::debug!("Group created: {}", notification.data.group_name);
-                  if !notification.data.members.contains(&id) {
-                    tracing::debug!("Group {} not assigned to this client, skipping", notification.data.group_name);
-                    continue;
-                  }
-                  groups.push(notification.data.id.clone());
+      }
+      group_notification = groupstream.next() => {
+        match group_notification {
+          Some(Ok(notification)) => {
+            match notification.action {
+              Action::Create => {
+                tracing::debug!("Monitor: group created: {}", notification.data.group_name);
+                if !notification.data.members.contains(&id) {
+                  tracing::debug!("Monitor: group {} not assigned, skipping", notification.data.group_name);
+                  continue;
                 }
-                Action::Update => {
-                  println!("Group updated in remote: {}", notification.data.group_name);
-                  tracing::debug!("Group updated: {}", notification.data.group_name);
-                  if !notification.data.members.contains(&id) {
-                    tracing::debug!("Group {} not assigned to this client, skipping", notification.data.group_name);
-                    groups.retain(|g| g != &notification.data.id);
-                    continue;
-                  }
-                  groups.retain(|g| g != &notification.data.id);
-                  groups.push(notification.data.id.clone());
-                }
-                Action::Delete | Action::Killed => {
-                  println!("Group removed from remote: {}", notification.data.group_name);
-                  tracing::debug!("Group removed from remote: {}", notification.data.group_name);
-                  groups.retain(|g| g != &notification.data.id);
+                groups.push(notification.data.id.clone());
+                if let Err(e) = actor_addr.send(GroupUpdate(groups.clone())).await {
+                  tracing::warn!("Monitor: failed to send GroupUpdate after create: {e}");
                 }
               }
+              Action::Update => {
+                tracing::debug!("Monitor: group updated: {}", notification.data.group_name);
+                if !notification.data.members.contains(&id) {
+                  tracing::debug!("Monitor: group {} not assigned, removing from groups", notification.data.group_name);
+                  groups.retain(|g| g != &notification.data.id);
+                  if let Err(e) = actor_addr.send(GroupUpdate(groups.clone())).await {
+                    tracing::warn!("Monitor: failed to send GroupUpdate after remove: {e}");
+                  }
+                  continue;
+                }
+                groups.retain(|g| g != &notification.data.id);
+                groups.push(notification.data.id.clone());
+                if let Err(e) = actor_addr.send(GroupUpdate(groups.clone())).await {
+                  tracing::warn!("Monitor: failed to send GroupUpdate after update: {e}");
+                }
+              }
+              Action::Delete | Action::Killed => {
+                tracing::debug!("Monitor: group removed from remote: {}", notification.data.group_name);
+                groups.retain(|g| g != &notification.data.id);
+                if let Err(e) = actor_addr.send(GroupUpdate(groups.clone())).await {
+                  tracing::warn!("Monitor: failed to send GroupUpdate after delete: {e}");
+                }
+              }
+            }
 
-              if let Err(e) = super::sync::sync_and_refill_queue(&job_injection_tx, &cid, &groups, &remote_db).await {
-                tracing::warn!("Failed to sync from remote: {}", e);
-              }
+            // Re-sync jobs from remote after group change
+            if let Err(e) = super::sync::sync_and_refill_queue(&scheduler_addr, &client_id, &groups, &remote_db).await {
+              tracing::warn!("Monitor: sync_and_refill_queue failed after group change: {e}");
             }
-            Some(Err(err)) => {
-              tracing::error!("Error: {:#?}", err);
-            }
-            None => {
-              tracing::warn!("Group notification stream ended, recreating");
-              break;
-            }
+          }
+          Some(Err(err)) => {
+            tracing::error!("Monitor: group stream error: {:#?}", err);
+          }
+          None => {
+            tracing::warn!("Monitor: group notification stream ended");
+            break;
           }
         }
       }
     }
-    tokio::time::sleep(Duration::from_secs(2)).await;
   }
+
+  tracing::info!("Monitor: monitoring task ended");
 }
