@@ -2,13 +2,16 @@ use std::time::Duration;
 
 use actix::prelude::*;
 use remex_core::db::DbOperator;
-use surrealdb::engine::any::Any;
-use surrealdb::engine::remote::http::Http;
-use surrealdb::types::ToSql;
-use surrealdb::Surreal;
+use surrealdb::{
+  engine::any::Any,
+  types::ToSql,
+  Surreal,
+};
 
-use crate::async_tasks::ConnectionReady;
-use crate::db::endpoint::SurrealSessionRepo;
+use crate::{
+  async_tasks::ConnectionReady,
+  db::endpoint::SurrealSessionRepo,
+};
 
 #[derive(Message)]
 #[rtype(result = "()")]
@@ -17,233 +20,255 @@ pub struct Subscribe(pub Recipient<ConnectionReady>);
 #[derive(Message)]
 #[rtype(result = "()")]
 struct ConnectionEstablished {
-    db: Surreal<Any>,
-    client_id: String,
+  db: Surreal<Any>,
+  client_id: String,
 }
 
 pub struct DbConnectorActor {
-    db_url: String,
-    enrollment_token: Option<String>,
-    subscribers: Vec<Recipient<ConnectionReady>>,
+  db_url: String,
+  enrollment_token: Option<String>,
+  subscribers: Vec<Recipient<ConnectionReady>>,
 }
 
 impl DbConnectorActor {
-    pub fn new(db_url: String, enrollment_token: Option<String>) -> Self {
-        DbConnectorActor {
-            db_url,
-            enrollment_token,
-            subscribers: Vec::new(),
-        }
+  pub fn new(db_url: String, enrollment_token: Option<String>) -> Self {
+    DbConnectorActor {
+      db_url,
+      enrollment_token,
+      subscribers: Vec::new(),
     }
+  }
 }
 
 impl Actor for DbConnectorActor {
-    type Context = Context<Self>;
+  type Context = Context<Self>;
 
-    fn started(&mut self, ctx: &mut Self::Context) {
-        let db_url = self.db_url.clone();
-        let enrollment_token = self.enrollment_token.clone();
-        let addr = ctx.address();
+  fn started(&mut self, ctx: &mut Self::Context) {
+    let db_url = self.db_url.clone();
+    let enrollment_token = self.enrollment_token.clone();
+    let addr = ctx.address();
 
-        tokio::spawn(async move {
-            connection_loop(&db_url, enrollment_token.as_deref(), addr).await;
-        });
-    }
+    tokio::spawn(async move {
+      connection_loop(&db_url, enrollment_token.as_deref(), addr).await;
+    });
+  }
 }
 
 impl actix::Supervised for DbConnectorActor {
-    fn restarting(&mut self, ctx: &mut Context<Self>) {
-        tracing::info!("DbConnectorActor: restarting");
-        // Subscribers Vec is preserved (same Actor instance)
-        // Re-spawn the connection loop (like started() does)
-        let db_url = self.db_url.clone();
-        let enrollment_token = self.enrollment_token.clone();
-        let addr = ctx.address();
-        tokio::spawn(async move {
-            connection_loop(&db_url, enrollment_token.as_deref(), addr).await;
-        });
-    }
+  fn restarting(&mut self, ctx: &mut Context<Self>) {
+    tracing::info!("DbConnectorActor: restarting");
+    // Subscribers Vec is preserved (same Actor instance)
+    // Re-spawn the connection loop (like started() does)
+    let db_url = self.db_url.clone();
+    let enrollment_token = self.enrollment_token.clone();
+    let addr = ctx.address();
+    tokio::spawn(async move {
+      connection_loop(&db_url, enrollment_token.as_deref(), addr).await;
+    });
+  }
 }
 
 impl Handler<Subscribe> for DbConnectorActor {
-    type Result = ();
+  type Result = ();
 
-    fn handle(&mut self, msg: Subscribe, _ctx: &mut Self::Context) {
-        self.subscribers.push(msg.0);
-        tracing::debug!("DbConnectorActor: subscriber added (total {})", self.subscribers.len());
-    }
+  fn handle(&mut self, msg: Subscribe, _ctx: &mut Self::Context) {
+    self.subscribers.push(msg.0);
+    tracing::debug!("DbConnectorActor: subscriber added (total {})", self.subscribers.len());
+  }
 }
 
 impl Handler<ConnectionEstablished> for DbConnectorActor {
-    type Result = ();
+  type Result = ();
 
-    fn handle(&mut self, msg: ConnectionEstablished, _ctx: &mut Self::Context) {
-        let ready = ConnectionReady {
-            db: Some(msg.db),
-            client_id: Some(msg.client_id),
-        };
+  fn handle(&mut self, msg: ConnectionEstablished, _ctx: &mut Self::Context) {
+    let ready = ConnectionReady {
+      db: Some(msg.db),
+      client_id: Some(msg.client_id),
+    };
 
-        // Broadcast to all subscribers
-        for sub in &self.subscribers {
-            let sub = sub.clone();
-            let ready = ready.clone();
-            tokio::spawn(async move {
-                if let Err(e) = sub.send(ready).await {
-                    tracing::warn!("DbConnectorActor: failed to send ConnectionReady to subscriber: {e}");
-                }
-            });
+    // Broadcast to all subscribers
+    for sub in &self.subscribers {
+      let sub = sub.clone();
+      let ready = ready.clone();
+      tokio::spawn(async move {
+        if let Err(e) = sub.send(ready).await {
+          tracing::warn!("DbConnectorActor: failed to send ConnectionReady to subscriber: {e}");
         }
+      });
     }
+  }
 }
 
 async fn connection_loop(
-    db_url: &str,
-    enrollment_token: Option<&str>,
-    addr: actix::Addr<DbConnectorActor>,
+  db_url: &str,
+  enrollment_token: Option<&str>,
+  addr: actix::Addr<DbConnectorActor>,
 ) {
-    // Outer retry loop
-    loop {
-        let local_db = match crate::db::get_local_endpoint().await {
-            Ok(db) => db,
-            Err(e) => {
-                tracing::error!("Failed to get local endpoint: {e}");
-                tokio::time::sleep(Duration::from_secs(5)).await;
-                continue;
-            }
-        };
-        let session_repo = SurrealSessionRepo { db: local_db.clone() };
-        let session = load_or_create_session(&session_repo).await;
+  // Outer retry loop
+  loop {
+    let local_db = match crate::db::get_local_endpoint().await {
+      Ok(db) => db,
+      Err(e) => {
+        tracing::error!("Failed to get local endpoint: {e}");
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        continue;
+      }
+    };
+    let session_repo = SurrealSessionRepo {
+      db: local_db.clone(),
+    };
+    let session = load_or_create_session(&session_repo).await;
 
-        let remote_db: Surreal<Http> = Surreal::init();
+    let remote_db: Surreal<Any> = Surreal::init();
 
-        tracing::info!("Connecting to remote database at {db_url}");
-        // Convert WebSocket URL to HTTP URL for HTTP client
-        let http_url = db_url.replace("ws://", "http://").replace("wss://", "https://");
-        let connect_result = tokio::time::timeout(
-            Duration::from_secs(15),
-            remote_db.connect(http_url.to_string()),
-        )
-        .await;
-        match connect_result {
-            Ok(Ok(())) => tracing::info!("Connected to remote database, proceeding with auth"),
-            Ok(Err(e)) => {
-                tracing::error!("Failed to connect to remote database: {e}");
-                tokio::time::sleep(Duration::from_secs(5)).await;
-                continue;
-            }
-            Err(_) => {
-                tracing::error!("Timed out connecting to remote database at {db_url}");
-                tokio::time::sleep(Duration::from_secs(5)).await;
-                continue;
-            }
-        }
-        tracing::info!("Connected to remote database, proceeding with auth");
-
-        let hardware_hash = machine_uid::get().unwrap_or_default();
-
-        let has_stored_creds = session.secret.is_some() && session.client_id.is_some();
-
-        if has_stored_creds {
-            let secret = session.secret.clone().unwrap_or_default();
-
-            tracing::info!("Signing in with existing credentials");
-            match remote_db
-                .signin(surrealdb::opt::auth::Record {
-                    namespace: "remex".into(),
-                    database: "remex".into(),
-                    access: "endpoint_access".into(),
-                    params: serde_json::json!({
-                        "variables": {
-                            "hardware_hash": hardware_hash,
-                            "secret": secret,
-                        },
-                    }),
-                })
-                .await
-            {
-                Ok(tok) => {
-                    let _tok = tok;
-                    if let Err(e) = remote_db.use_ns("remex").use_db("remex").await {
-                        tracing::warn!("Failed to set namespace/database after signin: {e}");
-                    }
-                    let client_id = lookup_client_id(&remote_db, &hardware_hash).await;
-                    tracing::info!("Signed in successfully as {client_id}");
-
-                    // Broadcast connection to the actor
-                    if let Err(e) = addr.send(ConnectionEstablished {
-                        db: remote_db.clone(),
-                        client_id: client_id.clone(),
-                    })
-                    .await
-                    {
-                        tracing::warn!("DbConnector: failed to send ConnectionEstablished after signin: {e}");
-                    }
-
-                    // Keep the connection alive by sleeping
-                    // (SurrealDB client manages reconnection internally)
-                    tokio::time::sleep(Duration::from_secs(3600)).await;
-                }
-                Err(e) => {
-                    tracing::error!("Signin failed: {e}. Will attempt enrollment if token is available.");
-                    // Fall through to enrollment attempt below
-                }
-            }
-        }
-
-        if let Some(token) = enrollment_token {
-            let client_name = gethostname::gethostname().to_string_lossy().to_string();
-            let secret = remex_core::utils::generate_secret(true);
-
-            tracing::info!("Signing up with enrollment token");
-            match remote_db
-                .signup(surrealdb::opt::auth::Record {
-                    namespace: "remex".into(),
-                    database: "remex".into(),
-                    access: "endpoint_access".into(),
-                    params: serde_json::json!({
-                        "variables": {
-                            "enrollment_token": token,
-                            "client_name": client_name,
-                            "secret": secret,
-                            "hardware_hash": hardware_hash,
-                        },
-                    }),
-                })
-                .await
-            {
-                Ok(tok) => {
-                    let _tok = tok;
-                    if let Err(e) = remote_db.use_ns("remex").use_db("remex").await {
-                        tracing::warn!("Failed to set namespace/database after signup: {e}");
-                    }
-                    let client_id = lookup_client_id(&remote_db, &hardware_hash).await;
-                    tracing::info!("Signed up successfully as {client_id}");
-                    if let Err(e) = update_session(&session_repo, &session.session_id(), client_id.clone(), Some(secret)).await {
-                        tracing::error!("Failed to persist session credentials after signup: {e}. Endpoint will need re-enrollment on restart.");
-                    }
-
-                    if let Err(e) = addr.send(ConnectionEstablished {
-                        db: remote_db.clone(),
-                        client_id: client_id.clone(),
-                    })
-                    .await
-                    {
-                        tracing::warn!("DbConnector: failed to send ConnectionEstablished after signup: {e}");
-                    }
-
-                    tokio::time::sleep(Duration::from_secs(3600)).await;
-                }
-                Err(e) => {
-                    tracing::error!("Signup failed (debug): {e:?}");
-                    tokio::time::sleep(Duration::from_secs(10)).await;
-                    continue;
-                }
-            }
-        }
-
-        tracing::warn!("No stored credentials and no enrollment token. Retrying in 10 seconds.");
-        tokio::time::sleep(Duration::from_secs(10)).await;
+    tracing::info!("Connecting to remote database at {db_url}");
+    let connect_result =
+      tokio::time::timeout(Duration::from_secs(15), remote_db.connect(db_url.to_string())).await;
+    match connect_result {
+      Ok(Ok(())) => tracing::info!("Connected to remote database, proceeding with auth"),
+      Ok(Err(e)) => {
+        tracing::error!("Failed to connect to remote database: {e}");
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        continue;
+      }
+      Err(_) => {
+        tracing::error!("Timed out connecting to remote database at {db_url}");
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        continue;
+      }
     }
+    tracing::info!("Connected to remote database, proceeding with auth");
+
+    let hardware_hash = machine_uid::get().unwrap_or_default();
+
+    let has_stored_creds = session.secret.is_some() && session.client_id.is_some();
+
+    if has_stored_creds {
+      let secret = session.secret.clone().unwrap_or_default();
+
+      tracing::info!("Signing in with existing credentials");
+      match remote_db
+        .signin(surrealdb::opt::auth::Record {
+          namespace: "remex".into(),
+          database: "remex".into(),
+          access: "endpoint_access".into(),
+          params: serde_json::json!({
+              "hardware_hash": hardware_hash,
+              "secret": secret,
+          }),
+        })
+        .await
+      {
+        Ok(tok) => {
+          let _tok = tok;
+          if let Err(e) = remote_db.use_ns("remex").use_db("remex").await {
+            tracing::warn!("Failed to set namespace/database after signin: {e}");
+          }
+          let client_id = lookup_client_id(&remote_db, &hardware_hash).await;
+          tracing::info!("Signed in successfully as {client_id}");
+
+          // Broadcast connection to the actor
+          if let Err(e) = addr
+            .send(ConnectionEstablished {
+              db: remote_db.clone(),
+              client_id: client_id.clone(),
+            })
+            .await
+          {
+            tracing::warn!("DbConnector: failed to send ConnectionEstablished after signin: {e}");
+          }
+
+          // Keep the connection alive by sleeping
+          // (SurrealDB client manages reconnection internally)
+          tokio::time::sleep(Duration::from_secs(3600)).await;
+        }
+        Err(e) => {
+          tracing::error!("Signin failed: {e}. Will attempt enrollment if token is available.");
+          // Fall through to enrollment attempt below
+        }
+      }
+    }
+
+    if let Some(token) = enrollment_token {
+      let client_name = gethostname::gethostname().to_string_lossy().to_string();
+      let secret = remex_core::utils::generate_secret(true);
+
+      tracing::info!("Signing up with enrollment token (client: {client_name})");
+
+      let signup_params = serde_json::json!({
+          "enrollment_token": token,
+          "client_name": client_name,
+          "secret": secret,
+          "hardware_hash": hardware_hash,
+      });
+
+      match remote_db
+        .signup(surrealdb::opt::auth::Record {
+          namespace: "remex".into(),
+          database: "remex".into(),
+          access: "endpoint_access".into(),
+          params: signup_params,
+        })
+        .await
+      {
+        Ok(tok) => {
+          let _tok = tok;
+          tracing::info!("Signup successful");
+          if let Err(e) = remote_db.use_ns("remex").use_db("remex").await {
+            tracing::warn!("Failed to set namespace/database after signup: {e}");
+          }
+          let client_id = lookup_client_id(&remote_db, &hardware_hash).await;
+          tracing::info!("Signed up successfully as {client_id}");
+          if let Err(e) =
+              update_session(&session_repo, &session.session_id(), client_id.clone(), Some(secret.clone()))
+              .await
+          {
+            tracing::error!("Failed to persist session credentials after signup: {e}. Endpoint will need re-enrollment on restart.");
+          }
+
+          // Re-authenticate as the client record (replaces signup-issued JWT with signin-issued JWT)
+          tracing::info!("Re-authenticating as client after signup");
+          if let Err(e) = remote_db
+            .signin(surrealdb::opt::auth::Record {
+              namespace: "remex".into(),
+              database: "remex".into(),
+              access: "endpoint_access".into(),
+              params: serde_json::json!({
+                  "hardware_hash": hardware_hash,
+                  "secret": secret,
+              }),
+            })
+            .await
+          {
+            tracing::warn!("Re-auth after signup failed (connection may still work with signup token): {e}");
+          }
+
+          if let Err(e) = addr
+            .send(ConnectionEstablished {
+              db: remote_db.clone(),
+              client_id: client_id.clone(),
+            })
+            .await
+          {
+            tracing::warn!("DbConnector: failed to send ConnectionEstablished after signup: {e}");
+          }
+
+          tokio::time::sleep(Duration::from_secs(3600)).await;
+        }
+        Err(e) => {
+          tracing::error!("Signup failed: {e:?}");
+          if let Some(cause) = e.cause() {
+            tracing::error!("Signup cause: {cause:?}");
+          }
+          tokio::time::sleep(Duration::from_secs(10)).await;
+          continue;
+        }
+      }
+    }
+
+    tracing::warn!("No stored credentials and no enrollment token. Retrying in 10 seconds.");
+    tokio::time::sleep(Duration::from_secs(10)).await;
+  }
 }
 
 async fn lookup_client_id(remote_db: &Surreal<Any>, hardware_hash: &str) -> String {
@@ -283,9 +308,7 @@ async fn update_session(
   Ok(())
 }
 
-async fn load_or_create_session(
-  repo: &SurrealSessionRepo,
-) -> crate::db::endpoint::Session {
+async fn load_or_create_session(repo: &SurrealSessionRepo) -> crate::db::endpoint::Session {
   match repo.list().await {
     Ok(mut sessions) => {
       if let Some(session) = sessions.pop() {
@@ -322,7 +345,10 @@ pub(crate) async fn create_new_session_with_repo(
 mod tests {
   use remex_core::impl_in_memory_db_operator;
 
-  use crate::db::endpoint::{Session, SessionData};
+  use crate::db::endpoint::{
+    Session,
+    SessionData,
+  };
 
   impl_in_memory_db_operator!(InMemorySessionRepo, Session, SessionData, "session");
 

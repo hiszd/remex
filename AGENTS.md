@@ -692,6 +692,36 @@ Database-dependent logic is tested via the **seam function** pattern (see [Testa
 - `create_new_session_with_repo`: 2 tests (defaults, unique IDs)
 - `persist_session_with_repo`: 3 tests (state, without client_id, full CRUD roundtrip)
 
+### Testing Pattern: Match-Based Error Inversion
+
+For integration tests that verify both success and failure paths, use a terminal
+`match` statement that documents the expected outcome and panics on unexpected ones.
+This ensures **all tests pass** when the system behaves correctly — tests that
+expect errors are not written "expecting to fail," they are written to assert
+that the correct error occurs.
+
+**Pattern:**
+
+```rust
+// Test that expects SUCCESS:
+match do_something().await {
+  Ok(value) => println!("operation succeeded as expected: {value:?}"),
+  Err(e) => panic!("operation should have succeeded: {e}"),
+}
+
+// Test that expects FAILURE:
+match do_something().await {
+  Ok(value) => panic!("operation should have failed, got: {value:?}"),
+  Err(e) => println!("operation failed as expected: {e}"),
+}
+```
+
+**Rules:**
+- Every test ends with exactly one `match` statement (or one per logical step)
+- The `Ok` or `Err` arm that represents the **expected** outcome calls `println!` to document it
+- The arm representing the **unexpected** outcome calls `panic!` to invert the result
+- Helper functions (`do_signup`, `do_signin`, etc.) return `Result<_, _>` and **never** call `.unwrap()` or `.expect()` — they propagate errors with `?`
+
 ## Testable Database Code with DbOperator
 
 All database operations go through the `DbOperator` trait (`core/src/db/mod.rs`):

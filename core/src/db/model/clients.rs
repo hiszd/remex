@@ -47,7 +47,7 @@ impl Client {
                     FOR create FULL,
                     FOR delete NONE;
         DEFINE FIELD IF NOT EXISTS client_name ON TABLE client TYPE string;
-        DEFINE FIELD IF NOT EXISTS secret ON TABLE client TYPE string VALUE crypto::argon2::generate($value);
+        DEFINE FIELD IF NOT EXISTS secret ON TABLE client TYPE string;
         DEFINE FIELD IF NOT EXISTS hardware_hash ON TABLE client TYPE string;
         DEFINE FIELD IF NOT EXISTS blocked ON TABLE client TYPE bool DEFAULT false;
         DEFINE FIELD IF NOT EXISTS created_at ON TABLE client TYPE datetime DEFAULT time::now() READONLY;
@@ -73,19 +73,18 @@ impl Client {
               IF $tok = NONE {
                 THROW 'Invalid or expired enrollment token'
               } ELSE {
-                LET $cl = (CREATE client CONTENT {
-                  client_name: $client_name,
-                  secret: $secret,
-                  hardware_hash: $hardware_hash,
-                  blocked: false
-                })[0];
+                LET $cl_arr = CREATE client SET
+                  client_name = $client_name,
+                  secret = crypto::argon2::generate($secret),
+                  hardware_hash = $hardware_hash,
+                  blocked = false;
+                LET $cl = $cl_arr[0];
                 IF $tok.single_use = true {
                   UPDATE $tok.id SET valid = false, usage_history += { client_id: $cl.id, used_at: time::now() };
-                  RETURN $cl
                 } ELSE {
                   UPDATE $tok.id SET usage_history += { client_id: $cl.id, used_at: time::now() };
-                  RETURN $cl
-                }
+                };
+                RETURN $cl
               }
             }
             SIGNIN (SELECT * FROM client WHERE hardware_hash = $hardware_hash AND crypto::argon2::compare(secret, $secret) AND blocked != true)

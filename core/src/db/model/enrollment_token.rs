@@ -56,7 +56,8 @@ impl EnrollmentToken {
         DEFINE FIELD IF NOT EXISTS single_use ON TABLE enrollment_token TYPE bool DEFAULT true;
         DEFINE FIELD IF NOT EXISTS expires_at ON TABLE enrollment_token TYPE option<datetime>;
         DEFINE FIELD IF NOT EXISTS issued_by ON TABLE enrollment_token TYPE record<user>;
-        DEFINE FIELD IF NOT EXISTS usage_history ON TABLE enrollment_token TYPE array<object> DEFAULT [];
+        DEFINE FIELD IF NOT EXISTS usage_history ON TABLE enrollment_token TYPE array<object> FLEXIBLE DEFAULT [];
+        DEFINE FIELD IF NOT EXISTS `usage_history.*` ON TABLE enrollment_token TYPE object FLEXIBLE DEFAULT {};
         DEFINE FIELD IF NOT EXISTS last_used ON TABLE enrollment_token TYPE option<datetime> COMPUTED {
           RETURN array::last($this.usage_history).used_at;
         };
@@ -76,6 +77,10 @@ impl EnrollmentToken {
     }
     if let Err(e) = db.query("REMOVE FIELD used_by ON TABLE enrollment_token").await {
       tracing::warn!("Failed to remove old field used_by: {e}");
+    }
+    // Remove old usage_history.* field definition (quoted) that was created without FLEXIBLE
+    if let Err(e) = db.query("REMOVE FIELD \"usage_history.*\" ON TABLE enrollment_token").await {
+      tracing::warn!("Failed to remove old usage_history.* field: {e}");
     }
 
     Ok(())
