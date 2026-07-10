@@ -1,7 +1,10 @@
 use std::sync::LazyLock;
 
 use remex_core::db::DbError;
-use surrealdb::{engine::local::Db, Surreal};
+use surrealdb::{
+  engine::local::Db,
+  Surreal,
+};
 
 pub static LOCAL_DB: LazyLock<Surreal<Db>> = LazyLock::new(Surreal::init);
 

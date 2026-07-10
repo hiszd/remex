@@ -1,15 +1,29 @@
 use actix::prelude::*;
 use remex_core::db::{
-  model::jobs::{Enabled, Job},
+  model::jobs::{
+    Enabled,
+    Job,
+  },
   DbOperator,
 };
-use surrealdb::{engine::any::Any, types::Action};
-use surrealdb::types::{RecordId, ToSql};
-use surrealdb::Surreal;
+use surrealdb::{
+  engine::any::Any,
+  types::{
+    Action,
+    RecordId,
+    ToSql,
+  },
+  Surreal,
+};
 use tokio_stream::StreamExt;
 
-use crate::async_tasks::ConnectionReady;
-use crate::db::remex::{JobCacheData, SurrealJobCacheRepo};
+use crate::{
+  async_tasks::ConnectionReady,
+  db::remex::{
+    JobCacheData,
+    SurrealJobCacheRepo,
+  },
+};
 
 async fn mark_job_incomplete(job_id: &RecordId) -> Result<(), crate::Error> {
   let db = crate::db::get_local_remex().await?;
@@ -55,12 +69,12 @@ impl Actor for MonitorActor {
 }
 
 impl actix::Supervised for MonitorActor {
-    fn restarting(&mut self, _ctx: &mut Context<Self>) {
-        tracing::info!("MonitorActor: restarting");
-        self.remote_db = None;
-        self.client_id = None;
-        self.groups.clear();
-    }
+  fn restarting(&mut self, _ctx: &mut Context<Self>) {
+    tracing::info!("MonitorActor: restarting");
+    self.remote_db = None;
+    self.client_id = None;
+    self.groups.clear();
+  }
 }
 
 impl Handler<ConnectionReady> for MonitorActor {
@@ -108,15 +122,12 @@ async fn monitor_task(
   scheduler_addr: actix::Addr<super::scheduler::SchedulerActor>,
   actor_addr: actix::Addr<MonitorActor>,
 ) {
+  tracing::info!("Monitor: monitor_task started for client {client_id}");
+
   // ---- Load cached jobs from local DB ----
   tracing::info!("Monitor: loading cached jobs from local database");
-  let cached_jobs: Vec<crate::db::remex::JobCache> = match crate::db::get_local_remex()
-    .await
-  {
-    Ok(db) => match db
-      .query("USE NS remex DB remex; SELECT * FROM job;")
-      .await
-    {
+  let cached_jobs: Vec<crate::db::remex::JobCache> = match crate::db::get_local_remex().await {
+    Ok(db) => match db.query("USE NS remex DB remex; SELECT * FROM job;").await {
       Ok(res) => match res.check() {
         Ok(mut r) => r.take(1).unwrap_or_default(),
         Err(e) => {
@@ -135,7 +146,10 @@ async fn monitor_task(
     }
   };
 
+  tracing::info!("Monitor: loaded {} cached jobs from local database", cached_jobs.len());
+
   // Forward cached jobs to scheduler
+  tracing::info!("Monitor: forwarding cached jobs to scheduler");
   for cached in cached_jobs {
     let job = cached.job_info;
     if let Some(exec_time) = super::calculate_execution_time(&job.job_type) {
@@ -163,12 +177,17 @@ async fn monitor_task(
   }
 
   // ---- Full sync from remote ----
-  tracing::info!("Monitor: syncing jobs from remote");
-  if let Err(e) = super::sync::full_sync(&client_id, &scheduler_addr, &remote_db).await {
-    tracing::warn!("Monitor: full_sync failed: {e}");
+  tracing::info!("Monitor: calling full_sync (client_id={client_id})");
+  let sync_result = super::sync::full_sync(&client_id, &scheduler_addr, &remote_db).await;
+  match &sync_result {
+    Ok(()) => tracing::info!("Monitor: full_sync completed successfully"),
+    Err(e) => tracing::warn!("Monitor: full_sync failed: {e}"),
   }
+  tracing::info!("Monitor: full_sync returned, proceeding to LIVE SELECT setup");
 
   // ---- Set up LIVE SELECT streams ----
+  tracing::info!("Monitor: setting up LIVE SELECT streams");
+
   let id = match RecordId::parse_simple(&client_id) {
     Ok(id) => id,
     Err(_) => {
@@ -177,27 +196,35 @@ async fn monitor_task(
     }
   };
 
+  tracing::info!("Monitor: creating LIVE SELECT on job table");
   let mut stream = match remote_db.select::<Vec<Job>>("job").live().await {
-    Ok(s) => s,
+    Ok(s) => {
+      tracing::info!("Monitor: LIVE SELECT on job table created successfully");
+      s
+    }
     Err(e) => {
       tracing::warn!("Monitor: failed to create job live query: {e}");
       return;
     }
   };
 
+  tracing::info!("Monitor: creating LIVE SELECT on group table");
   let mut groupstream = match remote_db
     .select::<Vec<remex_core::db::model::groups::Group>>("group")
     .live()
     .await
   {
-    Ok(s) => s,
+    Ok(s) => {
+      tracing::info!("Monitor: LIVE SELECT on group table created successfully");
+      s
+    }
     Err(e) => {
       tracing::warn!("Monitor: failed to create group live query: {e}");
       return;
     }
   };
 
-  tracing::info!("Monitor: monitoring jobs loop starting");
+  tracing::info!("Monitor: entering notification loop");
 
   loop {
     tokio::select! {
@@ -214,11 +241,16 @@ async fn monitor_task(
 
             match notification.action {
               Action::Create => {
-                tracing::debug!("Monitor: job created: {}", notification.data.job_name);
+                let enabled = notification.data.enabled == Enabled::Enabled;
+                tracing::debug!(
+                  "Monitor: job created: {} enabled={enabled} assignments={:?}",
+                  notification.data.job_name,
+                  notification.data.assignments,
+                );
                 let job = notification.data.clone();
                 let job_id = job.id.clone();
 
-                // Cache the new job locally
+                // Cache the new job locally (regardless of enabled status)
                 let local_db = match crate::db::get_local_remex().await {
                   Ok(d) => d,
                   Err(e) => {
@@ -256,32 +288,40 @@ async fn monitor_task(
                   tracing::error!("Monitor: failed to mark new job {} as incomplete: {e}", job.job_name);
                 }
 
-                // Inject into scheduler
-                if let Some(exec_time) = super::calculate_execution_time(&job.job_type) {
-                  if let Err(e) = scheduler_addr
-                    .send(super::scheduler::InjectJob(super::JobQueueMessage::Scheduled {
-                      job,
-                      execution_time: exec_time,
-                      client_id: client_id.clone(),
-                    }))
-                    .await
-                  {
-                    tracing::warn!("Monitor: failed to inject new scheduled job to scheduler: {e}");
+                // Only inject into scheduler if enabled
+                if enabled {
+                  if let Some(exec_time) = super::calculate_execution_time(&job.job_type) {
+                    if let Err(e) = scheduler_addr
+                      .send(super::scheduler::InjectJob(super::JobQueueMessage::Scheduled {
+                        job,
+                        execution_time: exec_time,
+                        client_id: client_id.clone(),
+                      }))
+                      .await
+                    {
+                      tracing::warn!("Monitor: failed to inject new scheduled job to scheduler: {e}");
+                    }
+                  } else {
+                    if let Err(e) = scheduler_addr
+                      .send(super::scheduler::InjectJob(super::JobQueueMessage::Immediate {
+                        job,
+                        client_id: client_id.clone(),
+                      }))
+                      .await
+                    {
+                      tracing::warn!("Monitor: failed to inject new immediate job to scheduler: {e}");
+                    }
                   }
                 } else {
-                  if let Err(e) = scheduler_addr
-                    .send(super::scheduler::InjectJob(super::JobQueueMessage::Immediate {
-                      job,
-                      client_id: client_id.clone(),
-                    }))
-                    .await
-                  {
-                    tracing::warn!("Monitor: failed to inject new immediate job to scheduler: {e}");
-                  }
+                  tracing::debug!("Monitor: job {} not enabled, skipping scheduler injection", job.job_name);
                 }
               }
               Action::Update => {
-                tracing::debug!("Monitor: job updated: {}", notification.data.job_name);
+                tracing::debug!(
+                  "Monitor: job updated: {} enabled={:?}",
+                  notification.data.job_name,
+                  notification.data.enabled,
+                );
                 let job_id = notification.data.id.clone();
                 let updated_job = notification.data.clone();
 
@@ -329,6 +369,7 @@ async fn monitor_task(
                 }
 
                 if notification.data.enabled == Enabled::Enabled {
+                  tracing::debug!("Monitor: re-injecting updated enabled job: {}", notification.data.job_name);
                   // Remove old job from scheduler queue
                   if let Err(e) = scheduler_addr
                     .send(super::scheduler::InjectJob(super::JobQueueMessage::Remove {
@@ -363,10 +404,12 @@ async fn monitor_task(
                       tracing::warn!("Monitor: failed to inject updated immediate job to scheduler: {e}");
                     }
                   }
+                } else {
+                  tracing::debug!("Monitor: updated job {} not enabled, skipping scheduler re-injection", notification.data.job_name);
                 }
               }
               Action::Delete | Action::Killed => {
-                tracing::debug!("Monitor: job removed from remote: {}", notification.data.job_name);
+                tracing::info!("Monitor: job removed from remote: {} — removing from scheduler queue", notification.data.job_name);
                 if let Err(e) = scheduler_addr
                   .send(super::scheduler::InjectJob(super::JobQueueMessage::Remove {
                     id: notification.data.id.clone(),

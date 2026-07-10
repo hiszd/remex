@@ -165,7 +165,7 @@ async fn connection_loop(
             tracing::warn!("Failed to set namespace/database after signin: {e}");
           }
           let client_id = lookup_client_id(&remote_db, &hardware_hash).await;
-          tracing::info!("Signed in successfully as {client_id}");
+          tracing::info!("Signed in successfully as client");
 
           // Broadcast connection to the actor
           if let Err(e) = addr
@@ -193,6 +193,29 @@ async fn connection_loop(
       let client_name = gethostname::gethostname().to_string_lossy().to_string();
       let secret = remex_core::utils::generate_secret(true);
 
+      // Check if a client with this hardware_hash already exists (from a previous incomplete signup)
+      let existing_client_id: Option<String> = match remote_db
+        .query(
+          "USE NS remex DB remex; SELECT VALUE id FROM client WHERE hardware_hash = $hash LIMIT 1;",
+        )
+        .bind(("hash", hardware_hash.clone()))
+        .await
+      {
+        Ok(mut res) => match res.take::<Vec<surrealdb::types::RecordId>>(1) {
+          Ok(ids) => ids.first().map(|id| id.to_sql()),
+          Err(_) => None,
+        },
+        Err(_) => None,
+      };
+
+      if let Some(existing_id) = existing_client_id {
+        tracing::warn!("Client {existing_id} already exists with this hardware_hash — deleting stale client from previous failed signup");
+        let _ = remote_db
+          .query("USE NS remex DB remex; DELETE FROM $id;")
+          .bind(("id", surrealdb::types::RecordId::parse_simple(&existing_id).unwrap()))
+          .await;
+      }
+
       tracing::info!("Signing up with enrollment token (client: {client_name})");
 
       let signup_params = serde_json::json!({
@@ -219,9 +242,15 @@ async fn connection_loop(
           }
           let client_id = lookup_client_id(&remote_db, &hardware_hash).await;
           tracing::info!("Signed up successfully as {client_id}");
-          if let Err(e) =
-              update_session(&session_repo, &session.session_id(), client_id.clone(), Some(secret.clone()))
-              .await
+
+          // Persist session credentials BEFORE re-auth — ensures we can sign in on restart
+          if let Err(e) = update_session(
+            &session_repo,
+            &session.session_id(),
+            client_id.clone(),
+            Some(secret.clone()),
+          )
+          .await
           {
             tracing::error!("Failed to persist session credentials after signup: {e}. Endpoint will need re-enrollment on restart.");
           }
@@ -240,7 +269,13 @@ async fn connection_loop(
             })
             .await
           {
-            tracing::warn!("Re-auth after signup failed (connection may still work with signup token): {e}");
+            tracing::warn!(
+              "Re-auth after signup failed (connection may still work with signup token): {e}"
+            );
+          }
+          // Re-set namespace/database after signin (signin may reset client state)
+          if let Err(e) = remote_db.use_ns("remex").use_db("remex").await {
+            tracing::warn!("Failed to set namespace/database after re-auth: {e}");
           }
 
           if let Err(e) = addr
@@ -260,6 +295,14 @@ async fn connection_loop(
           if let Some(cause) = e.cause() {
             tracing::error!("Signup cause: {cause:?}");
           }
+          // Log the full error chain
+          let mut current: &dyn std::error::Error = &e;
+          let mut idx = 0;
+          while let Some(source) = current.source() {
+            tracing::error!("  source[{idx}]: {source}");
+            current = source;
+            idx += 1;
+          }
           tokio::time::sleep(Duration::from_secs(10)).await;
           continue;
         }
@@ -273,16 +316,34 @@ async fn connection_loop(
 
 async fn lookup_client_id(remote_db: &Surreal<Any>, hardware_hash: &str) -> String {
   let hash = hardware_hash.to_owned();
-  match remote_db
-    .query("SELECT VALUE id FROM client WHERE hardware_hash = $hash;")
+  let result = remote_db
+    .query("USE NS remex DB remex; SELECT VALUE id FROM client WHERE hardware_hash = $hash;")
     .bind(("hash", hash))
-    .await
-  {
-    Ok(mut res) => match res.take::<Vec<surrealdb::types::RecordId>>(0) {
-      Ok(ids) => ids.first().map(|id| id.to_sql()).unwrap_or_default(),
-      Err(_) => String::new(),
-    },
-    Err(_) => String::new(),
+    .await;
+  match result {
+    Ok(mut res) => {
+      let taken: Result<Vec<surrealdb::types::RecordId>, _> = res.take(1);
+      match taken {
+        Ok(ids) => {
+          if let Some(id) = ids.first() {
+            let id_str = id.to_sql();
+            tracing::info!("lookup_client_id: found client id {id_str}");
+            id_str
+          } else {
+            tracing::warn!("lookup_client_id: no client found for hardware_hash — client_id will be empty string");
+            String::new()
+          }
+        }
+        Err(e) => {
+          tracing::error!("lookup_client_id: query response error: {e}");
+          String::new()
+        }
+      }
+    }
+    Err(e) => {
+      tracing::error!("lookup_client_id: transport error: {e}");
+      String::new()
+    }
   }
 }
 

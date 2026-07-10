@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use clap::Parser;
 use surrealdb::engine::local::SurrealKv;
 
@@ -6,12 +8,20 @@ mod db;
 mod db_connector;
 
 use actix::Supervisor;
-use async_tasks::ConnectionReady;
-use async_tasks::jobs::monitor::MonitorActor;
-use async_tasks::jobs::scheduler::SchedulerActor;
-use async_tasks::jobs::sync::SyncActor;
-use async_tasks::db_heartbeat::HeartbeatActor;
-use db_connector::{DbConnectorActor, Subscribe};
+use async_tasks::{
+  db_heartbeat::HeartbeatActor,
+  jobs::{
+    monitor::MonitorActor,
+    scheduler::SchedulerActor,
+    sync::SyncActor,
+    RealJobExecutor,
+  },
+  ConnectionReady,
+};
+use db_connector::{
+  DbConnectorActor,
+  Subscribe,
+};
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -63,7 +73,7 @@ async fn main() -> Result<(), Error> {
   db::migrate(&db::LOCAL_DB).await.unwrap();
 
   // Start SchedulerActor — migrate from old tokio task to Actix actor
-  let scheduler_addr = Supervisor::start(|_| SchedulerActor::new());
+  let scheduler_addr = Supervisor::start(|_| SchedulerActor::new(Arc::new(RealJobExecutor)));
 
   // Start HeartbeatActor — receives ConnectionReady from DbConnectorActor (once migrated)
   let heartbeat_addr = Supervisor::start(|_| HeartbeatActor::new());
@@ -72,7 +82,8 @@ async fn main() -> Result<(), Error> {
   let sync_addr = Supervisor::start(|_| SyncActor::new());
 
   // Start DbConnectorActor — owns the remote connection, broadcasts ConnectionReady
-  let db_connector_addr = Supervisor::start(|_| DbConnectorActor::new(args.db_url, args.enrollment_token));
+  let db_connector_addr =
+    Supervisor::start(|_| DbConnectorActor::new(args.db_url, args.enrollment_token));
 
   // Subscribe downstream actors to ConnectionReady broadcasts
   db_connector_addr.do_send(Subscribe(heartbeat_addr.recipient::<ConnectionReady>()));

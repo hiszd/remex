@@ -1,22 +1,26 @@
 use std::time::Duration;
+
 use actix::prelude::*;
-use surrealdb::{engine::any::Any, Surreal};
+use surrealdb::{
+  engine::any::Any,
+  Surreal,
+};
 use tracing;
 
 pub struct HeartbeatActor {
-    client_id: Option<String>,
-    remote_db: Option<Surreal<Any>>,
-    interval: Duration,
+  client_id: Option<String>,
+  remote_db: Option<Surreal<Any>>,
+  interval: Duration,
 }
 
 impl HeartbeatActor {
-    pub fn new() -> Self {
-        HeartbeatActor {
-            client_id: None,
-            remote_db: None,
-            interval: Duration::from_secs(60),
-        }
+  pub fn new() -> Self {
+    HeartbeatActor {
+      client_id: None,
+      remote_db: None,
+      interval: Duration::from_secs(60),
     }
+  }
 }
 
 #[derive(Message)]
@@ -24,75 +28,73 @@ impl HeartbeatActor {
 struct HeartbeatTick;
 
 impl Actor for HeartbeatActor {
-    type Context = Context<Self>;
+  type Context = Context<Self>;
 
-    fn started(&mut self, ctx: &mut Self::Context) {
-        ctx.notify_later(HeartbeatTick, self.interval);
-    }
+  fn started(&mut self, ctx: &mut Self::Context) { ctx.notify_later(HeartbeatTick, self.interval); }
 }
 
 impl actix::Supervised for HeartbeatActor {
-    fn restarting(&mut self, ctx: &mut Context<Self>) {
-        tracing::info!("HeartbeatActor: restarting");
-        self.client_id = None;
-        self.remote_db = None;
-        // Re-schedule the heartbeat tick (started() is not called on restart)
-        ctx.notify_later(HeartbeatTick, self.interval);
-    }
+  fn restarting(&mut self, ctx: &mut Context<Self>) {
+    tracing::info!("HeartbeatActor: restarting");
+    self.client_id = None;
+    self.remote_db = None;
+    // Re-schedule the heartbeat tick (started() is not called on restart)
+    ctx.notify_later(HeartbeatTick, self.interval);
+  }
 }
 
 impl Handler<crate::async_tasks::ConnectionReady> for HeartbeatActor {
-    type Result = ();
+  type Result = ();
 
-    fn handle(&mut self, msg: crate::async_tasks::ConnectionReady, _ctx: &mut Self::Context) {
-        self.remote_db = msg.db;
-        self.client_id = msg.client_id;
-        tracing::info!(
-            "Heartbeat actor received connection (db={}, client_id={})",
-            self.remote_db.is_some(),
-            self.client_id.is_some(),
-        );
-    }
+  fn handle(&mut self, msg: crate::async_tasks::ConnectionReady, _ctx: &mut Self::Context) {
+    self.remote_db = msg.db;
+    self.client_id = msg.client_id;
+    tracing::info!(
+      "Heartbeat actor received connection (db={}, client_id={})",
+      self.remote_db.is_some(),
+      self.client_id.is_some(),
+    );
+  }
 }
 
 impl Handler<HeartbeatTick> for HeartbeatActor {
-    type Result = ();
+  type Result = ();
 
-    fn handle(&mut self, _msg: HeartbeatTick, ctx: &mut Self::Context) {
-        if let Some(ref cid) = self.client_id {
-            if let Some(ref db) = self.remote_db {
-                let cid = cid.clone();
-                let db = db.clone();
-                tokio::spawn(async move {
-                    match surrealdb::types::RecordId::parse_simple(&cid) {
-                        Ok(rid) => {
-                            match db
-                                .query("UPDATE $id SET last_seen = time::now()")
-                                .bind(("id", rid))
-                                .await
-                            {
-                                Ok(mut response) => {
-                                    let updated: Vec<serde_json::Value> = match response.take(0) {
-                                        Ok(v) => v,
-                                        Err(e) => {
-                                            tracing::warn!("UPDATE failed on server: {e}");
-                                            vec![]
-                                        }
-                                    };
-                                    if updated.is_empty() {
-                                        tracing::warn!("UPDATE last_seen for {cid} matched zero records");
-                                    }
-                                }
-                                Err(e) => tracing::warn!("Failed to send UPDATE: {e}"),
-                            }
-                        }
-                        Err(e) => tracing::warn!("Invalid client_id {cid}: {e}"),
+  fn handle(&mut self, _msg: HeartbeatTick, ctx: &mut Self::Context) {
+    if let Some(ref cid) = self.client_id {
+      if let Some(ref db) = self.remote_db {
+        let cid = cid.clone();
+        let db = db.clone();
+        tokio::spawn(async move {
+          match surrealdb::types::RecordId::parse_simple(&cid) {
+            Ok(rid) => {
+              match db
+                .query("UPDATE $id SET last_seen = time::now()")
+                .bind(("id", rid))
+                .await
+              {
+                Ok(mut response) => {
+                  let updated: Vec<serde_json::Value> = match response.take(0) {
+                    Ok(v) => v,
+                    Err(e) => {
+                      tracing::warn!("UPDATE failed on server: {e}");
+                      vec![]
                     }
-                });
+                  };
+                  if updated.is_empty() {
+                    tracing::warn!("UPDATE last_seen for {cid} matched zero records");
+                  }
+                }
+                Err(e) => tracing::warn!("Failed to send UPDATE: {e}"),
+              }
             }
-        }
-        ctx.notify_later(HeartbeatTick, self.interval);
+            Err(e) => tracing::warn!("Invalid client_id {cid}: {e}"),
+          }
+        });
+      }
     }
+    ctx.notify_later(HeartbeatTick, self.interval);
+  }
 }
 
 #[cfg(test)]

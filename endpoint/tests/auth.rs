@@ -13,11 +13,8 @@ use serde_json::Value;
 
 /// Clean up all test data
 async fn cleanup(db: &surrealdb::Surreal<surrealdb::engine::any::Any>) {
-  db.query("REMOVE NAMESPACE remex;")
-    .await
-    .unwrap()
-    .check()
-    .unwrap();
+  // Ignore errors — namespace may not exist on a fresh database
+  let _ = db.query("REMOVE NAMESPACE remex;").await;
 }
 
 async fn db_signin() -> surrealdb::Surreal<surrealdb::engine::any::Any> {
@@ -35,9 +32,7 @@ async fn db_signin() -> surrealdb::Surreal<surrealdb::engine::any::Any> {
 }
 
 /// Setup: run migrations via the SDK, seed a user + enrollment token via WS SQL
-async fn setup_test_db(test_id: &str) -> String {
-  setup_test_db_with(test_id, true).await
-}
+async fn setup_test_db(test_id: &str) -> String { setup_test_db_with(test_id, true).await }
 
 /// Setup with configurable single_use flag
 async fn setup_test_db_with(test_id: &str, single_use: bool) -> String {

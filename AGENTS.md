@@ -10,6 +10,7 @@ The directory and project are laid out as such:
 - `/macros` - proc-macro crate for derive macros
 - `/configurator` - The configurator Vue.js web application
 - `/docs` - Architecture documents and ADRs
+- `/docs/design/remote-local-db-actors.md` - Design document for the RemoteDbActor + LocalDbActor refactor
 
 ## Systems Design
 
@@ -25,36 +26,53 @@ remex_configurator is a standalone Vue.js web application for the end user to cr
 
 ## Endpoint Architecture
 
-### Background Tasks
+### Actors
 
-The endpoint spawns **5 background tasks** in `endpoint/src/main.rs` (spawned during startup, then main sleeps forever):
+The endpoint uses **3 Actix actors** managed by `Supervisor`:
 
-| Task | File | Function | Purpose |
+| Actor | File | Role |
+|---|---|---|
+| **SchedulerActor** | `async_tasks/jobs/scheduler.rs` | Job queue (BinaryHeap), spawns `execute_job` tasks |
+| **RemoteDbActor** | `async_tasks/remote_db.rs` | Owns the single remote `Surreal<Any>` connection. Handles auth loop, heartbeat, LIVE SELECT, initial sync, execution push to remote |
+| **LocalDbActor** | `async_tasks/local_db.rs` | Owns the local SurrealKV handle. Handles session management, local cache operations, execution sync loop, cleanup |
+
+### Internal Tasks (spawned by actors)
+
+**RemoteDbActor** spawns these tasks after successful auth:
+
+| Task | Interval | Purpose |
+|---|---|---|
+| `heartbeat_loop` | Every 60s | `UPDATE client SET last_seen = time::now()` |
+| `live_select_job` | Continuous | LIVE SELECT on `job` table, caches locally, injects to scheduler |
+| `live_select_group` | Continuous | LIVE SELECT on `group` table, re-syncs jobs on group change |
+| `initial_sync` | One-shot | Fetch all groups + jobs from remote, cache locally, inject to scheduler |
+
+**LocalDbActor** spawns these tasks on startup:
+
+| Task | Interval | Purpose |
+|---|---|---|
+| `execution_sync_loop` | Every 30s | Find unsynced executions, send `PushExecution` to RemoteDbActor |
+| `cleanup_loop` | Every 30s (throttled 6h) | Delete old synced executions from local cache |
+
+### Message Flow
+
+| From | To | Message | Purpose |
 |---|---|---|---|
-| Database connector | `endpoint/src/db_connector.rs` | `run()` | Connects to remote SurrealDB using bearer token, sends DB handle via `watch` channel |
-| Server message loop | `endpoint/src/async_tasks/server_msg.rs` | `server_msg_loop()` | TCP connection to remex_server — ping/pong, sign-in/sign-up, receives bearer token and server URL |
-| Job scheduler | `endpoint/src/async_tasks/jobs/scheduler.rs` | `run()` | BinaryHeap-based job queue — receives `JobQueueMessage`s, fires `Immediate` / `Scheduled` jobs |
-| Remote monitor | `endpoint/src/async_tasks/jobs/monitor.rs` | `run()` | Connects to remote DB, sets up LIVE SELECT on `job` and `group` tables, reacts to changes by injecting jobs |
-| Execution sync loop | `endpoint/src/async_tasks/jobs/sync.rs` | `execution_sync_loop()` | Every 30s: pushes unsynced local executions to remote DB; every 6h: cleans up old synced executions |
+| LocalDbActor (sync loop) | RemoteDbActor | `PushExecution { cache_id, execution }` | Push an execution to remote DB |
+| RemoteDbActor (on success) | LocalDbActor | `MarkExecutionSynced { cache_id, execution_info }` | Mark local entry as synced |
+| RemoteDbActor (on auth) | Subscribers | `RemoteConnected { client_id }` | Notify of connection state |
+| RemoteDbActor (on disconnect) | Subscribers | `RemoteDisconnected` | Notify of connection loss |
+| RemoteDbActor (LIVE SELECT) | SchedulerActor | `InjectJob(JobQueueMessage)` | Inject/remove jobs from queue |
 
-**Message flow between tasks:**
+### Seam Functions (testable, no actor dependency)
 
-| Producer | Channel | Consumer | Message Type |
-|---|---|---|---|
-| `server_msg_loop` | `db_token_tx` (mpsc) | `db_connector` | `(BearerGrantResponse, String)` — bearer token + server URL |
-| `db_connector` | `db_handle_tx` (watch) | `monitor`, `execution_sync_loop` | `Option<Surreal<Client>>` — remote DB handle (or `None`) |
-| `server_msg_loop` | `monitor_cmd_tx` (mpsc) | `monitor` | `MonitorCommand::SetClientId(String)` |
-| `monitor` | `job_injection_tx` (mpsc) | `scheduler` | `JobQueueMessage` — `Immediate`, `Scheduled`, `Remove`, `SyncFromRemote` |
-| `scheduler` | spawns tasks | `execute_job()` | Job + client_id passed via async closure |
-
-The `jobs` module (`endpoint/src/async_tasks/jobs/`) contains four sub-modules:
+The `jobs` module (`endpoint/src/async_tasks/jobs/`) contains:
 
 | Module | File | Key Exports |
 |---|---|---|
-| `scheduler` | `jobs/scheduler.rs` | `run(rx)` |
-| `monitor` | `jobs/monitor.rs` | `run(cmd_rx, job_injection_tx, db_handle_rx)`, `MonitorCommand` |
-| `sync` | `jobs/sync.rs` | `full_sync()`, `sync_groups()`, `sync_and_refill_queue()`, `sync_job_to_cache()`, `execution_sync_loop()` |
+| `scheduler` | `jobs/scheduler.rs` | `SchedulerActor`, `InjectJob` |
 | `execution` | `jobs/execution.rs` | `execute_job()`, `should_skip_job()`, `mark_job_completed()`, `validate_shell()`, `run_command()` |
+| `sync` | `jobs/sync.rs` | `full_sync()`, `sync_groups()`, `sync_and_refill_queue()`, `sync_job_to_cache()`, `push_unsynced_executions()` |
 
 `JobQueueMessage` variants:
 
@@ -63,7 +81,6 @@ The `jobs` module (`endpoint/src/async_tasks/jobs/`) contains four sub-modules:
 | `Immediate { job, client_id }` | Execute the job right now |
 | `Scheduled { job, execution_time, client_id }` | Execute the job at `execution_time` (an `Instant`) |
 | `Remove { id }` | Remove a job from the scheduler queue by its `RecordId` |
-| `SyncFromRemote` | Clear the entire scheduler queue |
 
 ### Local Database Structure
 

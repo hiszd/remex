@@ -1,6 +1,9 @@
-use remex_core::db::{
-  BearerGrantResponse,
-  DbError,
+use remex_core::{
+  db::{
+    BearerGrantResponse,
+    DbError,
+  },
+  impl_surreal_db_operator,
 };
 use serde::{
   Deserialize,
@@ -11,8 +14,6 @@ use surrealdb::{
   types::SurrealValue,
   Surreal,
 };
-
-use remex_core::impl_surreal_db_operator;
 
 #[derive(Debug, Serialize, Deserialize, SurrealValue, Clone)]
 pub struct SessionData {

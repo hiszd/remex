@@ -33,11 +33,13 @@ impl LastAction {
 
   /// Check if a task has run within the given interval.
   /// Returns true if the task should be skipped (ran recently).
-  pub async fn should_skip(db: &Surreal<Db>, task_name: &str, interval_secs: u64) -> Result<bool, DbError> {
+  pub async fn should_skip(
+    db: &Surreal<Db>,
+    task_name: &str,
+    interval_secs: u64,
+  ) -> Result<bool, DbError> {
     let result: Option<LastAction> = db
-      .query(
-        "USE NS remex DB endpoint; SELECT * FROM last_action WHERE task_name = $name LIMIT 1;",
-      )
+      .query("USE NS remex DB endpoint; SELECT * FROM last_action WHERE task_name = $name LIMIT 1;")
       .bind(("name", task_name.to_string()))
       .await?
       .check()?
