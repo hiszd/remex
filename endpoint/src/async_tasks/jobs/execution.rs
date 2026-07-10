@@ -115,22 +115,13 @@ async fn mark_job_completed(
 pub async fn execute_job(
   job: remex_core::db::model::jobs::Job,
   client_id: &str,
-) -> Result<ExecutionResult, crate::Error> {
+) -> Result<Option<ExecutionResult>, crate::Error> {
   let cache_repo = SurrealJobCacheRepo {
     db: get_local_remex().await?,
   };
   if should_skip_job(&job.id.to_sql(), &cache_repo).await {
     tracing::debug!("Skipping job {} (recent execution exists)", job.job_name);
-    return Ok(ExecutionResult {
-      output: String::new(),
-      exit_code: String::new(),
-      execution_start: surrealdb::types::Datetime::now(),
-      execution_end: None,
-      job_id: job.id,
-      client_id: surrealdb::types::RecordId::parse_simple(client_id)
-        .map_err(|e| crate::Error::InvalidClientId(e.to_string()))?,
-      status: ExecutionStatus::Completed,
-    });
+    return Ok(None);
   }
 
   println!("Executing job: {}", job.job_name);
@@ -189,7 +180,7 @@ pub async fn execute_job(
     data.execution_info.execution_end = Some(time_end);
     data.execution_info.updated_at = surrealdb::types::Datetime::now();
     repo.update(&cache_id, data).await?;
-    return Ok(ExecutionResult {
+    return Ok(Some(ExecutionResult {
       output: format!("Shell not found: {}\n{}", job.job_shell, e),
       exit_code: "127".to_string(),
       execution_start: time_start,
@@ -197,7 +188,7 @@ pub async fn execute_job(
       job_id: job.id,
       client_id: client_id_record,
       status: ExecutionStatus::Failed,
-    });
+    }));
   }
 
   let (output_str, exit_status) = match run_command(&job.job_shell, &job.job_command, timeout).await
@@ -217,7 +208,7 @@ pub async fn execute_job(
       data.execution_info.execution_end = Some(time_end);
       data.execution_info.updated_at = surrealdb::types::Datetime::now();
       repo.update(&cache_id, data).await?;
-      return Ok(ExecutionResult {
+      return Ok(Some(ExecutionResult {
         output: format!("Command timed out after {:?}", timeout),
         exit_code: "-1".to_string(),
         execution_start: time_start,
@@ -225,7 +216,7 @@ pub async fn execute_job(
         job_id: job.id,
         client_id: client_id_record,
         status: ExecutionStatus::TimedOut,
-      });
+      }));
     }
     Err(e) => {
       tracing::error!("Command execution failed for job {}: {}", job.job_name, e);
@@ -241,7 +232,7 @@ pub async fn execute_job(
       data.execution_info.execution_end = Some(time_end);
       data.execution_info.updated_at = surrealdb::types::Datetime::now();
       repo.update(&cache_id, data).await?;
-      return Ok(ExecutionResult {
+      return Ok(Some(ExecutionResult {
         output: format!("Execution error: {}", e),
         exit_code: "1".to_string(),
         execution_start: time_start,
@@ -249,7 +240,7 @@ pub async fn execute_job(
         job_id: job.id,
         client_id: client_id_record,
         status: ExecutionStatus::Failed,
-      });
+      }));
     }
   };
 
@@ -281,7 +272,7 @@ pub async fn execute_job(
 
   tracing::info!("Job {} completed with status: {:?}", job.job_name, execution_status);
 
-  Ok(ExecutionResult {
+  Ok(Some(ExecutionResult {
     output: output_str,
     exit_code: exit_status.code().unwrap_or(0).to_string(),
     execution_start: time_start,
@@ -289,7 +280,7 @@ pub async fn execute_job(
     job_id: job.id,
     client_id: client_id_record,
     status: execution_status,
-  })
+  }))
 }
 
 #[cfg(test)]

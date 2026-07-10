@@ -198,13 +198,13 @@ mod scheduler_tests {
 
   #[async_trait]
   impl JobExecutor for MockJobExecutor {
-    async fn execute(&self, job: Job, client_id: &str) -> Result<ExecutionResult, crate::Error> {
+    async fn execute(&self, job: Job, client_id: &str) -> Result<Option<ExecutionResult>, crate::Error> {
       self
         .calls
         .lock()
         .unwrap()
         .push((job.clone(), client_id.to_string()));
-      Ok(ExecutionResult {
+      Ok(Some(ExecutionResult {
         output: String::new(),
         exit_code: "0".to_string(),
         execution_start: surrealdb::types::Datetime::default(),
@@ -212,7 +212,7 @@ mod scheduler_tests {
         job_id: job.id,
         client_id: surrealdb::types::RecordId::new("client", "mock"),
         status: remex_core::db::model::executions::ExecutionStatus::Completed,
-      })
+      }))
     }
   }
 
