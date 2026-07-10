@@ -56,12 +56,29 @@ The endpoint uses **3 Actix actors** managed by `Supervisor`:
 
 ### Message Flow
 
-| From | To | Message | Purpose |
+#### Currently Defined in Code (`endpoint/src/async_tasks.rs`)
+
+| Message | Sender | Recipient | Purpose |
 |---|---|---|---|
-| LocalDbActor (sync loop) | RemoteDbActor | `PushExecution { cache_id, execution }` | Push an execution to remote DB |
-| RemoteDbActor (on success) | LocalDbActor | `MarkExecutionSynced { cache_id, execution_info }` | Mark local entry as synced |
-| RemoteDbActor (on auth) | Subscribers | `RemoteConnected { client_id }` | Notify of connection state |
-| RemoteDbActor (on disconnect) | Subscribers | `RemoteDisconnected` | Notify of connection loss |
+| `PushExecution { cache_id, execution }` | LocalDbActor | RemoteDbActor | Push an execution to remote DB |
+| `MarkExecutionSynced { cache_id }` | RemoteDbActor | LocalDbActor | Mark local entry as synced |
+| `CacheJob { job }` | RemoteDbActor | LocalDbActor | Cache a job locally (from LIVE SELECT) |
+| `RecordExecution { result: ExecutionResult }` | SchedulerActor | LocalDbActor | Save execution result to local cache |
+| `GetSession` | RemoteDbActor | LocalDbActor | Request stored session credentials |
+| `SaveSession { client_id, secret }` | RemoteDbActor | LocalDbActor | Save session credentials after signup |
+| `ConnectionReady { db, client_id }` | DbConnectorActor | Subscribers | Deprecated (legacy, being replaced) |
+
+#### Planned (defined in design doc, not yet in code)
+
+| Message | Sender | Recipient | Purpose |
+|---|---|---|---|
+| `RemoteConnected { client_id }` | RemoteDbActor | Subscribers | Notify of connection state |
+| `RemoteDisconnected` | RemoteDbActor | Subscribers | Notify of connection loss |
+| `GetCachedJobs` | RemoteDbActor | LocalDbActor | Get all cached jobs from local DB |
+| `GetCachedJob { job_id }` | RemoteDbActor | LocalDbActor | Get a single cached job by remote ID |
+| `SetCachedJobCompleted { job_id, completed }` | RemoteDbActor | LocalDbActor | Mark cached job as completed/incomplete |
+| `ShouldSkipThrottle { task_name, interval_secs }` | RemoteDbActor | LocalDbActor | Check if cleanup should be skipped |
+| `RecordLastAction { task_name }` | RemoteDbActor | LocalDbActor | Record that a task has run |
 | RemoteDbActor (LIVE SELECT) | SchedulerActor | `InjectJob(JobQueueMessage)` | Inject/remove jobs from queue |
 
 ### Seam Functions (testable, no actor dependency)
@@ -69,9 +86,9 @@ The endpoint uses **3 Actix actors** managed by `Supervisor`:
 The `jobs` module (`endpoint/src/async_tasks/jobs/`) contains:
 
 | Module | File | Key Exports |
-|---|---|---|
+|---|---|---|---|
 | `scheduler` | `jobs/scheduler.rs` | `SchedulerActor`, `InjectJob` |
-| `execution` | `jobs/execution.rs` | `execute_job()`, `should_skip_job()`, `mark_job_completed()`, `validate_shell()`, `run_command()` |
+| `execution` | `jobs/execution.rs` | `ExecutionResult`, `execute_job()`, `should_skip_job()`, `mark_job_completed()`, `validate_shell()`, `run_command()` |
 | `sync` | `jobs/sync.rs` | `full_sync()`, `sync_groups()`, `sync_and_refill_queue()`, `sync_job_to_cache()`, `push_unsynced_executions()` |
 
 `JobQueueMessage` variants:
@@ -81,6 +98,61 @@ The `jobs` module (`endpoint/src/async_tasks/jobs/`) contains:
 | `Immediate { job, client_id }` | Execute the job right now |
 | `Scheduled { job, execution_time, client_id }` | Execute the job at `execution_time` (an `Instant`) |
 | `Remove { id }` | Remove a job from the scheduler queue by its `RecordId` |
+
+### ExecutionResult and JobExecutor
+
+**`ExecutionResult`** (`endpoint/src/async_tasks/jobs/execution.rs`) captures the outcome of a single job execution:
+
+```rust
+#[derive(Debug, Clone)]
+pub struct ExecutionResult {
+  pub output: String,
+  pub exit_code: String,
+  pub execution_start: surrealdb::types::Datetime,
+  pub execution_end: Option<surrealdb::types::Datetime>,
+  pub job_id: surrealdb::types::RecordId,
+  pub client_id: surrealdb::types::RecordId,
+  pub status: ExecutionStatus,
+}
+```
+
+**`execute_job()`** signature uses `Option<ExecutionResult>` to distinguish two cases:
+
+| Return value | Meaning |
+|---|---|
+| `Ok(None)` | Job was skipped (already completed recently — `should_skip_job()` returned `true`). No execution was created. |
+| `Ok(Some(ExecutionResult { ... }))` | Job actually ran. The result has real output, exit_code, and timestamps. Scheduler should send it to LocalDbActor via `RecordExecution`. |
+| `Err(e)` | Fatal error — local DB unavailable, invalid client_id, shell not found, command timeout. |
+
+**`JobExecutor` trait** abstracts execution for testability:
+
+```rust
+#[async_trait]
+pub trait JobExecutor: Send + Sync {
+  async fn execute(&self, job: Job, client_id: &str)
+    -> Result<Option<execution::ExecutionResult>, crate::Error>;
+}
+```
+
+| Implementor | File | Context |
+|---|---|---|
+| `RealJobExecutor` | `jobs/mod.rs` | Production — delegates to `execution::execute_job()` |
+| `MockJobExecutor` | `scheduler.rs` (tests) | Tests — records calls, returns a canned `Ok(Some(ExecutionResult { ... }))` |
+
+The `JobExecutor` is injected into `SchedulerActor` via constructor:
+
+```rust
+pub struct SchedulerActor {
+  executor: Arc<dyn JobExecutor>,
+  // ...
+}
+```
+
+**Scheduler flow** when a job fires:
+1. Call `executor.execute(job, client_id).await`
+2. If `Ok(Some(result))`, send `RecordExecution { result }` to LocalDbActor
+3. If `Ok(None)`, log "job skipped" and do nothing
+4. If `Err(e)`, log the error
 
 ### Local Database Structure
 

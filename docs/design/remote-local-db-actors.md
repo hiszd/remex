@@ -51,13 +51,27 @@ pub struct PushExecution {
 
 // ── Local queries (sent TO LocalDbActor) ──
 
+/// Save an execution result from the scheduler.
+/// Sent by SchedulerActor after execute_job() returns Ok(Some(result)).
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct RecordExecution {
+    pub result: ExecutionResult,
+}
+
 /// Mark a local execution cache entry as synced=true.
 /// Sent by RemoteDbActor after a successful remote push.
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct MarkExecutionSynced {
     pub cache_id: String,
-    pub execution_info: Execution,
+}
+
+/// Upsert a job into the local cache (from LIVE SELECT).
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct CacheJob {
+    pub job: Job,
 }
 
 /// Get all cached jobs from local database.
@@ -70,14 +84,6 @@ pub struct GetCachedJobs;
 #[rtype(result = "Result<Option<JobCache>, DbError>")]
 pub struct GetCachedJob {
     pub job_id: String,
-}
-
-/// Upsert a job into the local cache.
-#[derive(Message)]
-#[rtype(result = "Result<(), DbError>")]
-pub struct CacheJob {
-    pub job: Job,
-    pub completed: bool,
 }
 
 /// Mark a cached job as completed or incomplete.
@@ -95,11 +101,10 @@ pub struct GetSession;
 
 /// Save session credentials after signup.
 #[derive(Message)]
-#[rtype(result = "Result<(), DbError>")]
+#[rtype(result = "()")]
 pub struct SaveSession {
-    pub session_id: String,
     pub client_id: String,
-    pub secret: Option<String>,
+    pub secret: String,
 }
 
 /// Check if a cleanup task should be skipped (throttle).
