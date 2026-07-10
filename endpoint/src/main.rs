@@ -5,7 +5,6 @@ use surrealdb::engine::local::SurrealKv;
 
 mod async_tasks;
 mod db;
-mod db_connector;
 
 use actix::Supervisor;
 use async_tasks::{
