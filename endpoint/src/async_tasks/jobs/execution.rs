@@ -93,7 +93,7 @@ async fn should_skip_job(
     .unwrap_or(false)
 }
 
-async fn mark_job_completed(
+pub(crate) async fn mark_job_completed(
   job_id: &str,
   cache_repo: &dyn DbOperator<
     Record = crate::db::remex::JobCache,

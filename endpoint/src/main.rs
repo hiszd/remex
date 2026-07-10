@@ -9,18 +9,18 @@ mod db_connector;
 
 use actix::Supervisor;
 use async_tasks::{
-  db_heartbeat::HeartbeatActor,
   jobs::{
     monitor::MonitorActor,
     scheduler::SchedulerActor,
-    sync::SyncActor,
     RealJobExecutor,
   },
+  local_db::LocalDbActor,
+  remote_db::{
+    RemoteDbActor,
+    Subscribe,
+  },
   ConnectionReady,
-};
-use db_connector::{
-  DbConnectorActor,
-  Subscribe,
+  SetRemoteDbAddr,
 };
 
 #[derive(Parser, Debug)]
@@ -72,26 +72,33 @@ async fn main() -> Result<(), Error> {
     .unwrap();
   db::migrate(&db::LOCAL_DB).await.unwrap();
 
-  // Start SchedulerActor — migrate from old tokio task to Actix actor
+  let hardware_hash = machine_uid::get().unwrap_or_default();
+
+  // Start LocalDbActor — owns local SurrealKV, session, execution cache
+  let local_db_addr = Supervisor::start(|_| LocalDbActor::new());
+  let local_db_addr_2 = local_db_addr.clone();
+
+  // Start RemoteDbActor — owns remote connection, auth, heartbeat, execution push
+  let remote_db_addr = Supervisor::start(move |_| {
+    RemoteDbActor::new(
+      args.db_url.clone(),
+      args.enrollment_token.clone(),
+      hardware_hash.clone(),
+      local_db_addr_2.clone(),
+    )
+  });
+
+  // Wire up RemoteDbActor address to LocalDbActor (for execution sync)
+  local_db_addr.do_send(SetRemoteDbAddr(remote_db_addr.clone()));
+
+  // Start SchedulerActor — job queue, spawns execute_job tasks
   let scheduler_addr = Supervisor::start(|_| SchedulerActor::new(Arc::new(RealJobExecutor)));
-
-  // Start HeartbeatActor — receives ConnectionReady from DbConnectorActor (once migrated)
-  let heartbeat_addr = Supervisor::start(|_| HeartbeatActor::new());
-
-  // Start SyncActor — pushes unsynced executions to remote every 30s
-  let sync_addr = Supervisor::start(|_| SyncActor::new());
-
-  // Start DbConnectorActor — owns the remote connection, broadcasts ConnectionReady
-  let db_connector_addr =
-    Supervisor::start(|_| DbConnectorActor::new(args.db_url, args.enrollment_token));
-
-  // Subscribe downstream actors to ConnectionReady broadcasts
-  db_connector_addr.do_send(Subscribe(heartbeat_addr.recipient::<ConnectionReady>()));
-  db_connector_addr.do_send(Subscribe(sync_addr.recipient::<ConnectionReady>()));
 
   // Start MonitorActor — LIVE SELECT streams on job/group tables
   let monitor_addr = Supervisor::start(move |_| MonitorActor::new(scheduler_addr.clone()));
-  db_connector_addr.do_send(Subscribe(monitor_addr.recipient::<ConnectionReady>()));
+
+  // Subscribe MonitorActor to RemoteDbActor's ConnectionReady broadcasts
+  remote_db_addr.do_send(Subscribe(monitor_addr.recipient::<ConnectionReady>()));
 
   loop {
     tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;

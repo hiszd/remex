@@ -11,6 +11,7 @@ use surrealdb::{
 use crate::{
   async_tasks::{
     local_db::LocalDbActor,
+    ConnectionReady,
     GetSession,
     MarkExecutionSynced,
     PushExecution,
@@ -24,6 +25,11 @@ use crate::{
     get_local_endpoint,
   },
 };
+
+/// Subscribe to ConnectionReady broadcasts (e.g. MonitorActor).
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct Subscribe(pub actix::Recipient<ConnectionReady>);
 
 // ── Internal messages for communication between connection_loop and actor ──
 
@@ -65,6 +71,9 @@ pub struct RemoteDbActor {
 
   // References to other actors
   local_db_addr: Addr<LocalDbActor>,
+
+  // Subscribers to ConnectionReady broadcasts
+  subscribers: Vec<actix::Recipient<ConnectionReady>>,
 }
 
 impl RemoteDbActor {
@@ -83,6 +92,7 @@ impl RemoteDbActor {
       connected: false,
       pending_executions: Vec::new(),
       local_db_addr,
+      subscribers: Vec::new(),
     }
   }
 }
@@ -128,6 +138,17 @@ impl actix::Supervised for RemoteDbActor {
 
 // ── Message Handlers ──
 
+impl Handler<Subscribe> for RemoteDbActor {
+  type Result = ();
+
+  fn handle(&mut self, msg: Subscribe, _ctx: &mut Self::Context) {
+    self.subscribers.push(msg.0);
+    tracing::info!("RemoteDbActor: subscriber added (total {})", self.subscribers.len());
+  }
+}
+
+// ── Inbound connection state handlers ──
+
 impl Handler<PushExecution> for RemoteDbActor {
   type Result = Result<(), DbError>;
 
@@ -156,12 +177,22 @@ impl Handler<ConnectionSucceeded> for RemoteDbActor {
 
   fn handle(&mut self, msg: ConnectionSucceeded, _ctx: &mut Self::Context) {
     tracing::info!("RemoteDbActor: connection succeeded as {}", msg.client_id);
+    let client_id = msg.client_id.clone();
     self.remote_db = Some(msg.remote_db);
-    self.client_id = Some(msg.client_id);
+    self.client_id = Some(client_id.clone());
     self.connected = true;
 
     // Drain any queued executions
     self.drain_pending_executions();
+
+    // Notify subscribers that connection is ready
+    let ready_msg = ConnectionReady {
+      db: self.remote_db.clone(),
+      client_id: Some(client_id),
+    };
+    for sub in &self.subscribers {
+      sub.do_send(ready_msg.clone());
+    }
   }
 }
 

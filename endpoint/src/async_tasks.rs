@@ -1,4 +1,3 @@
-pub mod db_heartbeat;
 pub mod jobs;
 pub mod local_db;
 pub mod remote_db;
@@ -81,3 +80,9 @@ pub struct SaveSession {
   pub client_id: String,
   pub secret: String,
 }
+
+/// Wire up the RemoteDbActor address to LocalDbActor.
+/// Sent once after both actors are created (see main.rs pattern).
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct SetRemoteDbAddr(pub actix::Addr<crate::async_tasks::remote_db::RemoteDbActor>);
