@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use actix::prelude::*;
-use tokio::time::timeout;
 use remex_core::db::{
   model::{
     groups::Group,
@@ -17,6 +16,7 @@ use surrealdb::{
   },
   Surreal,
 };
+use tokio::time::timeout;
 
 use super::{
   JobQueueMessage,

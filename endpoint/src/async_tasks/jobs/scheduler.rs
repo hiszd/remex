@@ -198,7 +198,11 @@ mod scheduler_tests {
 
   #[async_trait]
   impl JobExecutor for MockJobExecutor {
-    async fn execute(&self, job: Job, client_id: &str) -> Result<Option<ExecutionResult>, crate::Error> {
+    async fn execute(
+      &self,
+      job: Job,
+      client_id: &str,
+    ) -> Result<Option<ExecutionResult>, crate::Error> {
       self
         .calls
         .lock()

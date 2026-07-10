@@ -39,14 +39,22 @@ impl JobSender for actix::Addr<scheduler::SchedulerActor> {
 /// Tests use a mock that records calls.
 #[async_trait]
 pub trait JobExecutor: Send + Sync {
-  async fn execute(&self, job: Job, client_id: &str) -> Result<Option<execution::ExecutionResult>, crate::Error>;
+  async fn execute(
+    &self,
+    job: Job,
+    client_id: &str,
+  ) -> Result<Option<execution::ExecutionResult>, crate::Error>;
 }
 
 pub struct RealJobExecutor;
 
 #[async_trait]
 impl JobExecutor for RealJobExecutor {
-  async fn execute(&self, job: Job, client_id: &str) -> Result<Option<execution::ExecutionResult>, crate::Error> {
+  async fn execute(
+    &self,
+    job: Job,
+    client_id: &str,
+  ) -> Result<Option<execution::ExecutionResult>, crate::Error> {
     execution::execute_job(job, client_id).await
   }
 }

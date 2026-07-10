@@ -1,5 +1,7 @@
 pub mod db_heartbeat;
 pub mod jobs;
+pub mod local_db;
+pub mod remote_db;
 
 use actix::prelude::*;
 use remex_core::db::{
@@ -25,6 +27,18 @@ pub struct ConnectionReady {
   pub db: Option<Surreal<Any>>,
   pub client_id: Option<String>,
 }
+
+/// Broadcast when the remote connection is established.
+#[derive(Message, Clone)]
+#[rtype(result = "()")]
+pub struct RemoteConnected {
+  pub client_id: String,
+}
+
+/// Broadcast when the remote connection is lost.
+#[derive(Message, Clone)]
+#[rtype(result = "()")]
+pub struct RemoteDisconnected;
 
 /// Sent from LocalDbActor to RemoteDbActor: push an execution to the remote DB.
 #[derive(Message, Clone)]
