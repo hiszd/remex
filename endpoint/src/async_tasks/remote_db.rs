@@ -10,7 +10,6 @@ use surrealdb::{
 
 use crate::{
   async_tasks::{
-    jobs::scheduler::SchedulerActor,
     local_db::LocalDbActor,
     GetSession,
     MarkExecutionSynced,
@@ -43,12 +42,18 @@ struct ConnectionFailed;
 #[rtype(result = "()")]
 struct ClearConnection;
 
+/// Test helper: query the number of pending executions.
+#[derive(Message)]
+#[rtype(result = "usize")]
+struct GetPendingCount;
+
 // ── Actor ──
 
 pub struct RemoteDbActor {
   // Config (immutable after construction)
   db_url: String,
   enrollment_token: Option<String>,
+  hardware_hash: String,
 
   // Connection state
   remote_db: Option<Surreal<Any>>,
@@ -60,26 +65,24 @@ pub struct RemoteDbActor {
 
   // References to other actors
   local_db_addr: Addr<LocalDbActor>,
-  scheduler_addr: Addr<SchedulerActor>,
 }
 
 impl RemoteDbActor {
-  #[allow(clippy::too_many_arguments)]
   pub fn new(
     db_url: String,
     enrollment_token: Option<String>,
+    hardware_hash: String,
     local_db_addr: Addr<LocalDbActor>,
-    scheduler_addr: Addr<SchedulerActor>,
   ) -> Self {
     RemoteDbActor {
       db_url,
       enrollment_token,
+      hardware_hash,
       remote_db: None,
       client_id: None,
       connected: false,
       pending_executions: Vec::new(),
       local_db_addr,
-      scheduler_addr,
     }
   }
 }
@@ -91,10 +94,12 @@ impl Actor for RemoteDbActor {
     let addr = ctx.address();
     let db_url = self.db_url.clone();
     let enrollment_token = self.enrollment_token.clone();
+    let hardware_hash = self.hardware_hash.clone();
     let local_db_addr = self.local_db_addr.clone();
 
     tokio::spawn(async move {
-      connection_loop(&db_url, enrollment_token.as_deref(), addr, local_db_addr).await;
+      connection_loop(&db_url, enrollment_token.as_deref(), &hardware_hash, addr, local_db_addr)
+        .await;
     });
   }
 }
@@ -112,9 +117,11 @@ impl actix::Supervised for RemoteDbActor {
     let addr = ctx.address();
     let db_url = self.db_url.clone();
     let enrollment_token = self.enrollment_token.clone();
+    let hardware_hash = self.hardware_hash.clone();
     let local_db_addr = self.local_db_addr.clone();
     tokio::spawn(async move {
-      connection_loop(&db_url, enrollment_token.as_deref(), addr, local_db_addr).await;
+      connection_loop(&db_url, enrollment_token.as_deref(), &hardware_hash, addr, local_db_addr)
+        .await;
     });
   }
 }
@@ -135,28 +142,7 @@ impl Handler<PushExecution> for RemoteDbActor {
         }
       };
       let local_db = self.local_db_addr.clone();
-      let cache_id = msg.cache_id.clone();
-
-      tokio::spawn(async move {
-        match db
-          .query("CREATE execution CONTENT $data")
-          .bind(("data", msg.execution))
-          .await
-        {
-          Ok(result) => match result.check() {
-            Ok(_) => {
-              tracing::debug!("RemoteDbActor: successfully pushed execution {cache_id}");
-              local_db.do_send(MarkExecutionSynced { cache_id });
-            }
-            Err(e) => {
-              tracing::warn!("RemoteDbActor: failed to push execution {cache_id}: {e}");
-            }
-          },
-          Err(e) => {
-            tracing::warn!("RemoteDbActor: transport error pushing execution {cache_id}: {e}");
-          }
-        }
-      });
+      Self::push_execution_to_remote(db, local_db, msg);
     } else {
       tracing::debug!("RemoteDbActor: queuing execution {} (disconnected)", msg.cache_id);
       self.pending_executions.push(msg);
@@ -170,18 +156,9 @@ impl Handler<ConnectionSucceeded> for RemoteDbActor {
 
   fn handle(&mut self, msg: ConnectionSucceeded, _ctx: &mut Self::Context) {
     tracing::info!("RemoteDbActor: connection succeeded as {}", msg.client_id);
-    self.remote_db = Some(msg.remote_db.clone());
+    self.remote_db = Some(msg.remote_db);
     self.client_id = Some(msg.client_id);
     self.connected = true;
-
-    // Spawn heartbeat loop
-    if let Some(ref db) = self.remote_db {
-      let db_clone = db.clone();
-      let cid = self.client_id.clone().unwrap_or_default();
-      tokio::spawn(async move {
-        heartbeat_loop(db_clone, &cid).await;
-      });
-    }
 
     // Drain any queued executions
     self.drain_pending_executions();
@@ -209,21 +186,63 @@ impl Handler<ClearConnection> for RemoteDbActor {
   }
 }
 
+impl Handler<GetPendingCount> for RemoteDbActor {
+  type Result = usize;
+
+  fn handle(&mut self, _msg: GetPendingCount, _ctx: &mut Self::Context) -> usize {
+    self.pending_executions.len()
+  }
+}
+
 // ── Internal Methods ──
 
 impl RemoteDbActor {
+  /// Spawn a tokio task to push an execution to the remote database.
+  /// On success, sends MarkExecutionSynced to the LocalDbActor.
+  fn push_execution_to_remote(
+    remote_db: Surreal<Any>,
+    local_db_addr: Addr<LocalDbActor>,
+    msg: PushExecution,
+  ) {
+    let cache_id = msg.cache_id.clone();
+    tokio::spawn(async move {
+      match remote_db
+        .query("CREATE execution CONTENT $data")
+        .bind(("data", msg.execution))
+        .await
+      {
+        Ok(result) => match result.check() {
+          Ok(_) => {
+            tracing::debug!("RemoteDbActor: successfully pushed execution {cache_id}");
+            local_db_addr.do_send(MarkExecutionSynced { cache_id });
+          }
+          Err(e) => {
+            tracing::warn!("RemoteDbActor: failed to push execution {cache_id}: {e}");
+          }
+        },
+        Err(e) => {
+          tracing::warn!("RemoteDbActor: transport error pushing execution {cache_id}: {e}");
+        }
+      }
+    });
+  }
+
   fn drain_pending_executions(&mut self) {
     let pending = std::mem::take(&mut self.pending_executions);
     if pending.is_empty() {
       return;
     }
     tracing::info!("RemoteDbActor: draining {} pending executions", pending.len());
-    for msg in pending {
-      // Re-process through the handler (connected = true now)
-      match self.handle(msg, &mut Context::new()) {
-        Ok(()) => {}
-        Err(e) => tracing::error!("RemoteDbActor: drain push execution failed: {e}"),
+    let db = match self.remote_db.clone() {
+      Some(db) => db,
+      None => {
+        tracing::error!("RemoteDbActor: cannot drain executions — no remote_db handle");
+        return;
       }
+    };
+    let local_db = self.local_db_addr.clone();
+    for msg in pending {
+      Self::push_execution_to_remote(db.clone(), local_db.clone(), msg);
     }
   }
 }
@@ -235,6 +254,7 @@ impl RemoteDbActor {
 async fn connection_loop(
   db_url: &str,
   enrollment_token: Option<&str>,
+  hardware_hash: &str,
   addr: actix::Addr<RemoteDbActor>,
   local_db_addr: actix::Addr<LocalDbActor>,
 ) {
@@ -243,20 +263,12 @@ async fn connection_loop(
     addr.do_send(ClearConnection);
 
     // Load session from local DB
-    let session = match load_or_get_session(&local_db_addr).await {
+    let session = match load_or_get_session(&local_db_addr, hardware_hash).await {
       Some(s) => s,
       None => {
         tracing::error!("RemoteDbActor: failed to load or create session");
         tokio::time::sleep(Duration::from_secs(5)).await;
         continue;
-      }
-    };
-
-    let hardware_hash = match machine_uid::get() {
-      Ok(h) => h,
-      Err(e) => {
-        tracing::warn!("RemoteDbActor: failed to get machine uid: {e}");
-        String::new()
       }
     };
 
@@ -309,12 +321,10 @@ async fn connection_loop(
 
           addr.do_send(ConnectionSucceeded {
             remote_db: remote_db.clone(),
-            client_id,
+            client_id: client_id.clone(),
           });
 
-          // Wait ~1 hour before re-auth (with random jitter 0-300s)
-          let jitter: u64 = rand::random::<u64>() % 300;
-          tokio::time::sleep(Duration::from_secs(3600 + jitter)).await;
+          wait_for_reconnect_or_heartbeat_death(remote_db.clone(), client_id).await;
           continue; // Loop back to re-authenticate
         }
         Err(e) => {
@@ -333,7 +343,7 @@ async fn connection_loop(
         .query(
           "USE NS remex DB remex; SELECT VALUE id FROM client WHERE hardware_hash = $hash LIMIT 1;",
         )
-        .bind(("hash", hardware_hash.clone()))
+        .bind(("hash", hardware_hash.to_string()))
         .await
       {
         Ok(mut res) => match res.take::<Vec<surrealdb::types::RecordId>>(1) {
@@ -345,9 +355,18 @@ async fn connection_loop(
 
       if let Some(ref existing_id) = existing_client_id {
         tracing::warn!("RemoteDbActor: deleting stale client {existing_id}");
+        let rid = match surrealdb::types::RecordId::parse_simple(existing_id) {
+          Ok(rid) => rid,
+          Err(e) => {
+            tracing::error!("RemoteDbActor: invalid stale client ID {existing_id}: {e}");
+            // Can't parse the ID — skip deletion, let enrollment attempt handle it
+            // Use a sentinel to avoid the deletion query
+            continue;
+          }
+        };
         match remote_db
           .query("USE NS remex DB remex; DELETE FROM $id;")
-          .bind(("id", surrealdb::types::RecordId::parse_simple(existing_id).unwrap()))
+          .bind(("id", rid))
           .await
         {
           Ok(_) => tracing::debug!("RemoteDbActor: deleted stale client {existing_id}"),
@@ -406,12 +425,10 @@ async fn connection_loop(
 
           addr.do_send(ConnectionSucceeded {
             remote_db: remote_db.clone(),
-            client_id,
+            client_id: client_id.clone(),
           });
 
-          // Wait ~1 hour before re-auth
-          let jitter: u64 = rand::random::<u64>() % 300;
-          tokio::time::sleep(Duration::from_secs(3600 + jitter)).await;
+          wait_for_reconnect_or_heartbeat_death(remote_db.clone(), client_id).await;
           continue;
         }
         Err(e) => {
@@ -454,6 +471,29 @@ async fn heartbeat_loop(remote_db: Surreal<Any>, client_id: &str) {
   }
 }
 
+/// Wait for re-auth timer or heartbeat task death.
+/// Spawns heartbeat_loop and uses tokio::select! to listen for both the
+/// 3600s + jitter timer and a oneshot signal when heartbeat_loop exits.
+async fn wait_for_reconnect_or_heartbeat_death(remote_db: Surreal<Any>, client_id: String) {
+  let (hb_done_tx, mut hb_done_rx) = tokio::sync::oneshot::channel::<()>();
+  let hb_remote_db = remote_db.clone();
+  let hb_client_id = client_id.clone();
+  tokio::spawn(async move {
+    heartbeat_loop(hb_remote_db, &hb_client_id).await;
+    let _ = hb_done_tx.send(());
+  });
+
+  let jitter: u64 = rand::random::<u64>() % 300;
+  tokio::select! {
+    _ = tokio::time::sleep(Duration::from_secs(3600 + jitter)) => {
+      tracing::debug!("RemoteDbActor: re-auth timer expired");
+    }
+    _ = &mut hb_done_rx => {
+      tracing::warn!("RemoteDbActor: heartbeat task died, triggering re-auth");
+    }
+  }
+}
+
 /// Look up the client record by hardware_hash and return its record id string.
 async fn lookup_client_id(remote_db: &Surreal<Any>, hardware_hash: &str) -> String {
   let hash = hardware_hash.to_owned();
@@ -489,23 +529,26 @@ async fn lookup_client_id(remote_db: &Surreal<Any>, hardware_hash: &str) -> Stri
 }
 
 /// Load session from LocalDbActor, creating a new one if none exists.
-async fn load_or_get_session(local_db_addr: &actix::Addr<LocalDbActor>) -> Option<Session> {
+async fn load_or_get_session(
+  local_db_addr: &actix::Addr<LocalDbActor>,
+  hardware_hash: &str,
+) -> Option<Session> {
   match local_db_addr.send(GetSession).await {
     Ok(Ok(session)) => Some(session),
     Ok(Err(e)) => {
       // LocalDbActor stub returns error — fall back to creating session directly
       tracing::warn!("RemoteDbActor: GetSession returned error: {e}. Creating session directly.");
-      create_session_directly().await
+      create_session_directly(hardware_hash).await
     }
     Err(e) => {
       tracing::error!("RemoteDbActor: failed to send GetSession: {e}. Creating session directly.");
-      create_session_directly().await
+      create_session_directly(hardware_hash).await
     }
   }
 }
 
 /// Create a new session directly from the local DB (fallback when LocalDbActor is a stub).
-async fn create_session_directly() -> Option<Session> {
+async fn create_session_directly(hardware_hash: &str) -> Option<Session> {
   use remex_core::db::DbOperator;
 
   use crate::db::endpoint::SessionData;
@@ -516,19 +559,12 @@ async fn create_session_directly() -> Option<Session> {
       return None;
     }
   };
-  let hardware_hash = match machine_uid::get() {
-    Ok(h) => h,
-    Err(e) => {
-      tracing::warn!("RemoteDbActor: failed to get machine uid for session: {e}");
-      String::new()
-    }
-  };
   let repo = SurrealSessionRepo { db: local_db };
   match repo
     .create(SessionData {
       client_id: None,
       client_name: Some(gethostname::gethostname().to_string_lossy().to_string()),
-      hardware_hash: Some(hardware_hash),
+      hardware_hash: Some(hardware_hash.to_string()),
       db_addr: None,
       tkn: None,
       secret: None,
@@ -568,8 +604,6 @@ async fn persist_session_after_signup(
 
 #[cfg(test)]
 mod remote_db_tests {
-  use std::sync::Arc;
-
   use actix::prelude::*;
   use remex_core::db::model::executions::Execution;
   use surrealdb::{
@@ -581,16 +615,11 @@ mod remote_db_tests {
     ClearConnection,
     ConnectionFailed,
     ConnectionSucceeded,
+    GetPendingCount,
     PushExecution,
     RemoteDbActor,
   };
-  use crate::async_tasks::{
-    jobs::{
-      scheduler::SchedulerActor,
-      RealJobExecutor,
-    },
-    local_db::LocalDbActor,
-  };
+  use crate::async_tasks::local_db::LocalDbActor;
 
   // ── Helpers ──
 
@@ -610,23 +639,25 @@ mod remote_db_tests {
     }
   }
 
-  fn setup_actor() -> (Addr<RemoteDbActor>, Addr<LocalDbActor>, Addr<SchedulerActor>) {
-    let executor = Arc::new(RealJobExecutor);
-    let scheduler_addr = SchedulerActor::new(executor).start();
+  fn setup_actor() -> (Addr<RemoteDbActor>, Addr<LocalDbActor>) {
     let local_db_addr = LocalDbActor::new().start();
-    let remote_db_addr =
-      RemoteDbActor::new("memory".to_string(), None, local_db_addr.clone(), scheduler_addr.clone())
-        .start();
-    (remote_db_addr, local_db_addr, scheduler_addr)
+    let remote_db_addr = RemoteDbActor::new(
+      "memory".to_string(),
+      None,
+      "test-hash".to_string(),
+      local_db_addr.clone(),
+    )
+    .start();
+    (remote_db_addr, local_db_addr)
   }
 
   // ── Tests ──
 
   #[actix::test]
   async fn push_queues_when_disconnected() {
-    let (remote_db_addr, _local_db, _scheduler) = setup_actor();
+    let (remote_db_addr, _local_db) = setup_actor();
 
-    // Send a push while not connected
+    // Send a push while not connected — should queue
     let exec = make_test_execution();
     remote_db_addr
       .send(PushExecution {
@@ -637,33 +668,35 @@ mod remote_db_tests {
       .unwrap()
       .unwrap();
 
-    // Give the actor time to process
-    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-    // If we got here without panic, the queueing worked
+    // Should be queued (not sent to remote)
+    let count = remote_db_addr.send(GetPendingCount).await.unwrap();
+    assert_eq!(count, 1, "execution should be queued when disconnected");
   }
 
   #[actix::test]
   async fn push_does_not_panic_when_disconnected() {
-    let (remote_db_addr, _local_db, _scheduler) = setup_actor();
+    let (remote_db_addr, _local_db) = setup_actor();
 
     // Send multiple pushes while disconnected
     for i in 0..5 {
       let exec = make_test_execution();
-      let _ = remote_db_addr
+      remote_db_addr
         .send(PushExecution {
           cache_id: format!("test-cache-{i}"),
           execution: exec,
         })
         .await
+        .unwrap()
         .unwrap();
     }
 
-    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+    let count = remote_db_addr.send(GetPendingCount).await.unwrap();
+    assert_eq!(count, 5, "all 5 executions should be queued when disconnected");
   }
 
   #[actix::test]
   async fn connection_succeeded_sets_state() {
-    let (remote_db_addr, _local_db, _scheduler) = setup_actor();
+    let (remote_db_addr, _local_db) = setup_actor();
 
     // Send ConnectionSucceeded — should set connected state
     let remote_db: Surreal<Any> = Surreal::init();
@@ -678,21 +711,54 @@ mod remote_db_tests {
       .await
       .unwrap();
 
+    // Give the actor time to process
     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-    // No panic = state transition works
+
+    // Push while connected — should NOT queue (will attempt remote CREATE,
+    // which may fail since memory DB doesn't have the execution table)
+    let exec = make_test_execution();
+    remote_db_addr
+      .send(PushExecution {
+        cache_id: "post-connect-push".to_string(),
+        execution: exec,
+      })
+      .await
+      .unwrap()
+      .unwrap();
+
+    // Give the spawned task time to process
+    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+    // The push should NOT have been queued (it was sent to remote instead)
+    let count = remote_db_addr.send(GetPendingCount).await.unwrap();
+    assert_eq!(count, 0, "push after connect should not be queued");
   }
 
   #[actix::test]
   async fn connection_failed_does_not_panic() {
-    let (remote_db_addr, _local_db, _scheduler) = setup_actor();
+    let (remote_db_addr, _local_db) = setup_actor();
 
     remote_db_addr.send(ConnectionFailed).await.unwrap();
     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+    // Push after failure should queue again
+    let exec = make_test_execution();
+    remote_db_addr
+      .send(PushExecution {
+        cache_id: "after-fail".to_string(),
+        execution: exec,
+      })
+      .await
+      .unwrap()
+      .unwrap();
+
+    let count = remote_db_addr.send(GetPendingCount).await.unwrap();
+    assert_eq!(count, 1, "push after connection failure should queue");
   }
 
   #[actix::test]
   async fn clear_connection_does_not_panic() {
-    let (remote_db_addr, _local_db, _scheduler) = setup_actor();
+    let (remote_db_addr, _local_db) = setup_actor();
 
     remote_db_addr.send(ClearConnection).await.unwrap();
     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -700,7 +766,7 @@ mod remote_db_tests {
 
   #[actix::test]
   async fn push_after_connected_does_not_panic() {
-    let (remote_db_addr, _local_db, _scheduler) = setup_actor();
+    let (remote_db_addr, _local_db) = setup_actor();
 
     // Simulate connection
     let remote_db: Surreal<Any> = Surreal::init();
@@ -721,14 +787,19 @@ mod remote_db_tests {
     // Send push (will attempt remote CREATE, which may fail since memory DB
     // doesn't have the execution table defined — but shouldn't panic)
     let exec = make_test_execution();
-    let _ = remote_db_addr
+    remote_db_addr
       .send(PushExecution {
         cache_id: "push-after-connect".to_string(),
         execution: exec,
       })
       .await
+      .unwrap()
       .unwrap();
 
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    // The push was sent to remote (possibly failed on CREATE), but should NOT be queued
+    let count = remote_db_addr.send(GetPendingCount).await.unwrap();
+    assert_eq!(count, 0, "push after connect should not remain queued");
   }
 }
