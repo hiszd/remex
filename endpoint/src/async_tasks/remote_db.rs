@@ -316,7 +316,7 @@ async fn connection_loop(
           if let Err(e) = remote_db.use_ns("remex").use_db("remex").await {
             tracing::warn!("RemoteDbActor: failed to set ns/db after signin: {e}");
           }
-          let client_id = lookup_client_id(&remote_db, &hardware_hash).await;
+          let client_id = lookup_client_id(&remote_db, hardware_hash).await;
           tracing::info!("RemoteDbActor: signed in as {client_id}");
 
           addr.do_send(ConnectionSucceeded {
@@ -355,24 +355,21 @@ async fn connection_loop(
 
       if let Some(ref existing_id) = existing_client_id {
         tracing::warn!("RemoteDbActor: deleting stale client {existing_id}");
-        let rid = match surrealdb::types::RecordId::parse_simple(existing_id) {
-          Ok(rid) => rid,
-          Err(e) => {
-            tracing::error!("RemoteDbActor: invalid stale client ID {existing_id}: {e}");
-            // Can't parse the ID — skip deletion, let enrollment attempt handle it
-            // Use a sentinel to avoid the deletion query
-            continue;
+        if let Some(rid) = surrealdb::types::RecordId::parse_simple(existing_id).ok() {
+          match remote_db
+            .query("USE NS remex DB remex; DELETE FROM $id;")
+            .bind(("id", rid))
+            .await
+          {
+            Ok(_) => tracing::debug!("RemoteDbActor: deleted stale client {existing_id}"),
+            Err(e) => {
+              tracing::error!("RemoteDbActor: failed to delete stale client {existing_id}: {e}")
+            }
           }
-        };
-        match remote_db
-          .query("USE NS remex DB remex; DELETE FROM $id;")
-          .bind(("id", rid))
-          .await
-        {
-          Ok(_) => tracing::debug!("RemoteDbActor: deleted stale client {existing_id}"),
-          Err(e) => {
-            tracing::error!("RemoteDbActor: failed to delete stale client {existing_id}: {e}")
-          }
+        } else {
+          tracing::error!(
+            "RemoteDbActor: invalid stale client ID {existing_id}, skipping deletion"
+          );
         }
       }
 
@@ -397,7 +394,7 @@ async fn connection_loop(
           if let Err(e) = remote_db.use_ns("remex").use_db("remex").await {
             tracing::warn!("RemoteDbActor: failed to set ns/db after signup: {e}");
           }
-          let client_id = lookup_client_id(&remote_db, &hardware_hash).await;
+          let client_id = lookup_client_id(&remote_db, hardware_hash).await;
           tracing::info!("RemoteDbActor: signed up as {client_id}");
 
           // Persist session credentials
@@ -754,6 +751,45 @@ mod remote_db_tests {
 
     let count = remote_db_addr.send(GetPendingCount).await.unwrap();
     assert_eq!(count, 1, "push after connection failure should queue");
+  }
+
+  #[actix::test]
+  async fn queued_executions_are_drained_on_reconnect() {
+    let (remote_db_addr, _local_db) = setup_actor();
+
+    // Queue an execution while disconnected
+    let exec = make_test_execution();
+    remote_db_addr
+      .send(PushExecution {
+        cache_id: "drain-me".to_string(),
+        execution: exec,
+      })
+      .await
+      .unwrap()
+      .unwrap();
+
+    let count = remote_db_addr.send(GetPendingCount).await.unwrap();
+    assert_eq!(count, 1, "execution should be queued when disconnected");
+
+    // Connect — should trigger drain
+    let remote_db: Surreal<Any> = Surreal::init();
+    remote_db.connect("memory").await.unwrap();
+    remote_db.use_ns("remex").use_db("remex").await.unwrap();
+
+    remote_db_addr
+      .send(ConnectionSucceeded {
+        remote_db: remote_db.clone(),
+        client_id: "client:drain-test".to_string(),
+      })
+      .await
+      .unwrap();
+
+    // Give the drain time to process (drain spawns tasks)
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    // Queue should be empty after drain
+    let count = remote_db_addr.send(GetPendingCount).await.unwrap();
+    assert_eq!(count, 0, "pending executions should be drained on reconnect");
   }
 
   #[actix::test]
