@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use actix::prelude::*;
 use remex_core::db::{
   model::{
     groups::Group,
@@ -25,7 +24,6 @@ use super::{
 use crate::db::remex::{
   ExecutionCache,
   ExecutionCacheData,
-  SurrealExecutionCacheRepo,
 };
 
 pub async fn sync_groups(
@@ -641,131 +639,4 @@ async fn cleanup_old_executions() -> Result<(), crate::Error> {
 
   tracing::info!("Execution cleanup completed: {:?}", result);
   Ok(())
-}
-
-pub struct SyncActor {
-  remote_db: Option<Surreal<Any>>,
-}
-
-impl SyncActor {
-  pub fn new() -> Self { SyncActor { remote_db: None } }
-}
-
-#[derive(Message)]
-#[rtype(result = "()")]
-struct SyncTick;
-
-impl Actor for SyncActor {
-  type Context = Context<Self>;
-
-  fn started(&mut self, ctx: &mut Self::Context) {
-    ctx.notify_later(SyncTick, Duration::from_secs(30));
-  }
-}
-
-impl actix::Supervised for SyncActor {
-  fn restarting(&mut self, ctx: &mut Context<Self>) {
-    tracing::info!("SyncActor: restarting");
-    self.remote_db = None;
-    // Re-schedule the sync tick (started() is not called on restart)
-    ctx.notify_later(SyncTick, Duration::from_secs(30));
-  }
-}
-
-impl Handler<crate::async_tasks::ConnectionReady> for SyncActor {
-  type Result = ();
-
-  fn handle(&mut self, msg: crate::async_tasks::ConnectionReady, _ctx: &mut Self::Context) {
-    self.remote_db = msg.db;
-    tracing::info!("Sync actor received connection (db={})", self.remote_db.is_some());
-  }
-}
-
-impl Handler<SyncTick> for SyncActor {
-  type Result = ();
-
-  fn handle(&mut self, _msg: SyncTick, ctx: &mut Self::Context) {
-    let remote_db = self.remote_db.clone();
-    tokio::spawn(async move {
-      const CLEANUP_INTERVAL_SECS: u64 = 6 * 3600;
-
-      let remote_db = match remote_db {
-        Some(db) => db,
-        None => {
-          tracing::debug!("Remote DB not connected, skipping execution sync");
-          return;
-        }
-      };
-
-      let db = match crate::db::get_local_remex().await {
-        Ok(d) => d,
-        Err(e) => {
-          tracing::warn!("Failed to get local DB for execution sync: {}", e);
-          return;
-        }
-      };
-
-      // ---- Cleanup (same logic as before, no changes) ----
-      match crate::db::last_action::LastAction::should_skip(
-        &db,
-        "cleanup_executions",
-        CLEANUP_INTERVAL_SECS,
-      )
-      .await
-      {
-        Ok(false) => {
-          if let Err(e) = cleanup_old_executions().await {
-            tracing::warn!("Execution cleanup failed: {}", e);
-          } else {
-            if let Err(e) =
-              crate::db::last_action::LastAction::record(&db, "cleanup_executions").await
-            {
-              tracing::warn!("Failed to record cleanup timestamp: {}", e);
-            }
-            if let Err(e) = crate::db::last_action::LastAction::cleanup_old(&db).await {
-              tracing::warn!("Failed to purge old last_action records: {}", e);
-            }
-          }
-        }
-        Ok(true) => {}
-        Err(e) => {
-          tracing::warn!("Failed to check last_action for cleanup: {}", e);
-        }
-      }
-
-      // ---- Query unsynced executions (same as before) ----
-      let unsynced: Vec<crate::db::remex::ExecutionCache> = match db
-        .query("USE NS remex DB remex; SELECT * FROM execution WHERE synced = false;")
-        .await
-      {
-        Ok(res) => match res.check() {
-          Ok(mut r) => match r.take(1) {
-            Ok(v) => v,
-            Err(e) => {
-              tracing::warn!("Failed to take unsynced executions: {}", e);
-              return;
-            }
-          },
-          Err(e) => {
-            tracing::warn!("Failed to check unsynced executions: {}", e);
-            return;
-          }
-        },
-        Err(e) => {
-          tracing::warn!("Failed to query unsynced executions: {}", e);
-          return;
-        }
-      };
-
-      if unsynced.is_empty() {
-        return;
-      }
-
-      let repo = SurrealExecutionCacheRepo { db: db.clone() };
-      let count = push_unsynced_executions(unsynced, &repo, &remote_db).await;
-      tracing::info!("Pushed {count} unsynced executions to remote");
-    });
-
-    ctx.notify_later(SyncTick, Duration::from_secs(30));
-  }
 }

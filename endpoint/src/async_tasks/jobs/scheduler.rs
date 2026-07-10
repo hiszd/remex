@@ -40,13 +40,18 @@ impl Eq for ScheduledJob {
 pub struct SchedulerActor {
   heap: BinaryHeap<ScheduledJob>,
   executor: Arc<dyn JobExecutor>,
+  execution_recorder: actix::Recipient<crate::async_tasks::RecordExecution>,
 }
 
 impl SchedulerActor {
-  pub fn new(executor: Arc<dyn JobExecutor>) -> Self {
+  pub fn new(
+    executor: Arc<dyn JobExecutor>,
+    execution_recorder: actix::Recipient<crate::async_tasks::RecordExecution>,
+  ) -> Self {
     SchedulerActor {
       heap: BinaryHeap::new(),
       executor,
+      execution_recorder,
     }
   }
 }
@@ -80,9 +85,18 @@ impl Handler<InjectJob> for SchedulerActor {
       JobQueueMessage::Immediate { job, client_id } => {
         tracing::debug!("Immediate job received: {}", job.job_name);
         let executor = Arc::clone(&self.executor);
+        let execution_recorder = self.execution_recorder.clone();
         tokio::spawn(async move {
-          if let Err(e) = executor.execute(job, &client_id).await {
-            tracing::error!("Job execution failed Immediate: {}", e);
+          match executor.execute(job, &client_id).await {
+            Ok(Some(result)) => {
+              execution_recorder.do_send(crate::async_tasks::RecordExecution { result });
+            }
+            Ok(None) => {
+              tracing::debug!("Job skipped (already completed)");
+            }
+            Err(e) => {
+              tracing::error!("Job execution failed Immediate: {}", e);
+            }
           }
         });
       }
@@ -102,9 +116,18 @@ impl Handler<InjectJob> for SchedulerActor {
           self.schedule_next(ctx);
         } else {
           let executor = Arc::clone(&self.executor);
+          let execution_recorder = self.execution_recorder.clone();
           tokio::spawn(async move {
-            if let Err(e) = executor.execute(job, &client_id).await {
-              tracing::error!("Job execution failed: {}", e);
+            match executor.execute(job, &client_id).await {
+              Ok(Some(result)) => {
+                execution_recorder.do_send(crate::async_tasks::RecordExecution { result });
+              }
+              Ok(None) => {
+                tracing::debug!("Job skipped (already completed)");
+              }
+              Err(e) => {
+                tracing::error!("Job execution failed (scheduled past): {}", e);
+              }
             }
           });
         }
@@ -129,9 +152,18 @@ impl Handler<SchedulerWakeUp> for SchedulerActor {
         if let Some(scheduled) = self.heap.pop() {
           tracing::debug!("Scheduled job firing: {}", scheduled.job.job_name);
           let executor = Arc::clone(&self.executor);
+          let execution_recorder = self.execution_recorder.clone();
           tokio::spawn(async move {
-            if let Err(e) = executor.execute(scheduled.job, &scheduled.client_id).await {
-              tracing::error!("Job execution failed: {}", e);
+            match executor.execute(scheduled.job, &scheduled.client_id).await {
+              Ok(Some(result)) => {
+                execution_recorder.do_send(crate::async_tasks::RecordExecution { result });
+              }
+              Ok(None) => {
+                tracing::debug!("Job skipped (already completed)");
+              }
+              Err(e) => {
+                tracing::error!("Job execution failed (wake-up): {}", e);
+              }
             }
           });
         }
@@ -220,6 +252,18 @@ mod scheduler_tests {
     }
   }
 
+  #[derive(Default)]
+  struct MockLocalDb;
+
+  impl Actor for MockLocalDb {
+    type Context = Context<Self>;
+  }
+
+  impl Handler<crate::async_tasks::RecordExecution> for MockLocalDb {
+    type Result = ();
+    fn handle(&mut self, _msg: crate::async_tasks::RecordExecution, _ctx: &mut Self::Context) {}
+  }
+
   fn make_test_job(id: &str, name: &str) -> Job {
     Job {
       id: surrealdb::types::RecordId::new("job", id),
@@ -242,7 +286,8 @@ mod scheduler_tests {
     let executor = Arc::new(MockJobExecutor {
       calls: calls.clone(),
     });
-    let addr = SchedulerActor::new(executor).start();
+    let mock_db = MockLocalDb.start();
+    let addr = SchedulerActor::new(executor, mock_db.recipient()).start();
 
     let job = make_test_job("immediate-1", "immediate-test");
     addr
@@ -267,7 +312,8 @@ mod scheduler_tests {
     let executor = Arc::new(MockJobExecutor {
       calls: calls.clone(),
     });
-    let addr = SchedulerActor::new(executor).start();
+    let mock_db = MockLocalDb.start();
+    let addr = SchedulerActor::new(executor, mock_db.recipient()).start();
 
     let job = make_test_job("sched-future-1", "future-job");
     let future_time = Instant::now() + Duration::from_secs(3600);
@@ -293,7 +339,8 @@ mod scheduler_tests {
     let executor = Arc::new(MockJobExecutor {
       calls: calls.clone(),
     });
-    let addr = SchedulerActor::new(executor).start();
+    let mock_db = MockLocalDb.start();
+    let addr = SchedulerActor::new(executor, mock_db.recipient()).start();
 
     let job = make_test_job("sched-past-1", "past-job");
     let past_time = Instant::now() - Duration::from_secs(10);
@@ -321,7 +368,8 @@ mod scheduler_tests {
     let executor = Arc::new(MockJobExecutor {
       calls: calls.clone(),
     });
-    let addr = SchedulerActor::new(executor).start();
+    let mock_db = MockLocalDb.start();
+    let addr = SchedulerActor::new(executor, mock_db.recipient()).start();
 
     let job = make_test_job("remove-1", "remove-job");
     let future_time = Instant::now() + Duration::from_millis(50);
@@ -358,7 +406,8 @@ mod scheduler_tests {
     let executor = Arc::new(MockJobExecutor {
       calls: calls.clone(),
     });
-    let addr = SchedulerActor::new(executor).start();
+    let mock_db = MockLocalDb.start();
+    let addr = SchedulerActor::new(executor, mock_db.recipient()).start();
 
     let job = make_test_job("wakeup-1", "wakeup-job");
     let due_time = Instant::now() + Duration::from_millis(50);
@@ -387,7 +436,8 @@ mod scheduler_tests {
     let executor = Arc::new(MockJobExecutor {
       calls: calls.clone(),
     });
-    let addr = SchedulerActor::new(executor).start();
+    let mock_db = MockLocalDb.start();
+    let addr = SchedulerActor::new(executor, mock_db.recipient()).start();
 
     let job = make_test_job("not-due-1", "not-due-job");
     let far_future = Instant::now() + Duration::from_secs(3600);

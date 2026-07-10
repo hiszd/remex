@@ -10,8 +10,8 @@ use surrealdb::{
 
 use crate::{
   async_tasks::{
+    jobs::scheduler::SchedulerActor,
     local_db::LocalDbActor,
-    ConnectionReady,
     GetSession,
     MarkExecutionSynced,
     PushExecution,
@@ -25,11 +25,6 @@ use crate::{
     get_local_endpoint,
   },
 };
-
-/// Subscribe to ConnectionReady broadcasts (e.g. MonitorActor).
-#[derive(Message)]
-#[rtype(result = "()")]
-pub struct Subscribe(pub actix::Recipient<ConnectionReady>);
 
 // ── Internal messages for communication between connection_loop and actor ──
 
@@ -71,9 +66,7 @@ pub struct RemoteDbActor {
 
   // References to other actors
   local_db_addr: Addr<LocalDbActor>,
-
-  // Subscribers to ConnectionReady broadcasts
-  subscribers: Vec<actix::Recipient<ConnectionReady>>,
+  scheduler_addr: Addr<SchedulerActor>,
 }
 
 impl RemoteDbActor {
@@ -82,6 +75,7 @@ impl RemoteDbActor {
     enrollment_token: Option<String>,
     hardware_hash: String,
     local_db_addr: Addr<LocalDbActor>,
+    scheduler_addr: Addr<SchedulerActor>,
   ) -> Self {
     RemoteDbActor {
       db_url,
@@ -92,7 +86,7 @@ impl RemoteDbActor {
       connected: false,
       pending_executions: Vec::new(),
       local_db_addr,
-      subscribers: Vec::new(),
+      scheduler_addr,
     }
   }
 }
@@ -138,15 +132,6 @@ impl actix::Supervised for RemoteDbActor {
 
 // ── Message Handlers ──
 
-impl Handler<Subscribe> for RemoteDbActor {
-  type Result = ();
-
-  fn handle(&mut self, msg: Subscribe, _ctx: &mut Self::Context) {
-    self.subscribers.push(msg.0);
-    tracing::info!("RemoteDbActor: subscriber added (total {})", self.subscribers.len());
-  }
-}
-
 // ── Inbound connection state handlers ──
 
 impl Handler<PushExecution> for RemoteDbActor {
@@ -178,21 +163,26 @@ impl Handler<ConnectionSucceeded> for RemoteDbActor {
   fn handle(&mut self, msg: ConnectionSucceeded, _ctx: &mut Self::Context) {
     tracing::info!("RemoteDbActor: connection succeeded as {}", msg.client_id);
     let client_id = msg.client_id.clone();
-    self.remote_db = Some(msg.remote_db);
+    self.remote_db = Some(msg.remote_db.clone());
     self.client_id = Some(client_id.clone());
     self.connected = true;
 
     // Drain any queued executions
     self.drain_pending_executions();
 
-    // Notify subscribers that connection is ready
-    let ready_msg = ConnectionReady {
-      db: self.remote_db.clone(),
-      client_id: Some(client_id),
-    };
-    for sub in &self.subscribers {
-      sub.do_send(ready_msg.clone());
-    }
+    // Spawn LIVE SELECT tasks for job and group tables
+    let remote_db = msg.remote_db;
+    let scheduler_addr = self.scheduler_addr.clone();
+    let client_id_clone = client_id.clone();
+
+    tokio::spawn(async move {
+      spawn_live_select_tasks(
+        remote_db,
+        scheduler_addr,
+        client_id_clone,
+      )
+      .await;
+    });
   }
 }
 
@@ -628,6 +618,350 @@ async fn persist_session_after_signup(
   }
 }
 
+// ── LIVE SELECT Tasks ──
+
+/// Spawn LIVE SELECT tasks for job and group tables after successful connection.
+/// This replaces the old MonitorActor functionality.
+async fn spawn_live_select_tasks(
+  remote_db: Surreal<Any>,
+  scheduler_addr: Addr<SchedulerActor>,
+  client_id: String,
+) {
+  use std::sync::{
+    Arc,
+    Mutex,
+  };
+
+  use remex_core::db::{
+    model::jobs::Job,
+    DbOperator,
+  };
+  use surrealdb::types::RecordId;
+  use tokio_stream::StreamExt;
+
+  use crate::{
+    async_tasks::jobs::{
+      scheduler::InjectJob,
+      sync::{
+        full_sync,
+        sync_and_refill_queue,
+        sync_job_to_cache,
+      },
+      JobQueueMessage,
+    },
+    db::remex::SurrealJobCacheRepo,
+  };
+
+  tracing::info!("RemoteDbActor: spawn_live_select_tasks started for client {client_id}");
+
+  // ---- Load cached jobs from local DB ----
+  tracing::info!("RemoteDbActor: loading cached jobs from local database");
+  let cached_jobs: Vec<crate::db::remex::JobCache> = match crate::db::get_local_remex().await {
+    Ok(db) => match db.query("USE NS remex DB remex; SELECT * FROM job;").await {
+      Ok(res) => match res.check() {
+        Ok(mut r) => match r.take(1) {
+          Ok(v) => v,
+          Err(e) => {
+            tracing::warn!("RemoteDbActor: failed to deserialize local jobs: {e}");
+            vec![]
+          }
+        },
+        Err(e) => {
+          tracing::warn!("RemoteDbActor: failed to check local jobs: {e}");
+          vec![]
+        }
+      },
+      Err(e) => {
+        tracing::warn!("RemoteDbActor: failed to query local jobs: {e}");
+        vec![]
+      }
+    },
+    Err(e) => {
+      tracing::warn!("RemoteDbActor: failed to get local DB for cached jobs: {e}");
+      vec![]
+    }
+  };
+
+  tracing::info!(
+    "RemoteDbActor: loaded {} cached jobs from local database",
+    cached_jobs.len()
+  );
+
+  // Forward cached jobs to scheduler
+  for cached in cached_jobs {
+    let job = cached.job_info;
+    if let Some(exec_time) = crate::async_tasks::jobs::calculate_execution_time(&job.job_type) {
+      if let Err(e) = scheduler_addr
+        .send(InjectJob(JobQueueMessage::Scheduled {
+          job,
+          execution_time: exec_time,
+          client_id: client_id.clone(),
+        }))
+        .await
+      {
+        tracing::warn!("RemoteDbActor: failed to send cached scheduled job to scheduler: {e}");
+      }
+    } else {
+      if let Err(e) = scheduler_addr
+        .send(InjectJob(JobQueueMessage::Immediate {
+          job,
+          client_id: client_id.clone(),
+        }))
+        .await
+      {
+        tracing::warn!("RemoteDbActor: failed to send cached immediate job to scheduler: {e}");
+      }
+    }
+  }
+
+  // ---- Full sync from remote ----
+  tracing::info!("RemoteDbActor: calling full_sync (client_id={client_id})");
+  match full_sync(&client_id, &scheduler_addr, &remote_db).await {
+    Ok(()) => tracing::info!("RemoteDbActor: full_sync completed successfully"),
+    Err(e) => tracing::warn!("RemoteDbActor: full_sync failed: {e}"),
+  }
+
+  // ---- Set up LIVE SELECT streams ----
+  let id = match RecordId::parse_simple(&client_id) {
+    Ok(id) => id,
+    Err(_) => {
+      tracing::error!("RemoteDbActor: invalid client_id format: {client_id}");
+      return;
+    }
+  };
+
+  let mut job_stream = match remote_db.select::<Vec<Job>>("job").live().await {
+    Ok(s) => {
+      tracing::info!("RemoteDbActor: LIVE SELECT on job table created successfully");
+      s
+    }
+    Err(e) => {
+      tracing::warn!("RemoteDbActor: failed to create job live query: {e}");
+      return;
+    }
+  };
+
+  let mut group_stream = match remote_db
+    .select::<Vec<remex_core::db::model::groups::Group>>("group")
+    .live()
+    .await
+  {
+    Ok(s) => {
+      tracing::info!("RemoteDbActor: LIVE SELECT on group table created successfully");
+      s
+    }
+    Err(e) => {
+      tracing::warn!("RemoteDbActor: failed to create group live query: {e}");
+      return;
+    }
+  };
+
+  // Shared group state
+  let groups = Arc::new(Mutex::new(Vec::<RecordId>::new()));
+
+  tracing::info!("RemoteDbActor: entering LIVE SELECT notification loop");
+
+  loop {
+    tokio::select! {
+      notification = job_stream.next() => {
+        match notification {
+          Some(Ok(notification)) => {
+            // Check assignment — lock, check, drop before any await
+            let is_assigned = {
+              let groups_guard = groups.lock().unwrap();
+              notification.data.assignments.contains(&id)
+                || notification.data.assignments.iter().any(|g| groups_guard.contains(g))
+            };
+            if !is_assigned {
+              tracing::debug!("RemoteDbActor: job {} not assigned, skipping", notification.data.job_name);
+              continue;
+            }
+
+            match notification.action {
+              surrealdb::types::Action::Create => {
+                let enabled = notification.data.enabled == remex_core::db::model::jobs::Enabled::Enabled;
+                tracing::debug!(
+                  "RemoteDbActor: job created: {} enabled={enabled}",
+                  notification.data.job_name,
+                );
+                let job = notification.data.clone();
+                let job_id = job.id.clone();
+
+                // Cache the new job locally using seam function
+                if let Ok(local_db) = crate::db::get_local_remex().await {
+                  let repo = SurrealJobCacheRepo { db: local_db.clone() };
+                  let existing = match repo.list().await {
+                    Ok(caches) => caches.into_iter().find(|c| c.job_id == job_id.to_sql()),
+                    Err(e) => {
+                      tracing::warn!("RemoteDbActor: failed to list job cache: {e}");
+                      None
+                    }
+                  };
+
+                  if let Err(e) = sync_job_to_cache(&job, existing.as_ref(), &repo).await {
+                    tracing::error!("RemoteDbActor: failed to cache job {}: {e}", job.job_name);
+                  }
+
+                  // Mark job incomplete (new jobs should be re-executed)
+                  if let Err(e) = local_db
+                    .query(
+                      r"USE NS remex DB remex;
+                        LET $cached = (SELECT * FROM job WHERE job_id = $job_id LIMIT 1)[0];
+                        IF $cached != NONE { UPDATE $cached.id SET completed = false; };",
+                    )
+                    .bind(("job_id", job_id.to_sql()))
+                    .await
+                  {
+                    tracing::error!("RemoteDbActor: failed to mark job {} as incomplete: {e}", job.job_name);
+                  }
+                }
+
+                // Inject into scheduler if enabled
+                if enabled {
+                  if let Some(exec_time) = crate::async_tasks::jobs::calculate_execution_time(&job.job_type) {
+                    if let Err(e) = scheduler_addr
+                      .send(InjectJob(JobQueueMessage::Scheduled {
+                        job,
+                        execution_time: exec_time,
+                        client_id: client_id.clone(),
+                      }))
+                      .await
+                    {
+                      tracing::warn!("RemoteDbActor: failed to inject scheduled job: {e}");
+                    }
+                  } else {
+                    if let Err(e) = scheduler_addr
+                      .send(InjectJob(JobQueueMessage::Immediate {
+                        job,
+                        client_id: client_id.clone(),
+                      }))
+                      .await
+                    {
+                      tracing::warn!("RemoteDbActor: failed to inject immediate job: {e}");
+                    }
+                  }
+                }
+              }
+              surrealdb::types::Action::Update => {
+                tracing::debug!("RemoteDbActor: job updated: {}", notification.data.job_name);
+                let updated_job = notification.data.clone();
+
+                // Update local cache using seam function
+                if let Ok(local_db) = crate::db::get_local_remex().await {
+                  let repo = SurrealJobCacheRepo { db: local_db.clone() };
+                  let existing = match repo.list().await {
+                    Ok(caches) => caches.into_iter().find(|c| c.job_id == updated_job.id.to_sql()),
+                    Err(e) => {
+                      tracing::warn!("RemoteDbActor: failed to list job cache: {e}");
+                      None
+                    }
+                  };
+
+                  if let Err(e) = sync_job_to_cache(&updated_job, existing.as_ref(), &repo).await {
+                    tracing::error!("RemoteDbActor: failed to cache updated job: {e}");
+                  }
+                }
+
+                // Re-inject if enabled
+                if notification.data.enabled == remex_core::db::model::jobs::Enabled::Enabled {
+                  if let Err(e) = scheduler_addr
+                    .send(InjectJob(JobQueueMessage::Remove { id: notification.data.id.clone() }))
+                    .await
+                  {
+                    tracing::warn!("RemoteDbActor: failed to remove updated job: {e}");
+                  }
+
+                  let job = notification.data.clone();
+                  if let Some(exec_time) = crate::async_tasks::jobs::calculate_execution_time(&job.job_type) {
+                    if let Err(e) = scheduler_addr
+                      .send(InjectJob(JobQueueMessage::Scheduled {
+                        job,
+                        execution_time: exec_time,
+                        client_id: client_id.clone(),
+                      }))
+                      .await
+                    {
+                      tracing::warn!("RemoteDbActor: failed to inject updated scheduled job: {e}");
+                    }
+                  } else {
+                    if let Err(e) = scheduler_addr
+                      .send(InjectJob(JobQueueMessage::Immediate {
+                        job,
+                        client_id: client_id.clone(),
+                      }))
+                      .await
+                    {
+                      tracing::warn!("RemoteDbActor: failed to inject updated immediate job: {e}");
+                    }
+                  }
+                }
+              }
+              surrealdb::types::Action::Delete | surrealdb::types::Action::Killed => {
+                tracing::info!("RemoteDbActor: job removed: {}", notification.data.job_name);
+                if let Err(e) = scheduler_addr
+                  .send(InjectJob(JobQueueMessage::Remove { id: notification.data.id.clone() }))
+                  .await
+                {
+                  tracing::warn!("RemoteDbActor: failed to remove deleted job: {e}");
+                }
+              }
+            }
+          }
+          Some(Err(err)) => {
+            tracing::error!("RemoteDbActor: job stream error: {:#?}", err);
+          }
+          None => {
+            tracing::warn!("RemoteDbActor: job stream ended");
+            break;
+          }
+        }
+      }
+      group_notification = group_stream.next() => {
+        match group_notification {
+          Some(Ok(notification)) => {
+            let groups_clone = {
+              let mut groups_guard = groups.lock().unwrap();
+              match notification.action {
+                surrealdb::types::Action::Create => {
+                  if notification.data.members.contains(&id) {
+                    groups_guard.push(notification.data.id.clone());
+                  }
+                }
+                surrealdb::types::Action::Update => {
+                  if !notification.data.members.contains(&id) {
+                    groups_guard.retain(|g| g != &notification.data.id);
+                  } else {
+                    groups_guard.retain(|g| g != &notification.data.id);
+                    groups_guard.push(notification.data.id.clone());
+                  }
+                }
+                surrealdb::types::Action::Delete | surrealdb::types::Action::Killed => {
+                  groups_guard.retain(|g| g != &notification.data.id);
+                }
+              }
+              groups_guard.clone()
+            };
+
+            // Re-sync jobs after group change
+            if let Err(e) = sync_and_refill_queue(&scheduler_addr, &client_id, &groups_clone, &remote_db).await {
+              tracing::warn!("RemoteDbActor: sync_and_refill_queue failed: {e}");
+            }
+          }
+          Some(Err(err)) => {
+            tracing::error!("RemoteDbActor: group stream error: {:#?}", err);
+          }
+          None => {
+            tracing::warn!("RemoteDbActor: group stream ended");
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  tracing::info!("RemoteDbActor: LIVE SELECT tasks ended");
+}
+
 // ── Tests ──
 
 #[cfg(test)]
@@ -668,12 +1002,22 @@ mod remote_db_tests {
   }
 
   fn setup_actor() -> (Addr<RemoteDbActor>, Addr<LocalDbActor>) {
+    use std::sync::Arc;
+
+    use crate::async_tasks::jobs::{
+      scheduler::SchedulerActor,
+      RealJobExecutor,
+    };
+
     let local_db_addr = LocalDbActor::new().start();
+    let mock_recorder = local_db_addr.clone().recipient();
+    let scheduler_addr = SchedulerActor::new(Arc::new(RealJobExecutor), mock_recorder).start();
     let remote_db_addr = RemoteDbActor::new(
       "memory".to_string(),
       None,
       "test-hash".to_string(),
       local_db_addr.clone(),
+      scheduler_addr,
     )
     .start();
     (remote_db_addr, local_db_addr)

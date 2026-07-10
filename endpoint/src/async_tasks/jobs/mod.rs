@@ -7,7 +7,6 @@ use surrealdb::types::RecordId;
 use tokio::time::Instant;
 
 pub mod execution;
-pub mod monitor;
 pub mod scheduler;
 pub mod sync;
 

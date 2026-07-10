@@ -9,16 +9,11 @@ mod db;
 use actix::Supervisor;
 use async_tasks::{
   jobs::{
-    monitor::MonitorActor,
     scheduler::SchedulerActor,
     RealJobExecutor,
   },
   local_db::LocalDbActor,
-  remote_db::{
-    RemoteDbActor,
-    Subscribe,
-  },
-  ConnectionReady,
+  remote_db::RemoteDbActor,
   SetRemoteDbAddr,
 };
 
@@ -75,29 +70,30 @@ async fn main() -> Result<(), Error> {
 
   // Start LocalDbActor — owns local SurrealKV, session, execution cache
   let local_db_addr = Supervisor::start(|_| LocalDbActor::new());
-  let local_db_addr_2 = local_db_addr.clone();
 
-  // Start RemoteDbActor — owns remote connection, auth, heartbeat, execution push
+  // Start SchedulerActor — job queue, spawns execute_job tasks, sends RecordExecution to LocalDbActor
+  let local_db_for_scheduler = local_db_addr.clone();
+  let scheduler_addr = Supervisor::start(move |_| {
+    SchedulerActor::new(
+      Arc::new(RealJobExecutor),
+      local_db_for_scheduler.recipient(),
+    )
+  });
+
+  // Start RemoteDbActor — owns remote connection, auth, heartbeat, execution push, LIVE SELECT
+  let local_db_for_remote = local_db_addr.clone();
   let remote_db_addr = Supervisor::start(move |_| {
     RemoteDbActor::new(
       args.db_url.clone(),
       args.enrollment_token.clone(),
       hardware_hash.clone(),
-      local_db_addr_2.clone(),
+      local_db_for_remote,
+      scheduler_addr.clone(),
     )
   });
 
   // Wire up RemoteDbActor address to LocalDbActor (for execution sync)
   local_db_addr.do_send(SetRemoteDbAddr(remote_db_addr.clone()));
-
-  // Start SchedulerActor — job queue, spawns execute_job tasks
-  let scheduler_addr = Supervisor::start(|_| SchedulerActor::new(Arc::new(RealJobExecutor)));
-
-  // Start MonitorActor — LIVE SELECT streams on job/group tables
-  let monitor_addr = Supervisor::start(move |_| MonitorActor::new(scheduler_addr.clone()));
-
-  // Subscribe MonitorActor to RemoteDbActor's ConnectionReady broadcasts
-  remote_db_addr.do_send(Subscribe(monitor_addr.recipient::<ConnectionReady>()));
 
   loop {
     tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
