@@ -133,7 +133,7 @@ pub async fn execute_job(
 
   let timeout = job.timeout.as_ref().map(|d| {
     let secs = d.as_secs().max(1);
-    Duration::from_secs(secs as u64)
+    Duration::from_secs(secs)
   });
 
   let running_execution = Execution {
@@ -147,7 +147,7 @@ pub async fn execute_job(
     output: String::new(),
     command: job.job_command.clone(),
     exit_code: String::new(),
-    execution_start: time_start.clone(),
+    execution_start: time_start,
     execution_end: None,
     created_at: surrealdb::types::Datetime::now(),
     updated_at: surrealdb::types::Datetime::now(),

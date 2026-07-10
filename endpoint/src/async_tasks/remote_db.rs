@@ -386,7 +386,7 @@ async fn connection_loop(
 
       if let Some(ref existing_id) = existing_client_id {
         tracing::warn!("RemoteDbActor: deleting stale client {existing_id}");
-        if let Some(rid) = surrealdb::types::RecordId::parse_simple(existing_id).ok() {
+        if let Ok(rid) = surrealdb::types::RecordId::parse_simple(existing_id) {
           match remote_db
             .query("USE NS remex DB remex; DELETE FROM $id;")
             .bind(("id", rid))
