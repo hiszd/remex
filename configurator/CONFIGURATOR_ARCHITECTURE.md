@@ -9,6 +9,7 @@ The **Remex Configurator** is a Vue.js 3 single-page application (SPA) that serv
 - **Organize clients into groups** — for bulk job assignment
 - **Monitor job execution status** — Pending, Running, Completed, Failed, TimedOut
 - **Assign jobs to individual clients or groups**
+- **Generate enrollment tokens** — for first-time endpoint registration
 
 Critically, the configurator connects **directly to SurrealDB** via WebSocket — there is no REST API middleware. The server's web API was removed entirely as an architectural simplification.
 
@@ -29,10 +30,10 @@ Critically, the configurator connects **directly to SurrealDB** via WebSocket �
 
 ### Dual Token Architecture
 
-Three tokens stored in `sessionStorage`:
-- **Access token** — JWT with 15-minute expiry
+Three auth values stored in `sessionStorage`:
+- **Access token** — JWT with 15-minute (`15m`) expiry
 - **Email** — User's email for loading the user record
-- **Refresh token** — Server-side token stored in `refresh_token` DB table (7-day expiry)
+- **Refresh token** — Server-side token stored in the `refresh_token` DB table (7-day expiry)
 
 ### Session Lifecycle
 
@@ -56,14 +57,18 @@ Three protective mechanisms run globally:
 | `/login` | `LoginView.vue` | Email/password sign-in |
 | `/register` | `RegisterView.vue` | Username/email/password registration |
 | `/` | `DashboardView.vue` | System overview with stats cards and recent jobs |
-| `/jobs` | `JobsView.vue` | List all jobs in card grid |
+| `/jobs` | `JobsView.vue` | List all jobs |
 | `/jobs/new` | `CreateJobView.vue` | Job creation form (name, shell, command, timeout, state) |
-| `/jobs/:id` | `JobDetailsView.vue` | View/edit/delete job, manage assignments |
+| `/jobs/:id` | `JobDetailsView.vue` | View/edit/delete job, manage assignments, view executions |
 | `/clients` | `ClientsView.vue` | List all registered clients |
 | `/clients/:id` | `ClientDetailsView.vue` | View client info, assigned jobs, groups |
 | `/groups` | `GroupsView.vue` | List all client groups |
 | `/groups/new` | `CreateGroupView.vue` | Group creation form |
 | `/groups/:id` | `GroupDetailsView.vue` | View/edit/delete group, manage members, assigned jobs |
+| `/tokens` | `TokensView.vue` | List enrollment tokens |
+| `/tokens/new` | `CreateTokenView.vue` | Generate a new enrollment token |
+| `/tokens/:id` | `TokenDetailsView.vue` | View token details |
+| `/executions/:id` | `ExecutionDetailsView.vue` | View execution output and metadata |
 
 ## Data Flow
 
@@ -107,11 +112,15 @@ const mutation = useMutation({
 
 | Component | Purpose |
 |-----------|---------|
-| **AppSidebar.vue** | Collapsible navigation with Home/Jobs/Groups/Clients links, user avatar, logout button. State persisted to localStorage. |
+| **DesignSidebar.vue** | Collapsible sidebar navigation with icon + label nav items, user avatar, and logout. Auto-collapses on small screens. |
+| **DesignTopBar.vue** | Top bar showing the current page title/breadcrumbs, hamburger toggle, and optional search input. |
+| **Client.vue** | Card component for displaying a single client record. |
+| **ClientTree.vue** | Hierarchical client display component. |
+| **MultiSelector.vue** | Assignment/member management with view/edit modes. Shows selectable items (clients, groups) with nested member lists. |
+| **ConfirmationModal.vue** | Generic confirmation dialog with Teleport, overlay click-to-dismiss, and danger variant. |
 | **QueryState.vue** | Generic wrapper for loading/error/empty states. Slots actual content when data is ready. |
-| **MultiSelector.vue** | Assignment management with view/edit modes. Shows selectable items (clients, groups) with nested member lists. |
-| **ConfirmationModal.vue** | Generic confirmation dialog with Teleport, overlay click-to-dismiss, danger variant. |
-| **Job.vue / Client1.vue / Group.vue** | Card components for list views with status badges and detail links. |
+
+> **Removed components:** `AppSidebar.vue`, `Job.vue`, `Group.vue`, and `Client1.vue` were replaced by the design-system sidebar, data-table rows, and shared card patterns.
 
 ## Design System
 
@@ -135,3 +144,5 @@ All global styles in `App.vue` with comprehensive design tokens:
 4. **Object-typed enums** — SurrealDB has no native enum type. Uses single-key objects: `{ Pending: {} }`, `{ Enabled: {} }`, etc. TypeScript types mirror this pattern.
 
 5. **Snake_case DB fields** — All views use actual DB field names (snake_case) rather than camelCase conversions. `FIELD_LABELS` map provides human-readable display names.
+
+6. **Tokens stored in `sessionStorage`** — Access token, email, and refresh token handle are kept in `sessionStorage` (not `localStorage`) so they do not persist across browser sessions.

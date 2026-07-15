@@ -2,7 +2,9 @@
 
 ## Purpose
 
-**Remex Core** is the shared library that holds all common logic for both the Remex Server and Remex Endpoint. It provides the communication protocol, encryption, actor system, database abstractions, and all domain data models. By centralizing these concerns, both binaries use identical types, serialization, and database logic without duplication.
+**Remex Core** is the shared library that holds all common logic for the Remex Endpoint and the transitional Remex Server. It provides the communication protocol, encryption, actor system, database abstractions, and all domain data models. By centralizing these concerns, both binaries use identical types, serialization, and database logic without duplication.
+
+The server actors (`RemexServer`, `RemexSession`) and the TCP codec are still present in `core`, but they are now used only by the transitional `server/` crate. The **endpoint does not connect to the server**; it authenticates directly to SurrealDB via `endpoint_access`.
 
 ## Module Organization
 
@@ -15,22 +17,24 @@ core/src/
 │   ├── mod.rs          # DbOperator trait, migrate(), BearerGrantResponse
 │   ├── connection.rs   # DbClients struct (local + remote DB holder)
 │   └── model/
-│       ├── clients.rs      # Client model + endpoint BEARER access
+│       ├── clients.rs      # Client model + endpoint_access
 │       ├── executions.rs   # Execution model + indexes
 │       ├── groups.rs       # Group model + audit event
 │       ├── jobs.rs         # Job model + computed execution_status
 │       ├── users.rs        # User model + configurator_access
-│       ├── refresh_tokens.rs # RefreshToken model
+│       ├── refresh_tokens.rs # RefreshToken model (table: refresh_token)
 │       ├── audit.rs        # AuditLog model (append-only)
 │       └── config.rs       # Config tables (separate database)
 └── actors/
-    ├── server.rs       # RemexServer actor (singleton hub)
+    ├── server.rs       # RemexServer actor (singleton hub) — used by transitional server crate
     ├── server/msg.rs   # ClientConnect, ClientDisconnect handlers
     ├── session.rs      # RemexSession actor (per-connection TCP handler)
     └── session/msg.rs  # SignupClient, SigninClient, Disconnect handlers
 ```
 
 ## Communication Protocol
+
+> **Note:** The TCP protocol described in this section is retained for the transitional `server/` crate. Current endpoints authenticate directly to SurrealDB over WebSocket and do **not** use this TCP protocol.
 
 ### Packet System
 
@@ -144,6 +148,8 @@ pub enum ServerResponse {
 
 ## Actor System
 
+> **Note:** The actors in this section are used only by the transitional `server/` crate. The endpoint uses its own Actix actors (`SchedulerActor`, `RemoteDbActor`, `LocalDbActor`) defined in the `endpoint` crate.
+
 ### Hierarchy
 
 ```
@@ -256,13 +262,13 @@ pub async fn migrate(db: &Surreal<Any>) -> Result<(), DbError>
 ```
 
 Runs migrations in order:
-1. `Client::migrate` → `remex` DB
-2. `Execution::migrate` → `remex` DB
-3. `Group::migrate` → `remex` DB
-4. `Job::migrate` → `remex` DB
-5. `User::migrate` → `remex` DB
-6. `RefreshToken::migrate` → `remex` DB
-7. `AuditLog::migrate` → `remex` DB
+1. `Client::migrate` → `client` table
+2. `Execution::migrate` → `execution` table
+3. `Group::migrate` → `group` table
+4. `Job::migrate` → `job` table
+5. `User::migrate` → `user` table
+6. `RefreshToken::migrate` → `refresh_token` table
+7. `AuditLog::migrate` → `audit_log` table
 8. `Config::migrate` → `config` DB (separate database)
 
 ### DbClients
@@ -294,16 +300,17 @@ Executes `ACCESS endpoint GRANT FOR RECORD <id>` to generate a 1-day BEARER toke
 | Field | Type | Notes |
 |-------|------|-------|
 | `client_name` | `string` | |
-| `secret` | `string` | Auto argon2-hashed via `VALUE crypto::argon2::generate($value)` |
+| `secret` | `string` | Stored as a plain string; argon2 hashing is performed by the `endpoint_access` SIGNUP/SIGNIN access method |
 | `hardware_hash` | `string` | UNIQUE index |
+| `blocked` | `bool` | DEFAULT `false`; admin revocation switch |
 | `last_seen` | `option<datetime>` | Connection tracking |
-| `connection_history` | `array<object>` | Default `[]` |
+| `connection_history` | `array<object>` | Default `[]`, trimmed to last 100 entries |
 | `created_at` | `datetime` | READONLY, default `now()` |
 | `updated_at` | `datetime` | READONLY, value `now()` |
 
-**Access**: `DEFINE ACCESS endpoint ON DATABASE TYPE BEARER FOR RECORD DURATION FOR GRANT 1d`
+**Access**: `DEFINE ACCESS endpoint_access ON DATABASE TYPE RECORD` with SIGNUP (enrollment token) and SIGNIN (`hardware_hash` + `secret`) `DURATION FOR TOKEN 1d`.
 
-**Audit**: `DEFINE EVENT audit_client` fires on CREATE/UPDATE/DELETE
+**Audit**: No `DEFINE EVENT` is currently defined for `client`. Audit events exist only for `job` and `group`.
 
 ---
 
@@ -324,12 +331,17 @@ Executes `ACCESS endpoint GRANT FOR RECORD <id>` to generate a 1-day BEARER toke
 | `created_at` | `datetime` | READONLY |
 | `updated_at` | `datetime` | READONLY |
 
-**Computed `execution_status` logic:**
+**Computed `execution_status` logic (latest execution per endpoint):**
+
+A job's status is determined by the *most recent* execution for each endpoint targeted by the job's assignments:
+
 1. No executions → `{ Pending: {} }`
-2. Any Failed → `{ Failed: {} }`
-3. ALL TimedOut → `{ TimedOut: {} }`
-4. ALL Completed → `{ Completed: {} }`
+2. If the latest execution for any targeted endpoint is `Failed` → `{ Failed: {} }`
+3. If the latest execution for every targeted endpoint is `TimedOut` → `{ TimedOut: {} }`
+4. If the latest execution for every targeted endpoint is `Completed` → `{ Completed: {} }`
 5. Otherwise → `{ Running: {} }`
+
+This matches ADR 0001.
 
 **Audit**: `DEFINE EVENT audit_job` fires on CREATE/UPDATE/DELETE
 
@@ -377,8 +389,8 @@ Executes `ACCESS endpoint GRANT FOR RECORD <id>` to generate a 1-day BEARER toke
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `table_name` | `string` | `"job"`, `"client"`, `"group"` |
-| `record_id` | `record<job | client | group>` | Polymorphic reference |
+| `table_name` | `string` | `"job"`, `"group"` ( `"client"` audit is not currently implemented) |
+| `record_id` | `record<job | group>` | Polymorphic reference |
 | `action` | `string` | `"CREATE"`, `"UPDATE"`, `"DELETE"` |
 | `before_snapshot` | `object FLEXIBLE` | State before change |
 | `after_snapshot` | `object FLEXIBLE` | State after change |
@@ -441,8 +453,8 @@ Executes `ACCESS endpoint GRANT FOR RECORD <id>` to generate a 1-day BEARER toke
 | `Packet` | Fragmented message unit with header + payload |
 | `Message` | String + packets wrapper with fragmentation/reassembly |
 | `MessageContents` | Command/Secret/Log classification by prefix |
-| `ClientRequest` | Endpoint→Server protocol messages |
-| `ServerResponse` | Server→Endpoint protocol messages |
+| `ClientRequest` | Endpoint→Server protocol messages (legacy TCP path) |
+| `ServerResponse` | Server→Endpoint protocol messages (legacy TCP path) |
 | `DisconnectReason` | Disconnect cause enumeration |
 | `DbError` | Database error enumeration |
 | `DbOperator<T, U>` | CRUD trait for all models |
@@ -462,13 +474,16 @@ Executes `ACCESS endpoint GRANT FOR RECORD <id>` to generate a 1-day BEARER toke
 `ClientCodec` and `ServerCodec` are mirror images — what one encodes, the other decodes. Both use the same AES key, nonce generation, and framing format. This ensures protocol compatibility without duplicated logic.
 
 ### Computed Fields
-The `execution_status` field on `job` is COMPUTED — derived from execution records at query time rather than stored. This ensures the status is always accurate without requiring application-level synchronization.
+The `execution_status` field on `job` is COMPUTED — derived from execution records at query time rather than stored. The computation considers only the latest execution per targeted endpoint, ensuring the status reflects current reality without application-level synchronization.
 
 ### Audit Events via SurrealDB
-Audit logging uses `DEFINE EVENT` triggers that fire automatically on CREATE/UPDATE/DELETE. This ensures the audit trail is always consistent with the actual data changes, even if changes come from different sources (configurator, endpoint, direct DB access).
+Audit logging uses `DEFINE EVENT` triggers that fire automatically on CREATE/UPDATE/DELETE for `job` and `group`. This ensures the audit trail is consistent with actual data changes, even when changes come from different sources (configurator, endpoint, direct DB access). A `client` audit event is not currently implemented.
 
 ### Separate Config Database
 The `config` database is separate from the `remex` database. This isolates UI preferences and user configuration from operational data, allowing independent backup, migration, and access control.
 
 ### DbOperator Pattern
-All models implement the same `DbOperator<T, U>` trait, providing a uniform CRUD interface. The endpoint's local SurrealKV database uses the same trait as the server's remote database, enabling identical query patterns across both.
+All models implement the same `DbOperator<T, U>` trait, providing a uniform CRUD interface. The endpoint's local SurrealKV database uses the same trait as the core remote database, enabling identical query patterns across both.
+
+### Direct Database Authentication
+The endpoint authenticates directly to SurrealDB via `endpoint_access` using an enrollment token for SIGNUP and `hardware_hash` + `secret` for SIGNIN. The legacy TCP server path still exists in the `server/` crate but is no longer used by endpoints.

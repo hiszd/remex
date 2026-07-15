@@ -6,7 +6,7 @@
 
 ## Table of Contents
 
-1. [Installation & Import](#1-installation--import)
+1. [Installation & Import](#1-installation-import)
 2. [Connecting to SurrealDB](#2-connecting-to-surrealdb)
 3. [Authentication](#3-authentication)
 4. [The `Surreal` Class](#4-the-surreal-class)
@@ -17,8 +17,8 @@
 9. [Expression Builder](#9-expression-builder)
 10. [TypeScript Types](#10-typescript-types)
 11. [Error Classes](#11-error-classes)
-12. [Live Queries & Subscriptions](#12-live-queries--subscriptions)
-13. [Engine & Codec Interfaces](#13-engine--codec-interfaces)
+12. [Live Queries & Subscriptions](#12-live-queries-subscriptions)
+13. [Engine & Codec Interfaces](#13-engine-codec-interfaces)
 14. [Diagnostics](#14-diagnostics)
 
 ---
