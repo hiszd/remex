@@ -1,7 +1,10 @@
 use std::time::Duration;
 
 use actix::prelude::*;
-use remex_core::db::DbError;
+use remex_core::db::{
+  DbError,
+  DbOperator,
+};
 use surrealdb::{
   engine::any::Any,
   types::ToSql,
@@ -23,6 +26,7 @@ use crate::{
   db::{
     endpoint::{
       Session,
+      SessionData,
       SurrealSessionRepo,
     },
     get_local_endpoint,
@@ -724,11 +728,27 @@ async fn load_or_get_session(
   }
 }
 
-/// Create a new session directly from the local DB (fallback when LocalDbActor is a stub).
-async fn create_session_directly(hardware_hash: &str) -> Option<Session> {
-  use remex_core::db::DbOperator;
+/// Seam function for creating a new session via a DbOperator.
+/// Testable in isolation without needing the concrete SurrealDB handle.
+async fn create_new_session_with_repo(
+  repo: &dyn DbOperator<Record = Session, Input = SessionData>,
+  hardware_hash: &str,
+) -> Result<Session, DbError> {
+  let data = SessionData {
+    client_id: None,
+    client_name: Some(gethostname::gethostname().to_string_lossy().to_string()),
+    hardware_hash: Some(hardware_hash.to_string()),
+    db_addr: None,
+    tkn: None,
+    secret: None,
+    groups: vec![],
+  };
+  repo.create(data).await
+}
 
-  use crate::db::endpoint::SessionData;
+/// Create a new session directly from the local DB (fallback when LocalDbActor is a stub).
+/// Uses the seam function above so the creation logic is testable.
+async fn create_session_directly(hardware_hash: &str) -> Option<Session> {
   let local_db = match get_local_endpoint().await {
     Ok(db) => db,
     Err(e) => {
@@ -737,18 +757,7 @@ async fn create_session_directly(hardware_hash: &str) -> Option<Session> {
     }
   };
   let repo = SurrealSessionRepo { db: local_db };
-  match repo
-    .create(SessionData {
-      client_id: None,
-      client_name: Some(gethostname::gethostname().to_string_lossy().to_string()),
-      hardware_hash: Some(hardware_hash.to_string()),
-      db_addr: None,
-      tkn: None,
-      secret: None,
-      groups: vec![],
-    })
-    .await
-  {
+  match create_new_session_with_repo(&repo, hardware_hash).await {
     Ok(session) => {
       tracing::info!("RemoteDbActor: created new session {}", session.session_id());
       Some(session)
@@ -1019,5 +1028,129 @@ mod remote_db_tests {
     // The push was sent to remote (possibly failed on CREATE), but should NOT be queued
     let count = remote_db_addr.send(GetPendingCount).await.unwrap();
     assert_eq!(count, 0, "push after connect should not remain queued");
+  }
+
+  // ── create_new_session_with_repo tests ──
+
+  use remex_core::db::DbError;
+  use surrealdb::types::ToSql;
+
+  use super::create_new_session_with_repo;
+  use crate::db::endpoint::{
+    Session,
+    SessionData,
+  };
+
+  struct MockSessionRepo {
+    last_data: std::sync::Mutex<Option<SessionData>>,
+  }
+
+  impl MockSessionRepo {
+    fn new() -> Self {
+      MockSessionRepo {
+        last_data: std::sync::Mutex::new(None),
+      }
+    }
+
+    fn last_data(&self) -> Option<SessionData> { self.last_data.lock().unwrap().clone() }
+  }
+
+  #[async_trait::async_trait]
+  impl remex_core::db::DbOperator for MockSessionRepo {
+    type Record = Session;
+    type Input = SessionData;
+
+    async fn create(&self, input: Self::Input) -> Result<Self::Record, DbError> {
+      *self.last_data.lock().unwrap() = Some(input.clone());
+      Ok(Session {
+        id: surrealdb::types::RecordId::new("session", "mock-session-1"),
+        client_id: input.client_id.clone(),
+        client_name: input.client_name.clone().unwrap_or_default(),
+        hardware_hash: input.hardware_hash.clone().unwrap_or_default(),
+        db_addr: input.db_addr.clone(),
+        tkn: input.tkn.clone(),
+        secret: input.secret.clone(),
+        groups: input.groups.clone(),
+      })
+    }
+
+    async fn read(&self, _id: &str) -> Result<Option<Self::Record>, DbError> { unimplemented!() }
+
+    async fn update(&self, _id: &str, _input: Self::Input) -> Result<Self::Record, DbError> {
+      unimplemented!()
+    }
+
+    async fn list(&self) -> Result<Vec<Self::Record>, DbError> { unimplemented!() }
+
+    async fn delete(&self, _id: &str) -> Result<(), DbError> { unimplemented!() }
+  }
+
+  #[actix::test]
+  async fn create_new_session_sets_defaults() {
+    let repo = MockSessionRepo::new();
+    let session = create_new_session_with_repo(&repo, "test-hash")
+      .await
+      .expect("session creation should succeed");
+
+    assert_eq!(session.client_id, None, "client_id should default to None");
+    assert_eq!(session.secret, None, "secret should default to None");
+    assert!(session.groups.is_empty(), "groups should be empty");
+    assert_eq!(session.hardware_hash, "test-hash", "hardware_hash should be set");
+    assert!(!session.client_name.is_empty(), "client_name should be set to hostname");
+
+    // Verify the repo received the right data
+    let data = repo.last_data().expect("repo should have recorded data");
+    assert_eq!(data.client_id, None);
+    assert_eq!(data.hardware_hash, Some("test-hash".to_string()));
+    assert!(data.groups.is_empty());
+  }
+
+  #[actix::test]
+  async fn create_new_session_generates_unique_ids() {
+    let repo1 = MockSessionRepo::new();
+    let session1 = create_new_session_with_repo(&repo1, "hash-a")
+      .await
+      .expect("first session should succeed");
+
+    // Create a second repo that returns a different id
+    struct CountedRepo {
+      count: std::sync::Mutex<u32>,
+    }
+    #[async_trait::async_trait]
+    impl remex_core::db::DbOperator for CountedRepo {
+      type Record = Session;
+      type Input = SessionData;
+
+      async fn create(&self, input: Self::Input) -> Result<Self::Record, DbError> {
+        let mut c = self.count.lock().unwrap();
+        *c += 1;
+        Ok(Session {
+          id: surrealdb::types::RecordId::new("session", format!("sess-{}", *c)),
+          client_id: input.client_id,
+          client_name: input.client_name.unwrap_or_default(),
+          hardware_hash: input.hardware_hash.unwrap_or_default(),
+          db_addr: input.db_addr,
+          tkn: input.tkn,
+          secret: input.secret,
+          groups: input.groups,
+        })
+      }
+
+      async fn read(&self, _id: &str) -> Result<Option<Self::Record>, DbError> { unimplemented!() }
+      async fn update(&self, _id: &str, _input: Self::Input) -> Result<Self::Record, DbError> {
+        unimplemented!()
+      }
+      async fn list(&self) -> Result<Vec<Self::Record>, DbError> { unimplemented!() }
+      async fn delete(&self, _id: &str) -> Result<(), DbError> { unimplemented!() }
+    }
+
+    let repo2 = CountedRepo {
+      count: std::sync::Mutex::new(42),
+    };
+    let session2 = create_new_session_with_repo(&repo2, "hash-b")
+      .await
+      .expect("second session should succeed");
+
+    assert_ne!(session1.id.to_sql(), session2.id.to_sql(), "sessions should have different IDs");
   }
 }
