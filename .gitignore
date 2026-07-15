@@ -5,3 +5,4 @@
 *.db/
 history.txt
 endpoint/history.txt
+/xtask/target

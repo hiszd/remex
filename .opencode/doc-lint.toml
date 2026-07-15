@@ -1,0 +1,54 @@
+[scan]
+include = ["**/*.md"]
+exclude = [
+  "**/node_modules/**",
+  "**/target/**",
+  "**/.git/**",
+  "**/.opencode/node_modules/**",
+  "**/.opencode/plans/**",
+]
+
+[[forbidden_term]]
+term = "localStorage"
+message = "Configurator auth tokens are stored in sessionStorage, not localStorage"
+replacement = "sessionStorage"
+
+[[forbidden_term]]
+term = "refresh_tokens"
+message = "The table name is refresh_token (singular)"
+replacement = "refresh_token"
+
+[[forbidden_term]]
+term = "(?i)server\\s+.*\\benrollment\\b"
+message = "The server crate is not used for endpoint enrollment"
+
+[[forbidden_term]]
+term = "(?i)server\\s+.*\\bremoved\\b"
+message = "Describe the server crate as transitional, not removed"
+
+[[mandatory_term]]
+term = "transitional"
+message = "The server crate must be described as transitional"
+scope_files = [
+  "AGENTS.md",
+  "CONTEXT.md",
+  "core/CORE_ARCHITECTURE.md",
+  "endpoint/ENDPOINT_ARCHITECTURE.md",
+  "server/SERVER_ARCHITECTURE.md",
+]
+condition = "server"
+
+[[forbidden_term]]
+term = "(?i)1\\s*h(?:our)?"
+message = "Configurator access tokens expire after 15 minutes, not 1 hour"
+context = "configurator"
+
+[[mandatory_term]]
+term = "latest execution per endpoint"
+message = "execution_status must be described as latest execution per endpoint"
+context = "execution_status"
+scope_files = [
+  "docs/agent-guide/DATABASE_PATTERNS.md",
+  "core/CORE_ARCHITECTURE.md",
+  "endpoint/ENDPOINT_ARCHITECTURE.md",
+]
