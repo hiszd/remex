@@ -17,10 +17,6 @@ use surrealdb::{
 };
 use tokio::time::timeout;
 
-use super::{
-  JobQueueMessage,
-  JobSender,
-};
 use crate::db::remex::{
   ExecutionCache,
   ExecutionCacheData,
@@ -71,108 +67,6 @@ pub async fn sync_groups(
   }
 
   Ok(grpmems)
-}
-
-pub async fn sync_and_refill_queue(
-  sender: &dyn JobSender,
-  client_id: &str,
-  groups: &[RecordId],
-  remote_db: &Surreal<Any>,
-) -> Result<(), crate::Error> {
-  use crate::db::remex::{
-    JobCache,
-    SurrealJobCacheRepo,
-  };
-
-  tracing::info!("sync_and_refill_queue: querying remote for all jobs");
-  let jobs: Vec<Job> = match timeout(Duration::from_secs(3), async {
-    remote_db
-      .query("USE NS remex DB remex; SELECT * FROM job;")
-      .await?
-      .check()?
-      .take(1)
-  })
-  .await
-  {
-    Ok(Ok(jobs)) => jobs,
-    Ok(Err(e)) => {
-      tracing::warn!("sync_and_refill_queue: remote query failed: {e}");
-      return Ok(());
-    }
-    Err(_) => {
-      tracing::warn!("sync_and_refill_queue: remote query timed out after 3s");
-      return Ok(());
-    }
-  };
-
-  tracing::info!("sync_and_refill_queue: fetched {} jobs from remote", jobs.len());
-
-  let id = RecordId::parse_simple(client_id).unwrap();
-  let mut queued_count = 0;
-
-  for job in jobs {
-    if !job.assignments.contains(&id) && !groups.iter().any(|g| job.assignments.contains(g)) {
-      tracing::debug!("Skipping job (not assigned): {}", job.job_name);
-      continue;
-    } else if job.enabled != remex_core::db::model::jobs::Enabled::Enabled {
-      tracing::debug!("Skipping job (disabled): {}", job.job_name);
-      continue;
-    }
-
-    tracing::info!("sync_and_refill_queue: processing job {}", job.job_name);
-    let local_db = crate::db::get_local_remex().await?;
-
-    let existing: Vec<JobCache> = match local_db
-      .query("USE NS remex DB remex; SELECT * FROM job WHERE job_id = $job_id LIMIT 1;")
-      .bind(("job_id", job.id.to_sql()))
-      .await
-    {
-      Ok(res) => match res.check() {
-        Ok(mut r) => r.take(1)?,
-        Err(_) => vec![],
-      },
-      Err(_) => vec![],
-    };
-
-    let repo = SurrealJobCacheRepo {
-      db: local_db.clone(),
-    };
-    if let Err(e) = sync_job_to_cache(&job, existing.first(), &repo).await {
-      tracing::error!("Failed to sync job {} to local cache: {e}", job.job_name);
-    }
-
-    if let Some(exec_time) = super::calculate_execution_time(&job.job_type) {
-      tracing::debug!("Injecting scheduled job: {} at {:?}", job.job_name, exec_time);
-      if let Err(_) = sender
-        .send_job(JobQueueMessage::Scheduled {
-          job,
-          execution_time: exec_time,
-          client_id: client_id.to_string(),
-        })
-        .await
-      {
-        tracing::error!("Failed to inject scheduled job into queue");
-      }
-      queued_count += 1;
-    } else {
-      tracing::debug!("Injecting immediate job: {}", job.job_name);
-      if let Err(_) = sender
-        .send_job(JobQueueMessage::Immediate {
-          job,
-          client_id: client_id.to_string(),
-        })
-        .await
-      {
-        tracing::error!("Failed to inject immediate job into queue");
-      }
-      queued_count += 1;
-    }
-    tracing::info!("sync_and_refill_queue: finished processing job (queued_count={queued_count})");
-  }
-
-  tracing::info!("sync_and_refill_queue: done, queued {queued_count} jobs");
-  tracing::info!("Queue refilled from remote database: {} jobs", queued_count);
-  Ok(())
 }
 
 pub(crate) async fn sync_job_to_cache(
@@ -524,21 +418,6 @@ mod sync_tests {
       "remote execution should reference correct client_id ({client_id})"
     );
   }
-}
-
-pub async fn full_sync(
-  client_id: &str,
-  sender: &dyn JobSender,
-  remote_db: &Surreal<Any>,
-) -> Result<(), crate::Error> {
-  tracing::info!("full_sync: starting sync_groups for client {client_id}");
-  let groups = sync_groups(client_id, remote_db).await?;
-  tracing::info!("full_sync: sync_groups returned {} groups", groups.len());
-  let group_ids: Vec<RecordId> = groups.iter().map(|g| g.id.clone()).collect();
-  tracing::info!("full_sync: calling sync_and_refill_queue with {} groups", group_ids.len());
-  let result = sync_and_refill_queue(sender, client_id, &group_ids, remote_db).await;
-  tracing::info!("full_sync: sync_and_refill_queue completed");
-  result
 }
 
 /// Push all unsynced execution records to the remote database.

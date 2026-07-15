@@ -1,31 +1,53 @@
-use std::time::Duration;
+use std::{
+  collections::HashMap,
+  time::Duration,
+};
 
 use actix::prelude::*;
 use remex_core::db::{
-  model::executions::ExecutionStatus,
+  model::{
+    executions::ExecutionStatus,
+    jobs::{
+      Enabled,
+      Job,
+    },
+  },
   DbError,
   DbOperator,
 };
 use surrealdb::{
   engine::local::Db,
-  types::ToSql,
+  types::{
+    RecordId,
+    ToSql,
+  },
   Surreal,
 };
 
 use crate::{
   async_tasks::{
     jobs::{
+      calculate_execution_time,
       execution::mark_job_completed,
+      scheduler::{
+        InjectJob,
+        SchedulerActor,
+      },
       sync::sync_job_to_cache,
+      JobQueueMessage,
     },
     remote_db::RemoteDbActor,
     CacheJob,
     GetSession,
+    GroupEvent,
     MarkExecutionSynced,
     PushExecution,
     RecordExecution,
+    RemoveJob,
     SaveSession,
     SetRemoteDbAddr,
+    SetSchedulerAddr,
+    SyncJobsBatch,
   },
   db::{
     endpoint::Session,
@@ -57,8 +79,14 @@ pub struct LocalDbActor {
   local_db: Surreal<Db>,
   /// Address of the RemoteDbActor for pushing unsynced executions.
   remote_db_addr: Option<Addr<RemoteDbActor>>,
+  /// Address of the SchedulerActor for injecting/removing jobs.
+  scheduler_addr: Option<Addr<SchedulerActor>>,
   /// In-memory session cache (loaded from local DB on startup/restart).
   session: Option<Session>,
+  /// In-memory cache of groups this endpoint is a member of.
+  groups: Vec<RecordId>,
+  /// Jobs currently injected into the SchedulerActor, keyed by job RecordId.
+  scheduled_jobs: HashMap<RecordId, Job>,
 }
 
 impl LocalDbActor {
@@ -66,7 +94,10 @@ impl LocalDbActor {
     Self {
       local_db: crate::db::LOCAL_DB.clone(),
       remote_db_addr: None,
+      scheduler_addr: None,
       session: None,
+      groups: Vec::new(),
+      scheduled_jobs: HashMap::new(),
     }
   }
 }
@@ -173,6 +204,15 @@ impl Handler<SetRemoteDbAddr> for LocalDbActor {
   fn handle(&mut self, msg: SetRemoteDbAddr, _ctx: &mut Self::Context) {
     self.remote_db_addr = Some(msg.0);
     tracing::info!("LocalDbActor: remote_db_addr set");
+  }
+}
+
+impl Handler<SetSchedulerAddr> for LocalDbActor {
+  type Result = ();
+
+  fn handle(&mut self, msg: SetSchedulerAddr, _ctx: &mut Self::Context) {
+    self.scheduler_addr = Some(msg.0);
+    tracing::info!("LocalDbActor: scheduler_addr set");
   }
 }
 
@@ -309,7 +349,157 @@ impl Handler<MarkExecutionSynced> for LocalDbActor {
   }
 }
 
-// ── Job caching ──
+// ── Job sync helpers ──
+
+/// Check whether a job is assigned to this endpoint directly or via a group.
+fn is_assigned(job: &Job, client_id: &str, groups: &[RecordId]) -> bool {
+  let client_rid = match RecordId::parse_simple(client_id) {
+    Ok(id) => id,
+    Err(e) => {
+      tracing::warn!("LocalDbActor: invalid client_id {client_id}: {e}");
+      return false;
+    }
+  };
+  job.assignments.contains(&client_rid) || job.assignments.iter().any(|a| groups.contains(a))
+}
+
+/// Build the set of jobs that should be scheduled, keyed by job RecordId.
+fn desired_scheduled_jobs(
+  jobs: &[Job],
+  client_id: &str,
+  groups: &[RecordId],
+) -> HashMap<RecordId, Job> {
+  jobs
+    .iter()
+    .filter(|job| job.enabled == Enabled::Enabled && is_assigned(job, client_id, groups))
+    .map(|job| (job.id.clone(), job.clone()))
+    .collect()
+}
+
+/// Convert a Job into a JobQueueMessage for the scheduler (Immediate or Scheduled).
+fn job_to_scheduler_message(job: &Job, client_id: &str) -> Option<JobQueueMessage> {
+  if job.enabled != Enabled::Enabled {
+    return None;
+  }
+  if let Some(exec_time) = calculate_execution_time(&job.job_type) {
+    Some(JobQueueMessage::Scheduled {
+      job: job.clone(),
+      execution_time: exec_time,
+      client_id: client_id.to_string(),
+    })
+  } else {
+    Some(JobQueueMessage::Immediate {
+      job: job.clone(),
+      client_id: client_id.to_string(),
+    })
+  }
+}
+
+/// Compute scheduler messages needed to transition from old_scheduled to desired.
+/// For changed jobs: Remove then re-add. For removed jobs: Remove. For new jobs: Add.
+fn compute_scheduler_diff(
+  old_scheduled: &HashMap<RecordId, Job>,
+  desired: &HashMap<RecordId, Job>,
+  client_id: &str,
+) -> Vec<JobQueueMessage> {
+  let mut messages = Vec::new();
+
+  for (id, job) in desired {
+    let changed = old_scheduled
+      .get(id)
+      .map_or(true, |old_job| old_job.updated_at != job.updated_at);
+
+    if changed {
+      messages.push(JobQueueMessage::Remove { id: id.clone() });
+      if let Some(msg) = job_to_scheduler_message(job, client_id) {
+        messages.push(msg);
+      }
+    }
+  }
+
+  for id in old_scheduled.keys() {
+    if !desired.contains_key(id) {
+      messages.push(JobQueueMessage::Remove { id: id.clone() });
+    }
+  }
+
+  messages
+}
+
+async fn send_scheduler_messages(
+  scheduler_addr: &Option<Addr<SchedulerActor>>,
+  messages: Vec<JobQueueMessage>,
+) {
+  let addr = match scheduler_addr {
+    Some(addr) => addr.clone(),
+    None => {
+      tracing::debug!(
+        "LocalDbActor: scheduler_addr not set, dropping {} scheduler messages",
+        messages.len()
+      );
+      return;
+    }
+  };
+  for msg in messages {
+    if let Err(e) = addr.send(InjectJob(msg)).await {
+      tracing::warn!("LocalDbActor: failed to send message to scheduler: {e}");
+    }
+  }
+}
+
+async fn upsert_job_cache(db: &Surreal<Db>, job: &Job) {
+  if let Err(e) = db.use_ns("remex").use_db("remex").await {
+    tracing::error!("LocalDbActor: failed to set ns/db for job upsert: {e}");
+    return;
+  }
+
+  let existing: Vec<JobCache> = match db
+    .query("SELECT * FROM job WHERE job_id = $job_id LIMIT 1;")
+    .bind(("job_id", job.id.to_sql()))
+    .await
+  {
+    Ok(mut res) => match res.take(0) {
+      Ok(v) => v,
+      Err(e) => {
+        tracing::warn!("LocalDbActor: failed to deserialize existing job cache: {e}");
+        vec![]
+      }
+    },
+    Err(e) => {
+      tracing::warn!("LocalDbActor: failed to query existing job cache: {e}");
+      vec![]
+    }
+  };
+
+  let repo = SurrealJobCacheRepo { db: db.clone() };
+  if let Err(e) = sync_job_to_cache(job, existing.first(), &repo).await {
+    tracing::error!("LocalDbActor: failed to cache job {}: {e}", job.job_name);
+  }
+}
+
+async fn load_cached_jobs(db: &Surreal<Db>) -> Vec<Job> {
+  match db.query("USE NS remex DB remex; SELECT * FROM job;").await {
+    Ok(res) => match res.check() {
+      Ok(mut r) => match r.take::<Vec<JobCache>>(1) {
+        Ok(caches) => caches.into_iter().map(|c| c.job_info).collect(),
+        Err(e) => {
+          tracing::warn!("LocalDbActor: failed to deserialize cached jobs: {e}");
+          vec![]
+        }
+      },
+      Err(e) => {
+        tracing::warn!("LocalDbActor: failed to check cached jobs query: {e}");
+        vec![]
+      }
+    },
+    Err(e) => {
+      tracing::warn!("LocalDbActor: failed to query cached jobs: {e}");
+      vec![]
+    }
+  }
+}
+
+// ── Job cache handlers ──
 
 impl Handler<CacheJob> for LocalDbActor {
   type Result = ();
@@ -317,45 +507,182 @@ impl Handler<CacheJob> for LocalDbActor {
   fn handle(&mut self, msg: CacheJob, _ctx: &mut Self::Context) {
     let db = self.local_db.clone();
     let job = msg.job;
+    let client_id = msg.client_id;
+    let groups = self.groups.clone();
+    let scheduler_addr = self.scheduler_addr.clone();
+    let old_scheduled = self.scheduled_jobs.clone();
+
+    tokio::spawn(async move {
+      upsert_job_cache(&db, &job).await;
+
+      // Reload all cached jobs and recompute scheduled set
+      let all_jobs = load_cached_jobs(&db).await;
+      let desired = desired_scheduled_jobs(&all_jobs, &client_id, &groups);
+      let messages = compute_scheduler_diff(&old_scheduled, &desired, &client_id);
+      send_scheduler_messages(&scheduler_addr, messages).await;
+    });
+  }
+}
+
+impl Handler<RemoveJob> for LocalDbActor {
+  type Result = ();
+
+  fn handle(&mut self, msg: RemoveJob, _ctx: &mut Self::Context) {
+    let db = self.local_db.clone();
+    let job_id = msg.job_id;
+    let job_id_str = job_id.to_sql();
+    let scheduler_addr = self.scheduler_addr.clone();
+
+    // If the job is currently scheduled, remove it
+    if self.scheduled_jobs.remove(&job_id).is_some() {
+      let addr = match scheduler_addr {
+        Some(addr) => addr,
+        None => {
+          tracing::debug!("LocalDbActor: scheduler_addr not set, skipping RemoveJob send");
+          return;
+        }
+      };
+      let addr_clone = addr.clone();
+      tokio::spawn(async move {
+        if let Err(e) = addr_clone
+          .send(InjectJob(JobQueueMessage::Remove { id: job_id }))
+          .await
+        {
+          tracing::warn!("LocalDbActor: failed to send Remove to scheduler: {e}");
+        }
+      });
+    }
+
+    // Delete from local cache
+    tokio::spawn(async move {
+      if let Err(e) = db.use_ns("remex").use_db("remex").await {
+        tracing::error!("LocalDbActor: failed to set ns/db for RemoveJob: {e}");
+        return;
+      }
+      match db
+        .query("DELETE FROM job WHERE job_id = $job_id;")
+        .bind(("job_id", job_id_str.clone()))
+        .await
+      {
+        Ok(_) => tracing::debug!("LocalDbActor: removed job {job_id_str} from cache"),
+        Err(e) => {
+          tracing::warn!("LocalDbActor: failed to delete job {job_id_str} from cache: {e}");
+        }
+      }
+    });
+  }
+}
+
+impl Handler<SyncJobsBatch> for LocalDbActor {
+  type Result = ();
+
+  fn handle(&mut self, msg: SyncJobsBatch, _ctx: &mut Self::Context) {
+    self.groups = msg.groups.clone();
+    let desired = desired_scheduled_jobs(&msg.jobs, &msg.client_id, &msg.groups);
+    let messages = compute_scheduler_diff(&self.scheduled_jobs, &desired, &msg.client_id);
+    self.scheduled_jobs = desired;
+
+    let db = self.local_db.clone();
+    let scheduler_addr = self.scheduler_addr.clone();
+    let jobs = msg.jobs;
 
     tokio::spawn(async move {
       if let Err(e) = db.use_ns("remex").use_db("remex").await {
-        tracing::error!("LocalDbActor: failed to set ns/db for CacheJob: {e}");
+        tracing::error!("LocalDbActor: failed to set ns/db for SyncJobsBatch: {e}");
         return;
       }
 
-      // Check if job already exists in cache
-      let existing: Vec<JobCache> = match db
-        .query("SELECT * FROM job WHERE job_id = $job_id LIMIT 1;")
-        .bind(("job_id", job.id.to_sql()))
-        .await
-      {
-        Ok(mut res) => match res.take(0) {
-          Ok(v) => v,
+      // Load existing cache
+      let existing: Vec<JobCache> = match db.query("SELECT * FROM job;").await {
+        Ok(res) => match res.check() {
+          Ok(mut r) => r.take::<Vec<JobCache>>(0).unwrap_or_default(),
           Err(e) => {
-            tracing::warn!("LocalDbActor: failed to deserialize existing cache: {e}");
+            tracing::warn!("LocalDbActor: failed to check existing jobs query: {e}");
             vec![]
           }
         },
         Err(e) => {
-          tracing::warn!("LocalDbActor: failed to query existing cache: {e}");
+          tracing::warn!("LocalDbActor: failed to query existing jobs: {e}");
           vec![]
         }
       };
 
-      let repo = SurrealJobCacheRepo { db: db.clone() };
-      match sync_job_to_cache(&job, existing.first(), &repo).await {
-        Ok(cached) => {
-          tracing::debug!(
-            "LocalDbActor: cached job {} (completed={})",
-            cached.job_id,
-            cached.completed
-          );
-        }
-        Err(e) => {
-          tracing::error!("LocalDbActor: failed to cache job {}: {e}", job.job_name);
+      let existing_by_id: HashMap<String, JobCache> = existing
+        .into_iter()
+        .map(|c| (c.job_id.clone(), c))
+        .collect();
+
+      let incoming_ids: std::collections::HashSet<String> =
+        jobs.iter().map(|j| j.id.to_sql()).collect();
+
+      // Upsert incoming jobs
+      for job in &jobs {
+        upsert_job_cache(&db, job).await;
+      }
+
+      // Delete local cache entries not in incoming batch (jobs deleted from remote)
+      for (job_id_str, cached) in &existing_by_id {
+        if !incoming_ids.contains(job_id_str) {
+          tracing::debug!("LocalDbActor: deleting stale job cache entry {job_id_str}");
+          if let Err(e) = db
+            .query("DELETE $id;")
+            .bind(("id", cached.id.clone()))
+            .await
+          {
+            tracing::warn!("LocalDbActor: failed to delete stale job cache {job_id_str}: {e}");
+          }
         }
       }
+
+      send_scheduler_messages(&scheduler_addr, messages).await;
+    });
+  }
+}
+
+impl Handler<GroupEvent> for LocalDbActor {
+  type Result = ();
+
+  fn handle(&mut self, msg: GroupEvent, _ctx: &mut Self::Context) {
+    let client_rid = match RecordId::parse_simple(&msg.client_id) {
+      Ok(id) => id,
+      Err(e) => {
+        tracing::warn!("LocalDbActor: invalid client_id in GroupEvent: {e}");
+        return;
+      }
+    };
+
+    // Update in-memory group cache based on action and membership
+    match msg.action {
+      surrealdb::types::Action::Create => {
+        if msg.group.members.contains(&client_rid) {
+          self.groups.push(msg.group.id.clone());
+        }
+      }
+      surrealdb::types::Action::Update => {
+        if msg.group.members.contains(&client_rid) {
+          self.groups.retain(|g| g != &msg.group.id);
+          self.groups.push(msg.group.id.clone());
+        } else {
+          self.groups.retain(|g| g != &msg.group.id);
+        }
+      }
+      surrealdb::types::Action::Delete | surrealdb::types::Action::Killed => {
+        self.groups.retain(|g| g != &msg.group.id);
+      }
+    }
+
+    // Re-evaluate all cached jobs against the updated groups
+    let db = self.local_db.clone();
+    let client_id = msg.client_id;
+    let groups = self.groups.clone();
+    let scheduler_addr = self.scheduler_addr.clone();
+    let old_scheduled = self.scheduled_jobs.clone();
+
+    tokio::spawn(async move {
+      let all_jobs = load_cached_jobs(&db).await;
+      let desired = desired_scheduled_jobs(&all_jobs, &client_id, &groups);
+      let messages = compute_scheduler_diff(&old_scheduled, &desired, &client_id);
+      send_scheduler_messages(&scheduler_addr, messages).await;
     });
   }
 }
@@ -466,6 +793,8 @@ impl Handler<CleanupTick> for LocalDbActor {
 
 #[cfg(test)]
 mod local_db_tests {
+  use std::collections::HashMap;
+
   use actix::prelude::*;
   use remex_core::db::model::{
     executions::ExecutionStatus,
@@ -601,7 +930,10 @@ mod local_db_tests {
     let actor = LocalDbActor {
       local_db: db.clone(),
       remote_db_addr: None,
+      scheduler_addr: None,
       session: None,
+      groups: Vec::new(),
+      scheduled_jobs: HashMap::new(),
     };
 
     let addr = actor.start();
@@ -677,7 +1009,10 @@ mod local_db_tests {
     let actor = LocalDbActor {
       local_db: db.clone(),
       remote_db_addr: None,
+      scheduler_addr: None,
       session: None,
+      groups: Vec::new(),
+      scheduled_jobs: HashMap::new(),
     };
     let addr = actor.start();
     // Wait long enough for started() to query and find no session
@@ -807,7 +1142,10 @@ mod local_db_tests {
     let actor = LocalDbActor {
       local_db: db.clone(),
       remote_db_addr: None,
+      scheduler_addr: None,
       session: None,
+      groups: Vec::new(),
+      scheduled_jobs: HashMap::new(),
     };
     let addr = actor.start();
     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -844,7 +1182,13 @@ mod local_db_tests {
     let job = make_test_job("cache-test-job", "cached-job");
 
     // Send CacheJob
-    addr.send(CacheJob { job: job.clone() }).await.unwrap();
+    addr
+      .send(CacheJob {
+        job: job.clone(),
+        client_id: "client:test-client".to_string(),
+      })
+      .await
+      .unwrap();
 
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 

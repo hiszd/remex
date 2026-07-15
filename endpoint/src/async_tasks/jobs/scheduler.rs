@@ -261,7 +261,8 @@ mod scheduler_tests {
 
   impl Handler<crate::async_tasks::RecordExecution> for MockLocalDb {
     type Result = ();
-    fn handle(&mut self, _msg: crate::async_tasks::RecordExecution, _ctx: &mut Self::Context) {}
+    fn handle(&mut self, _msg: crate::async_tasks::RecordExecution, _ctx: &mut Self::Context) {
+    }
   }
 
   fn make_test_job(id: &str, name: &str) -> Job {

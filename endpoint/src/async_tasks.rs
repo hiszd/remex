@@ -6,12 +6,17 @@ use actix::prelude::*;
 use remex_core::db::{
   model::{
     executions::Execution,
+    groups::Group,
     jobs::Job,
   },
   DbError,
 };
 use surrealdb::{
   engine::any::Any,
+  types::{
+    Action,
+    RecordId,
+  },
   Surreal,
 };
 
@@ -59,6 +64,32 @@ pub struct MarkExecutionSynced {
 #[rtype(result = "()")]
 pub struct CacheJob {
   pub job: Job,
+  pub client_id: String,
+}
+
+/// Sent from RemoteDbActor to LocalDbActor: remove a job from local cache and scheduler.
+#[derive(Message, Clone)]
+#[rtype(result = "()")]
+pub struct RemoveJob {
+  pub job_id: RecordId,
+}
+
+/// Sent from RemoteDbActor to LocalDbActor on connect/reconnect: full job + group snapshot.
+#[derive(Message, Clone)]
+#[rtype(result = "()")]
+pub struct SyncJobsBatch {
+  pub jobs: Vec<Job>,
+  pub groups: Vec<RecordId>,
+  pub client_id: String,
+}
+
+/// Sent from RemoteDbActor to LocalDbActor on group LIVE SELECT events.
+#[derive(Message, Clone)]
+#[rtype(result = "()")]
+pub struct GroupEvent {
+  pub group: Group,
+  pub action: Action,
+  pub client_id: String,
 }
 
 /// Sent from SchedulerActor to LocalDbActor: record the result of an execution.
@@ -86,3 +117,9 @@ pub struct SaveSession {
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct SetRemoteDbAddr(pub actix::Addr<crate::async_tasks::remote_db::RemoteDbActor>);
+
+/// Wire up the SchedulerActor address to LocalDbActor.
+/// Sent once after SchedulerActor is created (see main.rs pattern).
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct SetSchedulerAddr(pub actix::Addr<crate::async_tasks::jobs::scheduler::SchedulerActor>);

@@ -15,6 +15,7 @@ use async_tasks::{
   local_db::LocalDbActor,
   remote_db::RemoteDbActor,
   SetRemoteDbAddr,
+  SetSchedulerAddr,
 };
 
 #[derive(Parser, Debug)]
@@ -74,11 +75,11 @@ async fn main() -> Result<(), Error> {
   // Start SchedulerActor — job queue, spawns execute_job tasks, sends RecordExecution to LocalDbActor
   let local_db_for_scheduler = local_db_addr.clone();
   let scheduler_addr = Supervisor::start(move |_| {
-    SchedulerActor::new(
-      Arc::new(RealJobExecutor),
-      local_db_for_scheduler.recipient(),
-    )
+    SchedulerActor::new(Arc::new(RealJobExecutor), local_db_for_scheduler.recipient())
   });
+
+  // Wire up SchedulerActor address to LocalDbActor (for job injection/removal)
+  local_db_addr.do_send(SetSchedulerAddr(scheduler_addr.clone()));
 
   // Start RemoteDbActor — owns remote connection, auth, heartbeat, execution push, LIVE SELECT
   let local_db_for_remote = local_db_addr.clone();
@@ -88,7 +89,6 @@ async fn main() -> Result<(), Error> {
       args.enrollment_token.clone(),
       hardware_hash.clone(),
       local_db_for_remote,
-      scheduler_addr.clone(),
     )
   });
 

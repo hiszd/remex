@@ -6,53 +6,72 @@ The **Remex Endpoint** is an edge client that runs on remote machines to execute
 
 The endpoint is designed for environments where:
 - Network connectivity is intermittent or unreliable
-- Jobs must continue running even when disconnected from the central server
+- Jobs must continue running even when disconnected from the core database
 - Execution results must be reliably reported back when connectivity is restored
 
 ## System Architecture
 
 ```
-┌─────────────────┐       TCP (encrypted)       ┌─────────────────┐
-│   Remex Server  │◄──────────────────────────►│   Remex Endpoint│
-│   (central hub) │                            │   (edge client)  │
-└────────┬────────┘                            └────────┬─────────┘
-         │                                              │
-         │ WebSocket                                    │ Local SurrealKv DB
-         ▼                                              │ (offline cache)
-┌─────────────────┐                            ┌────────▼─────────┐
-│  Core SurrealDB │◄─────── WebSocket ────────►│  Remote DB Conn  │
-│  (cloud)        │                            │  (when connected)│
-└─────────────────┘                            └──────────────────┘
+┌─────────────────┐       WebSocket             ┌─────────────────┐
+│  Core SurrealDB │◄───────────────────────────►│   Remex Endpoint│
+│  (cloud)        │   (direct DB auth)          │   (edge client) │
+└─────────────────┘                             └────────┬────────┘
+                                                         │
+                                                ┌────────▼─────────┐
+                                                │  Local SurrealKV │
+                                                │  (offline cache) │
+                                                └──────────────────┘
 ```
+
+> **Note:** A legacy `Remex Server` TCP path still exists in the `server/` crate, but current endpoints do **not** connect to it. Endpoints authenticate directly to SurrealDB via `endpoint_access`.
 
 ### Key Components
 
-| Component | Purpose |
-|-----------|---------|
-| **Server Message Loop** | Maintains TCP connection to Remex Server. Handles authentication, receives bearer tokens and remote DB URLs. |
-| **Remote DB Connection** | WebSocket connection to core SurrealDB. Used for fetching jobs, live queries, and syncing execution results. |
-| **Local Database** | SurrealKv embedded database. Stores session data, job cache, execution cache, and last_action tracking. |
-| **Job Scheduler Loop** | Priority queue (BinaryHeap) that schedules and dispatches job executions based on timing. |
-| **Job Monitor** | Live query watcher on the remote `job` and `group` tables. Detects creates, updates, and deletes in real-time. |
-| **Execution Sync Loop** | Background task that pushes unsynced local executions to the remote DB every 30 seconds. |
+| Component | Actor / File | Purpose |
+|-----------|--------------|---------|
+| **SchedulerActor** | `async_tasks/jobs/scheduler.rs` | Priority queue (`BinaryHeap`) that schedules and dispatches job executions based on timing. |
+| **RemoteDbActor** | `async_tasks/remote_db.rs` | Owns the single remote `Surreal<Any>` connection. Handles the direct DB auth loop, heartbeat, combined LIVE SELECT + initial sync, and execution push to the remote database. |
+| **LocalDbActor** | `async_tasks/local_db.rs` | Owns the local SurrealKV handle. Handles session management, local cache operations, the execution sync tick, and the cleanup tick. |
+
+All three actors are started under Actix `Supervisor`, so they restart automatically on panic.
 
 ## Connection & Startup Flow
 
-1. **Local DB initialization** — Connects to `endpoint.db` (SurrealKv), runs migrations
-2. **Session loading** — Loads or creates a session record (hardware hash, hostname)
-3. **Server connection** — Spawns `server_msg_loop` to connect to TCP server
-4. **Authentication** — Signs up or signs in with the server, receives bearer token + remote DB URL
-5. **Remote DB connection** — Connects to core SurrealDB via WebSocket using bearer token
-6. **Job sync** — Fetches all assigned jobs from remote, caches them locally
-7. **Live queries** — Sets up live query streams on `job` and `group` tables
-8. **Background tasks** — Spawns scheduler loop, sync loop, and monitor
+1. **Local DB initialization** — Connects to `endpoint.db` (SurrealKV), runs migrations
+2. **Start LocalDbActor** — Loads session from the local `session` table; schedules periodic ticks
+3. **Start SchedulerActor** — Creates the job queue and wires it to LocalDbActor for `RecordExecution`
+4. **Start RemoteDbActor** — Given `db_url`, optional `enrollment_token`, and `hardware_hash`
+5. **Wire RemoteDbActor to LocalDbActor** — So unsynced executions can be pushed upstream
+6. **Direct DB authentication** — RemoteDbActor's `connection_loop` signs up (enrollment token) or signs in (`hardware_hash` + `secret`) via `endpoint_access`
+7. **On successful auth** — RemoteDbActor spawns `heartbeat_loop` and `spawn_live_select_tasks`
+8. **LIVE SELECT + initial sync** — Loads cached jobs, runs `full_sync`, then subscribes to live notifications on `job` and `group`
+9. **Background tasks** — Scheduler loop, execution sync tick, and cleanup tick run continuously
+
+## Internal Tasks
+
+### RemoteDbActor (spawned after successful auth)
+
+| Task | Interval / Trigger | Purpose |
+|------|-------------------|---------|
+| `connection_loop` | Continuous | Loads session, connects to remote, performs SIGNUP/SIGNIN via `endpoint_access`, reconnects on failure |
+| `heartbeat_loop` | Every 60s | `UPDATE client SET last_seen = time::now()` |
+| `spawn_live_select_tasks` | One-shot after auth | Loads cached jobs, runs `full_sync`, sets up LIVE SELECT on `job` and `group`, re-syncs jobs on group changes |
+| `PushExecution` handler | On demand | Sends a queued execution to the remote DB (or queues it while disconnected) |
+
+### LocalDbActor (scheduled on startup and restart)
+
+| Task | Interval | Purpose |
+|------|----------|---------|
+| `ExecutionSyncTick` | Every 30s | Find unsynced executions, send `PushExecution` to RemoteDbActor |
+| `CleanupTick` | Every 30s (throttled to 6h) | Delete old synced executions and stale `last_action` records |
+| Session load | On start / restart | Read `session` table into memory |
 
 ## Job Lifecycle
 
 ### Discovery
 
 Jobs are discovered through two paths:
-- **Initial sync** — On first remote connection, all assigned jobs are fetched and cached locally
+- **Initial sync** — On first remote connection, `spawn_live_select_tasks` calls `full_sync`, fetching all assigned jobs and caching them locally
 - **Live queries** — Real-time notifications when jobs are created, updated, or deleted on the remote
 
 ### Scheduling
@@ -96,7 +115,7 @@ This prevents redundant executions when the endpoint reconnects after being offl
 
 1. **Jobs are always cached locally** — The `JobCache` table stores all assigned jobs with their full metadata
 2. **Executions are always written locally first** — The `ExecutionCache` table stores every execution with a `synced` flag
-3. **Sync is asynchronous** — The `execution_sync_loop` runs every 30 seconds, pushing unsynced executions to remote
+3. **Sync is asynchronous** — The `ExecutionSyncTick` runs every 30 seconds, pushing unsynced executions to remote
 4. **No data loss on disconnect** — If the remote connection drops, executions are still recorded locally and synced when connectivity returns
 
 ### Sync Reliability
@@ -126,7 +145,7 @@ Stores the endpoint's identity and connection state.
 | `hardware_hash` | `string` | Machine UID |
 | `db_addr` | `option<string>` | Remote DB WebSocket URL |
 | `tkn` | `option<object>` | Bearer token from server |
-| `secret` | `option<string>` | Server authentication secret |
+| `secret` | `option<string>` | Authentication secret |
 | `groups` | `array<record<group>>` | Assigned group IDs |
 
 ### `job` (namespace: `remex`, database: `remex`) — JobCache
@@ -159,18 +178,23 @@ Records older than 72 hours are automatically purged.
 
 ## Communication Protocol
 
-### Server Connection (TCP)
-- Encrypted TCP socket with AES-GCM
-- Packet-based protocol with 128-byte fixed-size packets
-- Messages classified by prefix: `0` = command, `1` = secret, other = log
-- Handles signup, signin, ping/pong, and disconnect reasons
-
 ### Remote DB Connection (WebSocket)
 - SurrealDB WebSocket protocol
-- Authenticated via `endpoint` BEARER access with token from server
+- Authenticated directly via `endpoint_access` RECORD access (enrollment token for SIGNUP, `hardware_hash` + `secret` for SIGNIN; `DURATION FOR TOKEN 1d`)
 - Used for: job/group queries, live queries, execution sync
 
+### Legacy Server Connection (TCP)
+- Encrypted TCP socket with AES-GCM, packet-based 128-byte protocol
+- Implemented in the transitional `server/` crate
+- **Not used by current endpoints**; retained for migration/legacy scenarios only
+
 ## Key Design Decisions
+
+### Direct Database Authentication
+Endpoints authenticate directly to SurrealDB via `endpoint_access` instead of going through a central TCP server. The legacy TCP server path is retained only as a transitional utility.
+
+### Three-Actor Supervised Architecture
+Responsibilities are split into `SchedulerActor`, `RemoteDbActor`, and `LocalDbActor`, each started under an Actix `Supervisor`. This isolates failures: a panic in one actor restarts only that actor without bringing down the whole endpoint.
 
 ### Offline-First
 Executions are always written locally first. No execution data is lost if the network drops. The sync loop handles eventual consistency.
@@ -185,4 +209,4 @@ Marking `synced = true` before pushing to remote prevents duplicate syncs. The o
 Synced executions are kept for 7 days to support duplicate prevention and debugging. The 6-hour cleanup interval (tracked via `last_action`) prevents unbounded storage growth.
 
 ### Staggered Maintenance Tasks
-Critical tasks (`monitor_jobs`, `job_scheduler_loop`) start immediately on boot. Non-essential maintenance tasks (cleanup) check `last_action` before running, preventing all tasks from firing simultaneously on startup.
+Critical tasks (scheduler, live queries) start immediately on boot. Non-essential maintenance tasks (cleanup) check `last_action` before running, preventing all tasks from firing simultaneously on startup.
