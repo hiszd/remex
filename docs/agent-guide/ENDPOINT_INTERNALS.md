@@ -18,9 +18,9 @@ The endpoint uses **3 Actix actors** managed by `Supervisor`:
 
 | Task | Interval | Purpose |
 |---|---|---|
-| `connection_loop` | Reconnects / re-authenticates ~hourly | Drives the entire connection lifecycle: clear state, load/create local session, connect, signin/signup, then enter `wait_for_reconnect_or_heartbeat_death` |
+| `connection_loop` | Reconnects / re-authenticates ~hourly | Drives the entire connection lifecycle: clear state, load/create local session, connect, signin (stored creds take precedence over enrollment token) or signup (enrollment token only), then enter `supervise_connection` |
 | `heartbeat_loop` | Every 60s | `UPDATE client SET last_seen = time::now()` |
-| `spawn_live_select_tasks` | Continuous (one combined task) | Loads cached local jobs, performs an initial `full_sync`, then runs LIVE SELECT on both `job` and `group` tables, injects jobs into the scheduler, and re-syncs on group changes |
+| `supervise_connection` | One-shot after auth | Runs `initial_sync` first, then spawns `live_select_job` and `live_select_group` tasks. Watches them with the re-auth timer |
 
 **LocalDbActor** handles these periodic ticks on startup:
 
@@ -56,7 +56,7 @@ The `jobs` module (`endpoint/src/async_tasks/jobs/`) contains:
 |---|---|---|
 | `scheduler` | `jobs/scheduler.rs` | `SchedulerActor`, `InjectJob` |
 | `execution` | `jobs/execution.rs` | `ExecutionResult`, `execute_job()`, `should_skip_job()`, `mark_job_completed()`, `validate_shell()`, `run_command()` |
-| `sync` | `jobs/sync.rs` | `full_sync()`, `sync_groups()`, `sync_and_refill_queue()`, `sync_job_to_cache()`, `push_unsynced_executions()` |
+| `sync` | `jobs/sync.rs` | `sync_groups()`, `sync_job_to_cache()`, `push_unsynced_executions()` |
 
 `JobQueueMessage` variants:
 

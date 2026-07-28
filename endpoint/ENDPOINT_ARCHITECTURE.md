@@ -42,9 +42,9 @@ All three actors are started under Actix `Supervisor`, so they restart automatic
 3. **Start SchedulerActor** — Creates the job queue and wires it to LocalDbActor for `RecordExecution`
 4. **Start RemoteDbActor** — Given `db_url`, optional `enrollment_token`, and `hardware_hash`
 5. **Wire RemoteDbActor to LocalDbActor** — So unsynced executions can be pushed upstream
-6. **Direct DB authentication** — RemoteDbActor's `connection_loop` signs up (enrollment token) or signs in (`hardware_hash` + `secret`) via `endpoint_access`
-7. **On successful auth** — RemoteDbActor spawns `heartbeat_loop` and `spawn_live_select_tasks`
-8. **LIVE SELECT + initial sync** — Loads cached jobs, runs `full_sync`, then subscribes to live notifications on `job` and `group`
+6. **Direct DB authentication** — RemoteDbActor's `connection_loop` signs in with stored credentials if available (takes precedence over enrollment token), or signs up with enrollment token via `endpoint_access`. Signup authenticates directly — no separate re-signin is needed.
+7. **On successful auth** — RemoteDbActor runs `supervise_connection` which first runs `initial_sync` then spawns `heartbeat_loop`, `live_select_job`, and `live_select_group`
+8. **LIVE SELECT + initial sync** — Loads cached jobs, runs `initial_sync` (fetches groups and jobs from remote), then subscribes to live notifications on `job` and `group`
 9. **Background tasks** — Scheduler loop, execution sync tick, and cleanup tick run continuously
 
 ## Internal Tasks
@@ -53,9 +53,9 @@ All three actors are started under Actix `Supervisor`, so they restart automatic
 
 | Task | Interval / Trigger | Purpose |
 |------|-------------------|---------|
-| `connection_loop` | Continuous | Loads session, connects to remote, performs SIGNUP/SIGNIN via `endpoint_access`, reconnects on failure |
+| `connection_loop` | Continuous | Loads session (retries with backoff from LocalDbActor), connects to remote, performs SIGNIN (stored creds take precedence) or SIGNUP via `endpoint_access`. No re-signin after signup. |
 | `heartbeat_loop` | Every 60s | `UPDATE client SET last_seen = time::now()` |
-| `spawn_live_select_tasks` | One-shot after auth | Loads cached jobs, runs `full_sync`, sets up LIVE SELECT on `job` and `group`, re-syncs jobs on group changes |
+| `supervise_connection` | One-shot after auth | Runs `initial_sync` (groups + jobs), then spawns `live_select_job` and `live_select_group`, re-syncs jobs on group changes |
 | `PushExecution` handler | On demand | Sends a queued execution to the remote DB (or queues it while disconnected) |
 
 ### LocalDbActor (scheduled on startup and restart)
