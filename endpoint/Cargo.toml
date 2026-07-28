@@ -25,3 +25,4 @@ surrealdb.workspace = true
 thiserror = { workspace = true }
 async-trait.workspace = true
 actix = { workspace = true }
+tokio-util = { workspace = true }
