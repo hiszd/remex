@@ -87,10 +87,12 @@ pub struct LocalDbActor {
   groups: Vec<RecordId>,
   /// Jobs currently injected into the SchedulerActor, keyed by job RecordId.
   scheduled_jobs: HashMap<RecordId, Job>,
+  /// Machine hardware hash used for initial session creation.
+  hardware_hash: String,
 }
 
 impl LocalDbActor {
-  pub fn new() -> Self {
+  pub fn new(hardware_hash: String) -> Self {
     Self {
       local_db: crate::db::LOCAL_DB.clone(),
       remote_db_addr: None,
@@ -98,6 +100,7 @@ impl LocalDbActor {
       session: None,
       groups: Vec::new(),
       scheduled_jobs: HashMap::new(),
+      hardware_hash,
     }
   }
 }
@@ -111,6 +114,7 @@ impl Actor for LocalDbActor {
     // Load session from local DB asynchronously
     let db = self.local_db.clone();
     let addr = ctx.address();
+    let hw_hash = self.hardware_hash.clone();
     tokio::spawn(async move {
       // Set the ns/db context on the cloned handle
       if let Err(e) = db.use_ns("remex").use_db("endpoint").await {
@@ -124,7 +128,10 @@ impl Actor for LocalDbActor {
               tracing::info!("LocalDbActor: loaded session {}", session.session_id());
               addr.do_send(SessionLoaded(session));
             } else {
-              tracing::warn!("LocalDbActor: no session found in local DB");
+              tracing::warn!("LocalDbActor: no session found in local DB — creating one");
+              if let Some(session) = create_initial_session(&db, &hw_hash).await {
+                addr.do_send(SessionLoaded(session));
+              }
             }
           }
           Err(e) => {
@@ -711,7 +718,7 @@ impl Handler<ExecutionSyncTick> for LocalDbActor {
         .query("USE NS remex DB remex; SELECT * FROM execution WHERE synced = false;")
         .await
       {
-        Ok(mut res) => match res.take(0) {
+        Ok(mut res) => match res.take(1) {
           Ok(v) => v,
           Err(e) => {
             tracing::warn!("LocalDbActor: failed to deserialize unsynced executions: {e}");
@@ -786,6 +793,31 @@ impl Handler<CleanupTick> for LocalDbActor {
         }
       }
     });
+  }
+}
+
+// ── Helper: create initial session when none exists ──
+
+async fn create_initial_session(db: &Surreal<Db>, hardware_hash: &str) -> Option<Session> {
+  let data = crate::db::endpoint::SessionData {
+    client_id: None,
+    client_name: Some(gethostname::gethostname().to_string_lossy().to_string()),
+    hardware_hash: Some(hardware_hash.to_string()),
+    db_addr: None,
+    tkn: None,
+    secret: None,
+    groups: vec![],
+  };
+  let repo = crate::db::endpoint::SurrealSessionRepo { db: db.clone() };
+  match repo.create(data).await {
+    Ok(session) => {
+      tracing::info!("LocalDbActor: created new session {}", session.session_id());
+      Some(session)
+    }
+    Err(e) => {
+      tracing::error!("LocalDbActor: failed to create initial session: {e}");
+      None
+    }
   }
 }
 
@@ -934,6 +966,7 @@ mod local_db_tests {
       session: None,
       groups: Vec::new(),
       scheduled_jobs: HashMap::new(),
+      hardware_hash: "test-hash".to_string(),
     };
 
     let addr = actor.start();
@@ -1013,6 +1046,7 @@ mod local_db_tests {
       session: None,
       groups: Vec::new(),
       scheduled_jobs: HashMap::new(),
+      hardware_hash: "test-hash".to_string(),
     };
     let addr = actor.start();
     // Wait long enough for started() to query and find no session
@@ -1146,6 +1180,7 @@ mod local_db_tests {
       session: None,
       groups: Vec::new(),
       scheduled_jobs: HashMap::new(),
+      hardware_hash: "test-hash".to_string(),
     };
     let addr = actor.start();
     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;

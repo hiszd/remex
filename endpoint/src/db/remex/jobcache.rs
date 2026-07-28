@@ -57,6 +57,7 @@ impl JobCache {
         DEFINE FIELD IF NOT EXISTS job_id ON TABLE job TYPE string;
         DEFINE FIELD IF NOT EXISTS job_info ON TABLE job TYPE object FLEXIBLE;
         DEFINE FIELD IF NOT EXISTS completed ON TABLE job TYPE bool DEFAULT false;
+        DEFINE INDEX IF NOT EXISTS job_id_unique ON TABLE job COLUMNS job_id UNIQUE;
       ",
     )
     .await?

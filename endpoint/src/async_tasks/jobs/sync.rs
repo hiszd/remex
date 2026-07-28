@@ -26,31 +26,44 @@ pub async fn sync_groups(
   client_id: &str,
   remote_db: &Surreal<Any>,
 ) -> Result<Vec<Group>, crate::Error> {
-  println!("Syncing groups from remote...");
   tracing::info!("Syncing groups from remote database");
 
   let id =
     RecordId::parse_simple(client_id).map_err(|e| crate::Error::InvalidClientId(e.to_string()))?;
 
   tracing::info!("sync_groups: querying remote for groups containing {client_id}");
-  let groups: Vec<Group> = match timeout(Duration::from_secs(3), async {
-    remote_db
+  let tout = Duration::from_secs(30);
+  let groups: Vec<Group> = match timeout(tout, async {
+    tracing::debug!("sync_groups: sending query");
+    let response = match remote_db
       .query("USE NS remex DB remex; SELECT * FROM group WHERE members CONTAINS $client_rid;")
       .bind(("client_rid", id.clone()))
-      .await?
-      .check()?
-      .take(1)
+      .await
+    {
+      Ok(r) => r,
+      Err(e) => return Err::<Vec<Group>, surrealdb::Error>(e),
+    };
+    tracing::debug!("sync_groups: query returned from remote");
+    let groups: Vec<Group> = match response.check() {
+      Ok(mut r) => match r.take(1) {
+        Ok(g) => g,
+        Err(e) => return Err::<Vec<Group>, surrealdb::Error>(e),
+      },
+      Err(e) => return Err::<Vec<Group>, surrealdb::Error>(e),
+    };
+    tracing::debug!("sync_groups: results deserialized, {} groups", groups.len());
+    Ok::<Vec<Group>, surrealdb::Error>(groups)
   })
   .await
   {
     Ok(Ok(groups)) => groups,
     Ok(Err(e)) => {
       tracing::warn!("sync_groups: remote query failed: {e}");
-      return Ok(Vec::new());
+      return Err(crate::Error::Surreal(e));
     }
     Err(_) => {
-      tracing::warn!("sync_groups: remote query timed out after 3s");
-      return Ok(Vec::new());
+      tracing::warn!("sync_groups: remote query timed out after {tout:?}");
+      return Err(crate::Error::CommandTimeout);
     }
   };
 
@@ -87,7 +100,10 @@ pub(crate) async fn sync_job_to_cache(
     job_info: job.clone(),
     completed,
   };
-  cache_repo.create(cache_entry).await
+  match existing_cache {
+    Some(cached) => cache_repo.update(&cached.cache_id(), cache_entry).await,
+    None => cache_repo.create(cache_entry).await,
+  }
 }
 
 #[cfg(test)]
@@ -331,12 +347,12 @@ mod sync_tests {
 
     // Remote should have the execution record
     let remote_execs: Vec<serde_json::Value> = remote_db
-      .query("SELECT * FROM execution;")
+      .query("USE NS remex DB remex; SELECT * FROM execution;")
       .await
       .unwrap()
       .check()
       .unwrap()
-      .take(0)
+      .take(1)
       .unwrap();
     assert_eq!(remote_execs.len(), 1, "remote should have 1 execution record");
   }

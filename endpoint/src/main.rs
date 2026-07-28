@@ -33,6 +33,7 @@ fn init_logging(debug: bool) {
   if debug {
     tracing_subscriber::fmt()
       .with_max_level(tracing::Level::DEBUG)
+      .pretty()
       .init();
   } else {
     tracing_subscriber::fmt::init();
@@ -68,9 +69,10 @@ async fn main() -> Result<(), Error> {
   db::migrate(&db::LOCAL_DB).await.unwrap();
 
   let hardware_hash = machine_uid::get().unwrap_or_default();
+  let hw_clone = hardware_hash.clone();
 
   // Start LocalDbActor — owns local SurrealKV, session, execution cache
-  let local_db_addr = Supervisor::start(|_| LocalDbActor::new());
+  let local_db_addr = Supervisor::start(move |_| LocalDbActor::new(hw_clone));
 
   // Start SchedulerActor — job queue, spawns execute_job tasks, sends RecordExecution to LocalDbActor
   let local_db_for_scheduler = local_db_addr.clone();
