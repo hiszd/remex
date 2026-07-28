@@ -75,37 +75,18 @@ async fn main() -> anyhow::Result<()> {
       tracing::info!("Connected to SurrealDB");
       match remex_core::db::migrate(&REMOTE_DB).await {
         Ok(()) => {
-          tracing::info!("SurrealDB migrated");
+          tracing::info!("Migrated SurrealDB");
+          REMOTE_DB.query("USE NS remex DB remex; CREATE user SET email = 'hiszd1@gmail.com', username = 'Battl3Ax3', password = 'H@ck3r345';").await.unwrap().check().unwrap();
+          tracing::info!("Seed user created");
         }
         Err(e) => {
           tracing::error!("Failed to migrate SurrealDB: {}", e);
         }
       }
 
-      let client_sessions = Arc::new(Mutex::new(std::collections::HashMap::new()));
-
-      let server = RemexServer {
-        sessions: remex_core::sessionmap::SessionMap::default(),
-        migrated: false,
-        secret: Some(secret_string.clone()),
-        client_sessions,
-        db: Some(REMOTE_DB.clone()),
-      }
-      .start();
-
-      let tcp_fut = remex_core::actors::session::tcp_server(
-        ADDRESS,
-        &secret_string,
-        server,
-        Some(REMOTE_DB.clone()),
-      );
-
       tokio::select! {
         _ = tokio::signal::ctrl_c() => {
           println!("Ctrl-C received, shutting down gracefully...");
-        }
-        _ = tcp_fut => {
-          println!("TCP server exited unexpectedly.");
         }
       }
       Ok::<_, anyhow::Error>(())
