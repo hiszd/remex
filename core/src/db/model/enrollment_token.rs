@@ -72,14 +72,23 @@ impl EnrollmentToken {
     .check()?;
 
     // Remove old field definitions — log warning if removal fails
-    if let Err(e) = db.query("REMOVE FIELD used_at ON TABLE enrollment_token").await {
+    if let Err(e) = db
+      .query("REMOVE FIELD used_at ON TABLE enrollment_token")
+      .await
+    {
       tracing::warn!("Failed to remove old field used_at: {e}");
     }
-    if let Err(e) = db.query("REMOVE FIELD used_by ON TABLE enrollment_token").await {
+    if let Err(e) = db
+      .query("REMOVE FIELD used_by ON TABLE enrollment_token")
+      .await
+    {
       tracing::warn!("Failed to remove old field used_by: {e}");
     }
     // Remove old usage_history.* field definition (quoted) that was created without FLEXIBLE
-    if let Err(e) = db.query("REMOVE FIELD \"usage_history.*\" ON TABLE enrollment_token").await {
+    if let Err(e) = db
+      .query("REMOVE FIELD \"usage_history.*\" ON TABLE enrollment_token")
+      .await
+    {
       tracing::warn!("Failed to remove old usage_history.* field: {e}");
     }
 

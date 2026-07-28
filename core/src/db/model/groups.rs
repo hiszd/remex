@@ -42,6 +42,8 @@ impl Group {
 
         DEFINE FIELD IF NOT EXISTS members ON TABLE group TYPE array<record<client>> DEFAULT [];
 
+        DEFINE INDEX IF NOT EXISTS idx_group_members ON TABLE group COLUMNS members;
+
         DEFINE FIELD IF NOT EXISTS created_at ON TABLE group TYPE datetime DEFAULT time::now() READONLY;
         DEFINE FIELD IF NOT EXISTS updated_at ON TABLE group TYPE datetime VALUE time::now() READONLY;
 
